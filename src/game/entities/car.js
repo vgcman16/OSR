@@ -1,19 +1,10 @@
+const DEFAULT_SPEED = 0.12;
+
 export class Car {
-  constructor({
-    id,
-    x,
-    y,
-    width = 72,
-    height = 32,
-    color = '#ffcc00',
-    sprite = null,
-    speed = 0.15,
-    worldWidth = 960,
-  }) {
+  constructor({ id, x, y, sprite, speed = DEFAULT_SPEED, worldWidth = 960 }) {
     this.id = id;
-    this.position = { x, y };
-    this.size = { width, height };
-    this.color = color;
+    this.x = x;
+    this.y = y;
     this.sprite = sprite;
     this.speed = speed;
     this.direction = Math.random() > 0.5 ? 1 : -1;
@@ -21,12 +12,14 @@ export class Car {
   }
 
   update(delta) {
-    this.position.x += this.speed * this.direction * delta;
-    const wrapWidth = this.worldWidth + this.size.width;
-    if (this.position.x < -this.size.width) {
-      this.position.x = wrapWidth;
-    } else if (this.position.x > wrapWidth) {
-      this.position.x = -this.size.width;
+    const safeDelta = Number.isFinite(delta) ? Math.max(0, Math.min(delta, 1000)) : 0;
+    const distance = this.speed * safeDelta * this.direction;
+    this.x += distance;
+
+    if (this.x < -32) {
+      this.x = this.worldWidth + 32;
+    } else if (this.x > this.worldWidth + 32) {
+      this.x = -32;
     }
   }
 
@@ -35,21 +28,25 @@ export class Car {
       return;
     }
 
+    ctx.save();
     if (this.sprite && this.sprite.complete) {
+      const frameWidth = this.sprite.width / 4 || 64;
+      const frameHeight = this.sprite.height || 32;
       ctx.drawImage(
         this.sprite,
-        this.position.x,
-        this.position.y,
-        this.size.width,
-        this.size.height
+        0,
+        0,
+        frameWidth,
+        frameHeight,
+        this.x - frameWidth / 2,
+        this.y - frameHeight / 2,
+        frameWidth,
+        frameHeight
       );
-      return;
+    } else {
+      ctx.fillStyle = '#888';
+      ctx.fillRect(this.x - 24, this.y - 12, 48, 24);
     }
-
-    ctx.fillStyle = this.color;
-    ctx.fillRect(this.position.x, this.position.y, this.size.width, this.size.height);
-    ctx.fillStyle = '#111';
-    ctx.fillRect(this.position.x + 4, this.position.y + 4, 12, 8);
-    ctx.fillRect(this.position.x + this.size.width - 16, this.position.y + 4, 12, 8);
+    ctx.restore();
   }
 }

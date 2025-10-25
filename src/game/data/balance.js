@@ -1,75 +1,54 @@
 export const difficultyProgression = [
-  {
-    level: 1,
-    name: 'Lookout',
-    missionInterval: 12000,
-    policeAlertThreshold: 0.5,
-    lootMultiplier: 1,
-  },
-  {
-    level: 2,
-    name: 'Wheelman',
-    missionInterval: 10000,
-    policeAlertThreshold: 0.35,
-    lootMultiplier: 1.2,
-  },
-  {
-    level: 3,
-    name: 'Crew Chief',
-    missionInterval: 8000,
-    policeAlertThreshold: 0.2,
-    lootMultiplier: 1.5,
-  },
+  { name: 'Rookie', lootMultiplier: 1.0, policeAlertThreshold: 0.75 },
+  { name: 'Wheelman', lootMultiplier: 1.2, policeAlertThreshold: 0.65 },
+  { name: 'Ghost Driver', lootMultiplier: 1.4, policeAlertThreshold: 0.55 },
+  { name: 'Mastermind', lootMultiplier: 1.6, policeAlertThreshold: 0.45 },
 ];
-
-export const scoringRules = {
-  baseLootValue: 1500,
-  missionBonus: 800,
-  comboMultiplierStep: 0.15,
-  notorietyPenalty: 0.05,
-};
 
 export const missionCatalog = [
   {
-    id: 'midtown-caper',
-    displayName: 'Midtown Caper',
+    id: 'downtown-smash',
+    displayName: 'Downtown Smash & Grab',
+    description: 'Hit the jewelry stores before the heat arrives.',
     baseDuration: 45000,
-    lootTarget: 1,
-    description: 'Jack a luxury coupe from a guarded rooftop garage.',
+    lootTarget: 3,
   },
   {
-    id: 'harbor-heist',
-    displayName: 'Harbor Heist',
+    id: 'pier-heist',
+    displayName: 'Pier Heist',
+    description: 'Load the speedboat with contraband crates.',
     baseDuration: 60000,
-    lootTarget: 2,
-    description: 'Intercept a smuggler drop before the coast guard arrives.',
+    lootTarget: 4,
   },
   {
-    id: 'warehouse-wipe',
-    displayName: 'Warehouse Wipe',
+    id: 'uptown-boost',
+    displayName: 'Uptown Boost',
+    description: 'Steal high-end rides without scratching them.',
     baseDuration: 55000,
     lootTarget: 3,
-    description: 'Swipe prototype engines without tripping silent alarms.',
+  },
+  {
+    id: 'airport-run',
+    displayName: 'Airport Run',
+    description: 'Rush the cargo before security rotations.',
+    baseDuration: 65000,
+    lootTarget: 5,
   },
 ];
 
 export const lootTable = [
-  {
-    id: 'luxury-sedan',
-    label: 'Luxury Sedan',
-    baseValue: 2400,
-    heat: 0.2,
-  },
-  {
-    id: 'armored-suv',
-    label: 'Armored SUV',
-    baseValue: 3600,
-    heat: 0.35,
-  },
-  {
-    id: 'prototype-bike',
-    label: 'Prototype Bike',
-    baseValue: 2900,
-    heat: 0.25,
-  },
+  { id: 'microchips', label: 'Crate of Microchips', baseValue: 1200, heat: 0.12 },
+  { id: 'diamonds', label: 'Satchel of Diamonds', baseValue: 1600, heat: 0.2 },
+  { id: 'art', label: 'Stolen Artwork', baseValue: 2200, heat: 0.25 },
+  { id: 'cash', label: 'Bank Bonds', baseValue: 900, heat: 0.08 },
 ];
+
+export const scoringRules = {
+  baseLootValue: 500,
+  missionBonus: 2500,
+  comboMultiplierStep: 0.1,
+};
+
+export function getLastDifficultyTier() {
+  return difficultyProgression[difficultyProgression.length - 1];
+}

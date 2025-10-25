@@ -1,6 +1,12 @@
 import { HUD } from './ui/hud.js';
 import { Car } from './entities/car.js';
-import { difficultyProgression, missionCatalog, lootTable, scoringRules } from './data/balance.js';
+import {
+  difficultyProgression,
+  missionCatalog,
+  lootTable,
+  scoringRules,
+  getLastDifficultyTier,
+} from './data/balance.js';
 
 const GAME_WIDTH = 960;
 const GAME_HEIGHT = 540;
@@ -68,7 +74,8 @@ export class CarThiefGame {
 
   assignMission() {
     const nextMission = missionCatalog[Math.floor(Math.random() * missionCatalog.length)];
-    const progression = difficultyProgression[this.player.levelIndex] ?? difficultyProgression.at(-1);
+    const progression =
+      difficultyProgression[this.player.levelIndex] ?? getLastDifficultyTier();
     const duration = Math.max(15000, nextMission.baseDuration * Math.max(0.4, 1 - this.player.combo * 0.05));
     const lootTarget = Math.max(1, nextMission.lootTarget ?? 1);
 
@@ -110,7 +117,8 @@ export class CarThiefGame {
   update(delta) {
     const safeDelta = Number.isFinite(delta) ? Math.max(0, Math.min(delta, 1000)) : 0;
     const seconds = safeDelta / 1000;
-    const progression = difficultyProgression[this.player.levelIndex] ?? difficultyProgression.at(-1);
+    const progression =
+      difficultyProgression[this.player.levelIndex] ?? getLastDifficultyTier();
 
     this.timers.elapsed += safeDelta;
     this.timers.missionCountdown = Math.max(0, this.timers.missionCountdown - safeDelta);
