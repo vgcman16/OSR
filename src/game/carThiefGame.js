@@ -61,6 +61,7 @@ export class CarThiefGame {
         y: 180 + index * 60,
         sprite: this.assets?.sprites?.cars,
         speed: 0.08 + Math.random() * 0.12,
+        worldWidth: GAME_WIDTH,
       })
     );
   }
@@ -68,10 +69,12 @@ export class CarThiefGame {
   assignMission() {
     const nextMission = missionCatalog[Math.floor(Math.random() * missionCatalog.length)];
     const progression = difficultyProgression[this.player.levelIndex] ?? difficultyProgression.at(-1);
+    const duration = Math.max(15000, nextMission.baseDuration * Math.max(0.4, 1 - this.player.combo * 0.05));
+
     this.player.activeMission = {
       ...nextMission,
       payout: scoringRules.missionBonus * (1 + this.player.combo * scoringRules.comboMultiplierStep),
-      duration: nextMission.baseDuration * (1 - this.player.combo * 0.05),
+      duration,
       lootMultiplier: progression.lootMultiplier,
     };
     this.timers.missionTotal = this.player.activeMission.duration;
@@ -163,7 +166,7 @@ export class CarThiefGame {
       if (distance <= radius) {
         this.player.cash += drop.value;
         this.player.combo += 1;
-        this.player.heat += drop.heat;
+        this.player.heat = Math.min(1, this.player.heat + drop.heat);
         this.hud.pushMessage(`Scooped ${drop.label}!`);
         return false;
       }

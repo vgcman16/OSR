@@ -1,5 +1,15 @@
 export class Car {
-  constructor({ id, x, y, width = 72, height = 32, color = '#ffcc00', sprite = null, speed = 0.15 }) {
+  constructor({
+    id,
+    x,
+    y,
+    width = 72,
+    height = 32,
+    color = '#ffcc00',
+    sprite = null,
+    speed = 0.15,
+    worldWidth = 960,
+  }) {
     this.id = id;
     this.position = { x, y };
     this.size = { width, height };
@@ -7,13 +17,15 @@ export class Car {
     this.sprite = sprite;
     this.speed = speed;
     this.direction = Math.random() > 0.5 ? 1 : -1;
+    this.worldWidth = worldWidth;
   }
 
   update(delta) {
     this.position.x += this.speed * this.direction * delta;
+    const wrapWidth = this.worldWidth + this.size.width;
     if (this.position.x < -this.size.width) {
-      this.position.x = 800 + this.size.width;
-    } else if (this.position.x > 800 + this.size.width) {
+      this.position.x = wrapWidth;
+    } else if (this.position.x > wrapWidth) {
       this.position.x = -this.size.width;
     }
   }
