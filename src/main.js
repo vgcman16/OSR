@@ -51,16 +51,21 @@ async function bootstrap() {
   wireInputHandlers(game, canvas);
   game.startGame();
 
-  let lastTimestamp = performance.now();
+  const getNow = () => globalThis.performance?.now?.() ?? Date.now();
+  const scheduleFrame =
+    globalThis.requestAnimationFrame?.bind(globalThis) ?? ((cb) => globalThis.setTimeout(() => cb(getNow()), 16));
+
+  let lastTimestamp = getNow();
   function frame(timestamp) {
-    const delta = timestamp - lastTimestamp;
-    lastTimestamp = timestamp;
+    const currentTime = Number.isFinite(timestamp) ? timestamp : getNow();
+    const delta = currentTime - lastTimestamp;
+    lastTimestamp = currentTime;
     game.update(delta);
     game.render();
-    requestAnimationFrame(frame);
+    scheduleFrame(frame);
   }
 
-  requestAnimationFrame(frame);
+  scheduleFrame(frame);
 }
 
 function wireInputHandlers(game, canvas) {

@@ -2,13 +2,15 @@ const BAR_WIDTH = 180;
 const BAR_HEIGHT = 12;
 
 function drawBar(ctx, label, value, max, x, y, color) {
+  const safeMax = max > 0 ? max : 1;
   ctx.fillStyle = '#fff';
   ctx.font = '12px sans-serif';
   ctx.fillText(label, x, y - 4);
   ctx.strokeStyle = '#fff';
   ctx.strokeRect(x, y, BAR_WIDTH, BAR_HEIGHT);
   ctx.fillStyle = color;
-  ctx.fillRect(x + 1, y + 1, (Math.max(0, value) / max) * (BAR_WIDTH - 2), BAR_HEIGHT - 2);
+  const ratio = Math.max(0, Math.min(1, value / safeMax));
+  ctx.fillRect(x + 1, y + 1, ratio * (BAR_WIDTH - 2), BAR_HEIGHT - 2);
 }
 
 export class HUD {
@@ -17,12 +19,12 @@ export class HUD {
   }
 
   pushMessage(message, duration = 3000) {
-    const timestamp = performance.now();
+    const timestamp = globalThis.performance?.now?.() ?? Date.now();
     this.messages.push({ message, duration, timestamp });
   }
 
   update() {
-    const now = performance.now();
+    const now = globalThis.performance?.now?.() ?? Date.now();
     this.messages = this.messages.filter(({ timestamp, duration }) => now - timestamp < duration);
   }
 

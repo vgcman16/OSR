@@ -108,23 +108,24 @@ export class CarThiefGame {
   }
 
   update(delta) {
-    const seconds = delta / 1000;
+    const safeDelta = Number.isFinite(delta) ? Math.max(0, Math.min(delta, 1000)) : 0;
+    const seconds = safeDelta / 1000;
     const progression = difficultyProgression[this.player.levelIndex] ?? difficultyProgression.at(-1);
 
-    this.timers.elapsed += delta;
-    this.timers.missionCountdown = Math.max(0, this.timers.missionCountdown - delta);
-    this.timers.lootRespawn -= delta;
+    this.timers.elapsed += safeDelta;
+    this.timers.missionCountdown = Math.max(0, this.timers.missionCountdown - safeDelta);
+    this.timers.lootRespawn -= safeDelta;
 
-    if (this.timers.lootRespawn <= 0) {
+    while (this.timers.lootRespawn <= 0) {
       this.spawnLoot();
-      this.timers.lootRespawn = LOOT_RESPAWN_TIME;
+      this.timers.lootRespawn += LOOT_RESPAWN_TIME;
     }
 
     this.hud.update();
 
     const movement = this.getMovementInput();
-    this.player.pointer.x = Math.max(0, Math.min(GAME_WIDTH, this.player.pointer.x + movement.x * delta));
-    this.player.pointer.y = Math.max(0, Math.min(GAME_HEIGHT, this.player.pointer.y + movement.y * delta));
+    this.player.pointer.x = Math.max(0, Math.min(GAME_WIDTH, this.player.pointer.x + movement.x * safeDelta));
+    this.player.pointer.y = Math.max(0, Math.min(GAME_HEIGHT, this.player.pointer.y + movement.y * safeDelta));
 
     if (this.inputState.pointerActive) {
       this.collectNearbyLoot();
