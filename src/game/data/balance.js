@@ -34,18 +34,21 @@ export const missionCatalog = [
     id: 'midtown-caper',
     displayName: 'Midtown Caper',
     baseDuration: 45000,
+    lootTarget: 1,
     description: 'Jack a luxury coupe from a guarded rooftop garage.',
   },
   {
     id: 'harbor-heist',
     displayName: 'Harbor Heist',
     baseDuration: 60000,
+    lootTarget: 2,
     description: 'Intercept a smuggler drop before the coast guard arrives.',
   },
   {
     id: 'warehouse-wipe',
     displayName: 'Warehouse Wipe',
     baseDuration: 55000,
+    lootTarget: 3,
     description: 'Swipe prototype engines without tripping silent alarms.',
   },
 ];

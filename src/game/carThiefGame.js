@@ -70,16 +70,21 @@ export class CarThiefGame {
     const nextMission = missionCatalog[Math.floor(Math.random() * missionCatalog.length)];
     const progression = difficultyProgression[this.player.levelIndex] ?? difficultyProgression.at(-1);
     const duration = Math.max(15000, nextMission.baseDuration * Math.max(0.4, 1 - this.player.combo * 0.05));
+    const lootTarget = Math.max(1, nextMission.lootTarget ?? 1);
 
     this.player.activeMission = {
       ...nextMission,
       payout: scoringRules.missionBonus * (1 + this.player.combo * scoringRules.comboMultiplierStep),
       duration,
+      lootTarget,
+      lootCollected: 0,
       lootMultiplier: progression.lootMultiplier,
     };
     this.timers.missionTotal = this.player.activeMission.duration;
     this.timers.missionCountdown = this.player.activeMission.duration;
-    this.hud.pushMessage(`Mission started: ${nextMission.displayName}`);
+    this.hud.pushMessage(
+      `Mission started: ${nextMission.displayName} (grab ${lootTarget} haul${lootTarget > 1 ? 's' : ''})`
+    );
   }
 
   handleKeyDown(key) {
@@ -161,6 +166,7 @@ export class CarThiefGame {
 
   collectNearbyLoot() {
     const radius = 48;
+    let missionCompleted = false;
     this.loot = this.loot.filter((drop) => {
       const distance = Math.hypot(drop.x - this.player.pointer.x, drop.y - this.player.pointer.y);
       if (distance <= radius) {
@@ -168,10 +174,23 @@ export class CarThiefGame {
         this.player.combo += 1;
         this.player.heat = Math.min(1, this.player.heat + drop.heat);
         this.hud.pushMessage(`Scooped ${drop.label}!`);
+        if (this.player.activeMission) {
+          this.player.activeMission.lootCollected = Math.min(
+            this.player.activeMission.lootTarget,
+            (this.player.activeMission.lootCollected ?? 0) + 1
+          );
+          if (this.player.activeMission.lootCollected >= this.player.activeMission.lootTarget) {
+            missionCompleted = true;
+          }
+        }
         return false;
       }
       return true;
     });
+
+    if (missionCompleted) {
+      this.completeMission(true);
+    }
   }
 
   completeMission(success) {
@@ -190,6 +209,7 @@ export class CarThiefGame {
       this.hud.pushMessage('Mission failed. Regroup and try again.');
     }
 
+    this.loot = [];
     this.player.activeMission = null;
     this.progressDifficulty();
     this.assignMission();
@@ -296,6 +316,17 @@ export class CarThiefGame {
     ctx.fillText(mission.description, GAME_WIDTH - 176, 60, 150);
     ctx.fillText(`Reward: $${mission.payout.toFixed(0)}`, GAME_WIDTH - 176, 80);
     ctx.fillText(`Loot x${mission.lootMultiplier.toFixed(2)}`, GAME_WIDTH - 176, 96);
+    ctx.fillText(
+      `Progress: ${(mission.lootCollected ?? 0)}/${mission.lootTarget}`,
+      GAME_WIDTH - 176,
+      112
+    );
+
+    const progressRatio = Math.min(1, (mission.lootCollected ?? 0) / mission.lootTarget);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(GAME_WIDTH - 176, 120, 150, 10);
+    ctx.fillStyle = '#66ff66';
+    ctx.fillRect(GAME_WIDTH - 176, 120, 150 * progressRatio, 10);
 
     ctx.restore();
   }
