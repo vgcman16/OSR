@@ -1,19 +1,38 @@
-import { CarThiefGame } from './game/carThiefGame.js';
+import CarThiefGame from './game/carThiefGame.js';
+import { bindGameInput } from './game/input.js';
+import { createFrameScheduler } from './game/loop/frameScheduler.js';
 
 function loadImage(src) {
   return new Promise((resolve) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => resolve(image);
+    const resolveImage = () => resolve(image);
+    image.onload = resolveImage;
+    image.onerror = resolveImage;
     image.src = src;
   });
 }
 
-async function loadAudio(src) {
-  const audio = new Audio(src);
-  await audio.load?.();
-  audio.volume = 0.5;
-  return audio;
+function loadAudio(src) {
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    const cleanup = () => {
+      audio.removeEventListener('canplaythrough', handleReady);
+      audio.removeEventListener('error', handleReady);
+    };
+    const handleReady = () => {
+      cleanup();
+      resolve(audio);
+    };
+    audio.addEventListener('canplaythrough', handleReady, { once: true });
+    audio.addEventListener('error', handleReady, { once: true });
+    audio.preload = 'auto';
+    audio.src = src;
+    audio.volume = 0.5;
+    if (audio.readyState >= 2) {
+      cleanup();
+      resolve(audio);
+    }
+  });
 }
 
 async function bootstrap() {
@@ -48,48 +67,67 @@ async function bootstrap() {
     },
   });
 
-  wireInputHandlers(game, canvas);
+  const detachInput = bindGameInput(game, canvas);
+
   game.startGame();
+  game.render();
 
-  const getNow = () => globalThis.performance?.now?.() ?? Date.now();
-  const scheduleFrame =
-    globalThis.requestAnimationFrame?.bind(globalThis) ?? ((cb) => globalThis.setTimeout(() => cb(getNow()), 16));
+  let lastTimestamp = 0;
+  const scheduler = createFrameScheduler((timestamp) => {
+    const currentTime = Number.isFinite(timestamp) ? timestamp : scheduler.getNow();
+    if (!lastTimestamp) {
+      lastTimestamp = currentTime;
+      return;
+    }
 
-  let lastTimestamp = getNow();
-  function frame(timestamp) {
-    const currentTime = Number.isFinite(timestamp) ? timestamp : getNow();
     const delta = currentTime - lastTimestamp;
     lastTimestamp = currentTime;
     game.update(delta);
     game.render();
-    scheduleFrame(frame);
-  }
+  });
 
-  scheduleFrame(frame);
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      scheduler.stop();
+    } else {
+      lastTimestamp = scheduler.getNow();
+      scheduler.start();
+    }
+  };
+
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+
+  let disposed = false;
+  const teardown = () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    scheduler.stop();
+    detachInput();
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('beforeunload', teardown);
+    game.stopGame();
+  };
+
+  window.addEventListener('beforeunload', teardown);
+
+  lastTimestamp = scheduler.getNow();
+  scheduler.start();
+
+  if (!window.__carThiefGame) {
+    window.__carThiefGame = game;
+  }
 }
 
-function wireInputHandlers(game, canvas) {
-  window.addEventListener('keydown', (event) => {
-    game.handleKeyDown(event.key);
-  });
-
-  window.addEventListener('keyup', (event) => {
-    game.handleKeyUp(event.key);
-  });
-
-  canvas.addEventListener('pointerdown', () => game.handlePointerDown());
-  canvas.addEventListener('pointerup', () => game.handlePointerUp());
-  canvas.addEventListener('pointerleave', () => game.handlePointerUp());
-  canvas.addEventListener('pointermove', (event) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
-    const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
-    game.handlePointerMove(x, y);
+function run() {
+  bootstrap().catch((error) => {
+    console.error('Failed to bootstrap Car Thief Game', error);
   });
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap, { once: true });
+  document.addEventListener('DOMContentLoaded', run, { once: true });
 } else {
-  bootstrap();
+  run();
 }

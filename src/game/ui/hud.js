@@ -7,6 +7,10 @@ function now() {
 
 export class HUD {
   constructor() {
+    this.reset();
+  }
+
+  reset() {
     this.messages = [];
     this.lastUpdate = now();
   }
