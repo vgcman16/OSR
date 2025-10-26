@@ -230,3 +230,46 @@ test('MissionSystem draws from the contract pool when available', () => {
   assert.equal(appendedMission.status, 'available', 'contract drawn from the pool is available to start');
   assert.equal(appendedMission.progress, 0, 'contract drawn from the pool starts with zero progress');
 });
+
+test('MissionSystem sanitizes numeric rewards for templates missing payout or heat', () => {
+  const state = createState();
+  const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
+
+  const minimalTemplate = {
+    id: 'mystery-contract',
+    name: 'Mystery Contract',
+    difficulty: 1,
+  };
+
+  missionSystem.registerTemplate(minimalTemplate);
+
+  const createdMission = missionSystem.createMissionFromTemplate(minimalTemplate);
+  assert.ok(createdMission, 'mission is created from a template missing payout and heat');
+  missionSystem.availableMissions.push(createdMission);
+
+  const fundsBefore = state.funds;
+  const heatBefore = state.heat;
+
+  const startedMission = missionSystem.startMission(createdMission.id);
+  assert.equal(startedMission, createdMission, 'mission can be started after sanitizing values');
+
+  missionSystem.update(createdMission.duration);
+  assert.equal(
+    createdMission.status,
+    'awaiting-resolution',
+    'mission transitions to awaiting-resolution after its duration elapses',
+  );
+
+  assert.equal(createdMission.payout, 0, 'missing payout defaults to 0');
+  assert.equal(createdMission.heat, 0, 'missing heat defaults to 0');
+  assert.ok(Number.isFinite(createdMission.payout), 'mission payout is coerced to a finite number');
+  assert.doesNotThrow(() => {
+    `${createdMission.name} — $${createdMission.payout.toLocaleString()} (available)`;
+  }, 'UI formatting helpers can safely format sanitized mission payouts');
+
+  const resolvedMission = missionSystem.resolveMission(createdMission.id, 'success');
+  assert.equal(resolvedMission, createdMission, 'mission resolves successfully after sanitization');
+  assert.equal(state.funds, fundsBefore + createdMission.payout, 'funds remain numeric after resolution');
+  assert.ok(Number.isFinite(state.funds), 'state funds stay a finite number after resolution');
+  assert.equal(state.heat, heatBefore + createdMission.heat, 'heat increases by the sanitized mission heat');
+});
