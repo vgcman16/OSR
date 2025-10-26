@@ -8,6 +8,7 @@ const defaultMissionTemplates = [
     difficulty: 2,
     payout: 15000,
     heat: 2,
+    duration: 40,
     description: 'Swipe a prototype from a downtown showroom under heavy surveillance.',
   },
   {
@@ -16,14 +17,16 @@ const defaultMissionTemplates = [
     difficulty: 1,
     payout: 8000,
     heat: 1,
+    duration: 28,
     description: 'Intercept a shipment of luxury SUVs before it leaves the harbor.',
   },
   {
     id: 'collector-estate',
-    name: "Collector's Estate", 
+    name: "Collector's Estate",
     difficulty: 3,
     payout: 22000,
     heat: 3,
+    duration: 55,
     description: 'Infiltrate a fortified mansion and extract a mint condition classic.',
   },
 ];
@@ -40,10 +43,19 @@ class MissionSystem {
       ...template,
       vehicle: new Vehicle({ model: 'Target Vehicle' }),
       status: 'available',
+      elapsedTime: 0,
+      progress: 0,
+      duration: template.duration ?? Math.max(template.difficulty * 20, 20),
+      startedAt: null,
+      completedAt: null,
     }));
   }
 
   startMission(missionId) {
+    if (this.state.activeMission && this.state.activeMission.status !== 'completed') {
+      return null;
+    }
+
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
     if (!mission || mission.status !== 'available') {
       return null;
@@ -51,18 +63,32 @@ class MissionSystem {
 
     mission.status = 'in-progress';
     mission.startedAt = Date.now();
+    mission.elapsedTime = 0;
+    mission.progress = 0;
     this.state.activeMission = mission;
     return mission;
   }
 
   resolveMission(missionId, outcome) {
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
-    if (!mission) {
+    if (!mission || mission.status === 'available' || mission.status === 'completed') {
+      return null;
+    }
+
+    const isSuccess = outcome === 'success' && mission.status === 'awaiting-resolution';
+    const isFailure =
+      outcome === 'failure' &&
+      (mission.status === 'awaiting-resolution' || mission.status === 'in-progress');
+
+    if (!(isSuccess || isFailure)) {
       return null;
     }
 
     mission.status = 'completed';
     mission.outcome = outcome;
+    mission.completedAt = Date.now();
+    mission.progress = 1;
+    mission.elapsedTime = mission.duration;
     this.state.activeMission = null;
 
     if (outcome === 'success') {
@@ -76,8 +102,21 @@ class MissionSystem {
     return mission;
   }
 
-  update() {
-    // Placeholder for mission timers and dynamic generation.
+  update(delta) {
+    const mission = this.state.activeMission;
+    if (!mission || mission.status !== 'in-progress') {
+      return;
+    }
+
+    mission.elapsedTime = (mission.elapsedTime ?? 0) + delta;
+    const duration = mission.duration ?? Math.max(mission.difficulty * 20, 20);
+    mission.duration = duration;
+    mission.progress = Math.min(mission.elapsedTime / duration, 1);
+
+    if (mission.progress >= 1) {
+      mission.status = 'awaiting-resolution';
+      mission.completedAt = mission.completedAt ?? Date.now();
+    }
   }
 }
 

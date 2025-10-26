@@ -2,6 +2,8 @@ class EconomySystem {
   constructor(state) {
     this.state = state;
     this.dailyExpenses = 500;
+    this.dayLengthSeconds = 45;
+    this.timeAccumulator = 0;
   }
 
   payCrew() {
@@ -19,8 +21,20 @@ class EconomySystem {
     this.state.funds += amount;
   }
 
-  update() {
-    // Placeholder for cashflow forecasting.
+  update(delta) {
+    this.timeAccumulator += delta;
+    if (this.timeAccumulator < this.dayLengthSeconds) {
+      return;
+    }
+
+    const elapsedDays = Math.floor(this.timeAccumulator / this.dayLengthSeconds);
+    this.timeAccumulator -= elapsedDays * this.dayLengthSeconds;
+
+    for (let index = 0; index < elapsedDays; index += 1) {
+      this.applyDailyExpenses();
+      this.payCrew();
+      this.state.day += 1;
+    }
   }
 }
 
