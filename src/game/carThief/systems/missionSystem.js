@@ -1,4 +1,5 @@
 import { Vehicle } from '../entities/vehicle.js';
+import { HeatSystem } from './heatSystem.js';
 
 const defaultMissionTemplates = [
   {
@@ -28,9 +29,10 @@ const defaultMissionTemplates = [
 ];
 
 class MissionSystem {
-  constructor(state) {
+  constructor(state, { heatSystem = new HeatSystem(state) } = {}) {
     this.state = state;
     this.availableMissions = [];
+    this.heatSystem = heatSystem;
   }
 
   generateInitialContracts() {
@@ -65,10 +67,10 @@ class MissionSystem {
 
     if (outcome === 'success') {
       this.state.funds += mission.payout;
-      this.state.heat += mission.heat;
+      this.heatSystem.increase(mission.heat);
       this.state.garage.push(mission.vehicle);
     } else if (outcome === 'failure') {
-      this.state.heat += mission.heat * 2;
+      this.heatSystem.increase(mission.heat * 2);
     }
 
     return mission;
