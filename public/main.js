@@ -2,6 +2,20 @@ import { createCarThiefGame } from './game/carThief/index.js';
 
 let gameInstance = null;
 
+const teardownGame = () => {
+  if (!gameInstance) {
+    return;
+  }
+
+  if (typeof gameInstance.stop === 'function') {
+    gameInstance.stop();
+  } else if (gameInstance.loop && typeof gameInstance.loop.stop === 'function') {
+    gameInstance.loop.stop();
+  }
+
+  gameInstance = null;
+};
+
 const missionControls = {
   select: null,
   startButton: null,
@@ -242,6 +256,14 @@ const setupMissionControls = () => {
 };
 
 function initGame() {
+  if (gameInstance) {
+    if (gameInstance.loop?.running) {
+      return gameInstance;
+    }
+
+    teardownGame();
+  }
+
   const canvas = document.getElementById('game-canvas');
   if (!canvas) {
     console.warn('Game canvas not found.');
@@ -281,4 +303,4 @@ window.addEventListener('osr:init', () => {
   updateMissionControls();
 });
 
-export { initGame };
+export { initGame, teardownGame };
