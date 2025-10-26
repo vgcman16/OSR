@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MissionSystem } from '../public/game/carThief/systems/missionSystem.js';
-import { HeatSystem } from '../public/game/carThief/systems/heatSystem.js';
+import { MissionSystem } from '../src/game/carThief/systems/missionSystem.js';
+import { HeatSystem } from '../src/game/carThief/systems/heatSystem.js';
 
 const createState = () => ({
   funds: 1000,
