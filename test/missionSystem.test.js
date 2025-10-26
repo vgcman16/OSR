@@ -70,6 +70,22 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
     garageBeforeResolution + 1,
     'successful missions add the reward vehicle to the garage',
   );
+
+  const refreshedMission = missionSystem.availableMissions.find(
+    (mission) => mission.id === firstMission.id,
+  );
+  assert.ok(refreshedMission, 'mission template respawns after successful resolution');
+  assert.notEqual(
+    refreshedMission,
+    firstMission,
+    'respawned mission is a new instance separate from the completed contract',
+  );
+  assert.equal(refreshedMission.status, 'available', 'respawned mission is immediately available');
+  assert.equal(refreshedMission.progress, 0, 'respawned mission resets progress');
+  assert.equal(refreshedMission.elapsedTime, 0, 'respawned mission resets elapsed time');
+  assert.equal(refreshedMission.startedAt, null, 'respawned mission clears start timestamp');
+  assert.equal(refreshedMission.completedAt, null, 'respawned mission clears completion timestamp');
+  assert.equal(refreshedMission.outcome, null, 'respawned mission clears prior outcome');
 });
 
 test('MissionSystem resolves failures from in-progress and awaiting-resolution states', async (t) => {
@@ -102,6 +118,21 @@ test('MissionSystem resolves failures from in-progress and awaiting-resolution s
       state.heat,
       Math.min(10, heatBefore + mission.heat * 2),
       'failure increases heat by twice the mission heat value',
+    );
+
+    const refreshedMission = missionSystem.availableMissions.find(
+      (entry) => entry.id === mission.id,
+    );
+    assert.ok(refreshedMission, 'mission template respawns after failure resolution');
+    assert.notEqual(
+      refreshedMission,
+      mission,
+      'respawned mission is a new instance separate from the failed contract',
+    );
+    assert.equal(
+      refreshedMission.status,
+      'available',
+      'respawned mission becomes available again after failure',
     );
   });
 
@@ -143,5 +174,59 @@ test('MissionSystem resolves failures from in-progress and awaiting-resolution s
       Math.min(10, heatBefore + mission.heat * 2),
       'failure increases heat by twice the mission heat value',
     );
+
+    const refreshedMission = missionSystem.availableMissions.find(
+      (entry) => entry.id === mission.id,
+    );
+    assert.ok(refreshedMission, 'mission template respawns after failure resolution');
+    assert.notEqual(
+      refreshedMission,
+      mission,
+      'respawned mission is a new instance separate from the failed contract',
+    );
+    assert.equal(
+      refreshedMission.status,
+      'available',
+      'respawned mission becomes available again after failure',
+    );
   });
+});
+
+test('MissionSystem draws from the contract pool when available', () => {
+  const state = createState();
+  const extraContract = {
+    id: 'midnight-sting',
+    name: 'Midnight Sting',
+    difficulty: 2,
+    payout: 12000,
+    heat: 2,
+    duration: 35,
+    description: 'Set an ambush for a rare hypercar on its transport route.',
+  };
+
+  const missionSystem = new MissionSystem(state, {
+    heatSystem: new HeatSystem(state),
+    contractPool: [extraContract],
+  });
+
+  missionSystem.generateInitialContracts();
+  const [mission] = missionSystem.availableMissions;
+
+  const originalDateNow = Date.now;
+  Date.now = () => 250_000;
+
+  try {
+    missionSystem.startMission(mission.id);
+    missionSystem.resolveMission(mission.id, 'failure');
+  } finally {
+    Date.now = originalDateNow;
+  }
+
+  const appendedMission = missionSystem.availableMissions.find(
+    (entry) => entry.id === extraContract.id,
+  );
+
+  assert.ok(appendedMission, 'new contract is appended from the pool after resolution');
+  assert.equal(appendedMission.status, 'available', 'contract drawn from the pool is available to start');
+  assert.equal(appendedMission.progress, 0, 'contract drawn from the pool starts with zero progress');
 });

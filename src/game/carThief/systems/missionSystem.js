@@ -32,23 +32,108 @@ const defaultMissionTemplates = [
 ];
 
 class MissionSystem {
-  constructor(state, { heatSystem = new HeatSystem(state) } = {}) {
+  constructor(
+    state,
+    {
+      heatSystem = new HeatSystem(state),
+      missionTemplates = defaultMissionTemplates,
+      contractPool = [],
+    } = {},
+  ) {
     this.state = state;
     this.availableMissions = [];
     this.heatSystem = heatSystem;
+    this.missionTemplates = missionTemplates.map((template) => ({ ...template }));
+    this.templateMap = new Map(
+      this.missionTemplates.map((template) => [template.id, template]),
+    );
+    this.contractPool = contractPool.map((template) => ({ ...template }));
   }
 
-  generateInitialContracts() {
-    this.availableMissions = defaultMissionTemplates.map((template) => ({
+  registerTemplate(template) {
+    if (!template || !template.id) {
+      return;
+    }
+
+    if (!this.templateMap.has(template.id)) {
+      const storedTemplate = { ...template };
+      this.templateMap.set(template.id, storedTemplate);
+      this.missionTemplates.push(storedTemplate);
+    }
+  }
+
+  createMissionFromTemplate(template) {
+    if (!template) {
+      return null;
+    }
+
+    const duration = template.duration ?? Math.max(template.difficulty * 20, 20);
+    const vehicleConfig =
+      typeof template.vehicle === 'object' && template.vehicle !== null
+        ? template.vehicle
+        : { model: 'Target Vehicle' };
+
+    return {
       ...template,
-      vehicle: new Vehicle({ model: 'Target Vehicle' }),
+      vehicle: new Vehicle(vehicleConfig),
       status: 'available',
       elapsedTime: 0,
       progress: 0,
-      duration: template.duration ?? Math.max(template.difficulty * 20, 20),
+      duration,
       startedAt: null,
       completedAt: null,
-    }));
+      outcome: null,
+    };
+  }
+
+  respawnMissionTemplate(missionId) {
+    const missionIndex = this.availableMissions.findIndex((entry) => entry.id === missionId);
+    if (missionIndex === -1) {
+      return;
+    }
+
+    const template = this.templateMap.get(missionId);
+    if (!template) {
+      this.availableMissions.splice(missionIndex, 1);
+      return;
+    }
+
+    const refreshedMission = this.createMissionFromTemplate(template);
+    if (refreshedMission) {
+      this.availableMissions.splice(missionIndex, 1, refreshedMission);
+    }
+  }
+
+  drawContractFromPool() {
+    if (!this.contractPool.length) {
+      return null;
+    }
+
+    const nextTemplate = this.contractPool.shift();
+    if (!nextTemplate) {
+      return null;
+    }
+
+    this.registerTemplate(nextTemplate);
+    const mission = this.createMissionFromTemplate(nextTemplate);
+    if (mission) {
+      const existingIndex = this.availableMissions.findIndex(
+        (entry) => entry.id === mission.id,
+      );
+      if (existingIndex === -1) {
+        this.availableMissions.push(mission);
+      } else {
+        this.availableMissions.splice(existingIndex, 1, mission);
+      }
+    }
+
+    return mission;
+  }
+
+  generateInitialContracts() {
+    this.availableMissions = this.missionTemplates
+      .map((template) => this.createMissionFromTemplate(template))
+      .filter(Boolean);
   }
 
   startMission(missionId) {
@@ -98,6 +183,9 @@ class MissionSystem {
     } else if (outcome === 'failure') {
       this.heatSystem.increase(mission.heat * 2);
     }
+
+    this.respawnMissionTemplate(mission.id);
+    this.drawContractFromPool();
 
     return mission;
   }
