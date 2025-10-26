@@ -1,6 +1,13 @@
 import { Vehicle } from '../entities/vehicle.js';
 import { HeatSystem } from './heatSystem.js';
 
+const coerceFiniteNumber = (value, fallback = 0) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const REQUIRED_TEMPLATE_FIELDS = ['id', 'name'];
+
 const defaultMissionTemplates = [
   {
     id: 'showroom-heist',
@@ -67,7 +74,23 @@ class MissionSystem {
       return null;
     }
 
-    const duration = template.duration ?? Math.max(template.difficulty * 20, 20);
+    const missingFields = REQUIRED_TEMPLATE_FIELDS.filter(
+      (field) => template[field] === undefined || template[field] === null,
+    );
+
+    if (missingFields.length) {
+      console.warn(
+        `Mission template "${template.id ?? '<unknown>'}" missing required fields: ${missingFields.join(
+          ', ',
+        )}`,
+      );
+      return null;
+    }
+
+    const payout = coerceFiniteNumber(template.payout, 0);
+    const heat = coerceFiniteNumber(template.heat, 0);
+    const difficulty = coerceFiniteNumber(template.difficulty, 1);
+    const duration = template.duration ?? Math.max(difficulty * 20, 20);
     const vehicleConfig =
       typeof template.vehicle === 'object' && template.vehicle !== null
         ? template.vehicle
@@ -75,6 +98,9 @@ class MissionSystem {
 
     return {
       ...template,
+      payout,
+      heat,
+      difficulty,
       vehicle: new Vehicle(vehicleConfig),
       status: 'available',
       elapsedTime: 0,
