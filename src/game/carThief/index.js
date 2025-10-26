@@ -6,8 +6,8 @@ import { GameLoop } from './loop/gameLoop.js';
 
 const createCarThiefGame = ({ canvas, context }) => {
   const state = createInitialGameState();
-  const missionSystem = new MissionSystem(state);
   const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
   const economySystem = new EconomySystem(state);
 
   const renderHud = () => {
