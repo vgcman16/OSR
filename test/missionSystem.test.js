@@ -71,3 +71,77 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
     'successful missions add the reward vehicle to the garage',
   );
 });
+
+test('MissionSystem resolves failures from in-progress and awaiting-resolution states', async (t) => {
+  await t.test('resolving failure while the mission is in-progress', async (t) => {
+    const state = createState();
+    const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
+
+    missionSystem.generateInitialContracts();
+    const mission = missionSystem.availableMissions[0];
+
+    const originalDateNow = Date.now;
+    t.after(() => {
+      Date.now = originalDateNow;
+    });
+
+    Date.now = () => 500_000;
+    missionSystem.startMission(mission.id);
+
+    const fundsBefore = state.funds;
+    const heatBefore = state.heat;
+
+    const resolvedMission = missionSystem.resolveMission(mission.id, 'failure');
+
+    assert.equal(resolvedMission, mission, 'resolveMission returns the mission instance on failure');
+    assert.equal(resolvedMission.status, 'completed', 'mission transitions to completed on failure');
+    assert.equal(resolvedMission.outcome, 'failure', 'mission outcome is recorded as failure');
+    assert.equal(state.activeMission, null, 'active mission clears after a failure resolution');
+    assert.equal(state.funds, fundsBefore, 'failure does not change funds');
+    assert.equal(
+      state.heat,
+      Math.min(10, heatBefore + mission.heat * 2),
+      'failure increases heat by twice the mission heat value',
+    );
+  });
+
+  await t.test('resolving failure after mission awaits resolution', async (t) => {
+    const state = createState();
+    const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
+
+    missionSystem.generateInitialContracts();
+    const mission = missionSystem.availableMissions[0];
+
+    const originalDateNow = Date.now;
+    t.after(() => {
+      Date.now = originalDateNow;
+    });
+
+    Date.now = () => 750_000;
+    missionSystem.startMission(mission.id);
+
+    const fundsBefore = state.funds;
+    const heatBefore = state.heat;
+
+    missionSystem.update(mission.duration);
+    assert.equal(
+      mission.status,
+      'awaiting-resolution',
+      'mission transitions to awaiting-resolution after the duration elapses',
+    );
+
+    Date.now = () => 800_000;
+    const resolvedMission = missionSystem.resolveMission(mission.id, 'failure');
+
+    assert.equal(resolvedMission, mission, 'resolveMission returns the mission instance on failure');
+    assert.equal(resolvedMission.status, 'completed', 'mission transitions to completed on failure');
+    assert.equal(resolvedMission.outcome, 'failure', 'mission outcome is recorded as failure');
+    assert.equal(state.activeMission, null, 'active mission clears after a failure resolution');
+    assert.equal(state.funds, fundsBefore, 'failure does not change funds');
+    assert.equal(
+      state.heat,
+      Math.min(10, heatBefore + mission.heat * 2),
+      'failure increases heat by twice the mission heat value',
+    );
+  });
+});
