@@ -1,40 +1,42 @@
 # OSR
 
 This repository contains the front-end scaffold for the Open Source Roguelike prototype.
-The static site lives entirely in the `public/` directory and loads the entry script from `public/main.js`.
+The browser entry point imports the live source modules from the `src/` directory so that
+there is only a single copy of the game code.
 
 ## Running the static site locally
 
-You can launch the site with any static file server. Two common options are shown below:
+You can launch the site with any static file server as long as it serves the repository
+root (so the browser can request files from both `public/` and `src/`). Two common options
+are shown below:
 
 ### Using Node.js
 
 ```bash
 npm install --global serve
-serve public
+serve .
 ```
 
-This command serves the `public/` directory and makes the site available at the URL displayed in the terminal (typically http://localhost:3000).
+This command serves the entire repository and makes the site available at the URL displayed
+in the terminal (typically http://localhost:3000). Open `http://localhost:3000/public/` in
+your browser to view the game.
 
 ### Using Python 3
 
 ```bash
-cd public
 python -m http.server 3000
 ```
 
-Then open http://localhost:3000 in your browser to view the site.
-
-With either approach, the server must host the `public/` directory so the browser can request
-`main.js` and the nested modules in `public/game/carThief/` without hitting 404s.
+Then open http://localhost:3000/public/ in your browser to view the site.
 
 ## Project structure
 
 ```
 public/
-  index.html      # Main HTML document and layout
-  main.js         # Initializes the canvas and bootstraps the game
+  index.html      # Main HTML document and layout that imports modules from ../src/
   styles.css      # Base styling for the game shell
+src/
+  main.js         # Initializes the canvas and bootstraps the game
   game/
     carThief/     # Game state, systems, entities, and loop modules used by the HUD
 ```
