@@ -33,9 +33,69 @@ const createCarThiefGame = ({ canvas, context }) => {
       context.fillText(`- ${member.name} (${member.specialty})`, 48, 212 + index * 26);
     });
 
-    context.fillText('Active Contracts:', 420, 182);
+    const missionInfoX = 420;
+    let missionInfoY = 48;
+    context.fillText('Mission Status:', missionInfoX, missionInfoY);
+
+    missionInfoY += 30;
+    const activeMission = state.activeMission;
+    if (activeMission) {
+      const progressPercent = Math.round((activeMission.progress ?? 0) * 100);
+      const remainingSeconds = Math.max(
+        (activeMission.duration ?? 0) - (activeMission.elapsedTime ?? 0),
+        0,
+      );
+      const timeLabel = `${Math.ceil(remainingSeconds)}s remaining`;
+      const statusLabel =
+        activeMission.status === 'awaiting-resolution'
+          ? 'Awaiting outcome'
+          : activeMission.status === 'in-progress'
+            ? 'In progress'
+            : activeMission.status === 'completed'
+              ? `Completed (${activeMission.outcome ?? 'unknown'})`
+              : activeMission.status ?? 'Unknown';
+
+      context.fillText(activeMission.name, missionInfoX, missionInfoY);
+      missionInfoY += 26;
+      context.fillText(`Status: ${statusLabel}`, missionInfoX, missionInfoY);
+      missionInfoY += 26;
+
+      if (activeMission.status === 'in-progress') {
+        context.fillText(
+          `Progress: ${progressPercent}% — ${timeLabel}`,
+          missionInfoX,
+          missionInfoY,
+        );
+        missionInfoY += 26;
+      } else if (activeMission.status === 'awaiting-resolution') {
+        context.fillText(`Progress: ${progressPercent}% — Ready to resolve`, missionInfoX, missionInfoY);
+        missionInfoY += 26;
+      } else if (activeMission.status === 'completed') {
+        context.fillText(`Payout: $${activeMission.payout.toLocaleString()}`, missionInfoX, missionInfoY);
+        missionInfoY += 26;
+      }
+    } else {
+      context.fillText('No active mission', missionInfoX, missionInfoY);
+      missionInfoY += 26;
+    }
+
+    missionInfoY += 32;
+    context.fillText('Contracts:', missionInfoX, missionInfoY);
     missionSystem.availableMissions.forEach((mission, index) => {
-      context.fillText(`${mission.name} — $${mission.payout.toLocaleString()}`, 420, 212 + index * 26);
+      const baseY = missionInfoY + 30 + index * 26;
+      const progressPercent = Math.round((mission.progress ?? 0) * 100);
+      let statusLabel = mission.status ?? 'unknown';
+      if (mission.status === 'in-progress') {
+        statusLabel = `in progress (${progressPercent}%)`;
+      } else if (mission.status === 'awaiting-resolution') {
+        statusLabel = 'awaiting outcome';
+      }
+
+      context.fillText(
+        `${mission.name} — $${mission.payout.toLocaleString()} (${statusLabel})`,
+        missionInfoX,
+        baseY,
+      );
     });
   };
 

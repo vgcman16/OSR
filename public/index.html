@@ -12,7 +12,31 @@
     </header>
     <main class="site-main">
       <section class="game-container" aria-label="Game canvas">
-        <canvas id="game-canvas" width="800" height="600" role="img" aria-label="Game viewport"></canvas>
+        <canvas
+          id="game-canvas"
+          width="800"
+          height="600"
+          role="img"
+          aria-label="Game viewport"
+        ></canvas>
+      </section>
+      <section class="control-panel" aria-label="Mission control interface">
+        <h2>Mission Control</h2>
+        <p class="control-panel__hint">
+          Select a contract, then coordinate its execution.
+        </p>
+        <label for="mission-select">Available contracts</label>
+        <select id="mission-select" name="mission-select" aria-describedby="mission-status-text">
+          <option value="" disabled selected>Select a mission</option>
+        </select>
+        <div class="control-panel__actions">
+          <button id="start-mission-btn" type="button">Start Mission</button>
+          <button id="mission-success-btn" type="button">Mark Success</button>
+          <button id="mission-failure-btn" type="button">Mark Failure</button>
+        </div>
+        <p id="mission-status-text" class="control-panel__status" role="status" aria-live="polite">
+          Awaiting mission selection.
+        </p>
       </section>
     </main>
     <footer class="site-footer">
