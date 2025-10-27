@@ -63,6 +63,9 @@ const missionControls = {
    trainingAttributeSelect: null,
    trainingAttributeButton: null,
    trainingAttributeList: null,
+  trainingRestCrewSelect: null,
+  trainingRestDurationSelect: null,
+  trainingRestButton: null,
   trainingStatus: null,
   playerStatsList: null,
   playerSkillSelect: null,
@@ -115,6 +118,12 @@ const CREW_ATTRIBUTE_OPTIONS = Object.values(CREW_TRAIT_CONFIG)
   }))
   .sort((a, b) => a.label.localeCompare(b.label));
 
+const CREW_REST_DURATION_OPTIONS = [
+  { value: 1, label: '1 day — quick reset' },
+  { value: 2, label: '2 days — deeper recovery' },
+  { value: 3, label: '3 days — full rotation' },
+];
+
 const getCrewTraitLevel = (entity, traitKey) => {
   if (!entity) {
     return 0;
@@ -166,6 +175,7 @@ const summarizeCrewReadiness = (member) => {
     tooltip: 'Crew readiness data unavailable.',
     fatiguePercent: null,
     state: 'unknown',
+    restPlan: null,
   };
 
   if (!member || typeof member !== 'object') {
@@ -186,10 +196,22 @@ const summarizeCrewReadiness = (member) => {
   const recoveryRate = summary?.recoveryPerDay ?? Number(member.fatigueRecoveryPerDay);
   const fatiguePercent = fatigue !== null ? Math.round((fatigue / maxFatigue) * 100) : null;
   const readinessState = summary?.state ?? (member.status ?? 'idle');
+  const restPlan = summary?.restPlan ?? null;
+  const restDaysRaw = Number(restPlan?.remainingDays);
+  const restMultiplierRaw = Number(restPlan?.recoveryMultiplier);
+  const restDays = Number.isFinite(restDaysRaw) ? Math.max(0, restDaysRaw) : 0;
+  const restPlanSummary = restDays > 0
+    ? {
+        remainingDays: restDays,
+        recoveryMultiplier: Number.isFinite(restMultiplierRaw) ? restMultiplierRaw : null,
+      }
+    : null;
 
   let readinessLabel = 'Ready';
   const normalizedState = typeof readinessState === 'string' ? readinessState.toLowerCase() : 'ready';
-  if (normalizedState === 'exhausted' || normalizedState === 'needs-rest') {
+  if (normalizedState === 'resting') {
+    readinessLabel = 'Resting';
+  } else if (normalizedState === 'exhausted' || normalizedState === 'needs-rest') {
     readinessLabel = 'Needs rest';
   } else if (normalizedState === 'tired') {
     readinessLabel = 'Tired';
@@ -208,7 +230,21 @@ const summarizeCrewReadiness = (member) => {
     tooltipParts.push(`Recovers about ${Math.round(recoveryRate)} fatigue per day.`);
   }
 
-  if (normalizedState === 'exhausted' || normalizedState === 'needs-rest') {
+  if (restPlanSummary) {
+    const daysLabel = restPlanSummary.remainingDays === 1
+      ? '1 day remaining'
+      : `${restPlanSummary.remainingDays} days remaining`;
+    tooltipParts.push(`Accelerated recovery underway — ${daysLabel}.`);
+
+    if (Number.isFinite(restPlanSummary.recoveryMultiplier) && restPlanSummary.recoveryMultiplier > 1) {
+      const multiplierLabel = restPlanSummary.recoveryMultiplier >= 2
+        ? `${restPlanSummary.recoveryMultiplier.toFixed(1)}x`
+        : `${(restPlanSummary.recoveryMultiplier * 100 - 100).toFixed(0)}% boost`;
+      tooltipParts.push(`Bench rotation applying a ${multiplierLabel} bonus to recovery.`);
+    }
+
+    tooltipParts.push('Unavailable for missions until rotation completes.');
+  } else if (normalizedState === 'exhausted' || normalizedState === 'needs-rest') {
     tooltipParts.push('Unavailable for missions until rested.');
   } else if (normalizedState === 'tired') {
     tooltipParts.push('Pushing further could sideline them.');
@@ -223,6 +259,7 @@ const summarizeCrewReadiness = (member) => {
     tooltip: tooltipParts.join(' '),
     fatiguePercent,
     state: normalizedState,
+    restPlan: restPlanSummary,
   };
 };
 
@@ -2107,6 +2144,9 @@ const updateTrainingOptions = () => {
   const attributeSelect = missionControls.trainingAttributeSelect;
   const attributeButton = missionControls.trainingAttributeButton;
   const attributeList = missionControls.trainingAttributeList;
+  const restCrewSelect = missionControls.trainingRestCrewSelect;
+  const restDurationSelect = missionControls.trainingRestDurationSelect;
+  const restButton = missionControls.trainingRestButton;
 
   if (
     !crewSelect ||
@@ -2115,7 +2155,10 @@ const updateTrainingOptions = () => {
     !specialtyButton ||
     !attributeSelect ||
     !attributeButton ||
-    !attributeList
+    !attributeList ||
+    !restCrewSelect ||
+    !restDurationSelect ||
+    !restButton
   ) {
     return;
   }
@@ -2152,7 +2195,86 @@ const updateTrainingOptions = () => {
     crewSelect.value = previousSelection;
   }
 
+  const previousRestSelection = restCrewSelect.value;
+  restCrewSelect.innerHTML = '';
+
+  const restPlaceholder = document.createElement('option');
+  restPlaceholder.value = '';
+  restPlaceholder.textContent = crew.length
+    ? 'Select crew to rotate'
+    : 'No crew available';
+  restPlaceholder.disabled = true;
+  restPlaceholder.selected = true;
+  restCrewSelect.appendChild(restPlaceholder);
+
+  crew.forEach((member) => {
+    if (!member) {
+      return;
+    }
+
+    const readiness = summarizeCrewReadiness(member);
+    const stateLabelRaw = readiness?.state ?? (member.status ?? 'idle');
+    const stateLabel = stateLabelRaw ? stateLabelRaw.replace(/-/g, ' ') : 'idle';
+    const fatigueLabel = readiness?.fatiguePercent !== null
+      ? `${readiness.fatiguePercent}% fatigue`
+      : 'Fatigue unknown';
+    const restPlan = readiness?.restPlan ?? null;
+    const restLabel = restPlan?.remainingDays
+      ? ` • resting ${restPlan.remainingDays}d remaining`
+      : '';
+
+    const option = document.createElement('option');
+    option.value = member.id;
+    option.textContent = `${member.name} — ${stateLabel} • ${fatigueLabel}${restLabel}`;
+    if (readiness?.tooltip) {
+      option.title = readiness.tooltip;
+    }
+    restCrewSelect.appendChild(option);
+  });
+
+  if (previousRestSelection && crew.some((member) => member?.id === previousRestSelection)) {
+    restCrewSelect.value = previousRestSelection;
+    restPlaceholder.selected = false;
+  }
+
   const currentSelection = crew.find((member) => member?.id === crewSelect.value) ?? null;
+  const restingSelection = crew.find((member) => member?.id === restCrewSelect.value) ?? null;
+  const restingSummary = restingSelection ? summarizeCrewReadiness(restingSelection) : null;
+  const restPlanActive = Boolean(restingSummary?.restPlan);
+  const restEligible = restingSelection
+    ? typeof restingSelection.isRestEligible === 'function'
+      ? restingSelection.isRestEligible()
+      : !['on-mission', 'captured'].includes((restingSelection.status ?? '').toLowerCase())
+    : false;
+
+  const previousRestDuration = restDurationSelect.value;
+  restDurationSelect.innerHTML = '';
+  CREW_REST_DURATION_OPTIONS.forEach((entry) => {
+    const option = document.createElement('option');
+    option.value = String(entry.value);
+    option.textContent = entry.label;
+    restDurationSelect.appendChild(option);
+  });
+
+  const durationValues = CREW_REST_DURATION_OPTIONS.map((entry) => String(entry.value));
+  if (durationValues.includes(previousRestDuration)) {
+    restDurationSelect.value = previousRestDuration;
+  } else if (durationValues.length) {
+    restDurationSelect.value = durationValues[0];
+  }
+
+  const restInteractionDisabled = !restingSelection || !restEligible;
+  restDurationSelect.disabled = restInteractionDisabled;
+  restButton.disabled = restInteractionDisabled;
+  restButton.textContent = restPlanActive ? 'Extend Recovery' : 'Schedule Recovery';
+
+  if (!restingSelection) {
+    restButton.title = 'Select crew to rotate into rest.';
+  } else if (!restEligible) {
+    restButton.title = `${restingSelection.name} cannot stand down right now.`;
+  } else {
+    restButton.title = '';
+  }
 
   renderCrewTraitList(attributeList, currentSelection);
 
@@ -2193,11 +2315,19 @@ const updateTrainingOptions = () => {
     attributeSelect.value = CREW_ATTRIBUTE_OPTIONS[0].value;
   }
 
-  const canTrain = Boolean(missionSystem && economySystem && currentSelection);
+  const isResting = currentSelection
+    ? typeof currentSelection.hasActiveRestOrder === 'function'
+      ? currentSelection.hasActiveRestOrder()
+      : (currentSelection.status ?? '').toLowerCase() === 'resting'
+    : false;
+  const canTrain = Boolean(missionSystem && economySystem && currentSelection && !isResting);
   const atMaxLoyalty = currentSelection ? Number(currentSelection.loyalty) >= 5 : true;
 
   loyaltyButton.disabled = !canTrain || atMaxLoyalty || funds < LOYALTY_TRAINING_COST;
   loyaltyButton.textContent = `Boost Loyalty (${formatCurrency(LOYALTY_TRAINING_COST)})`;
+  loyaltyButton.title = isResting && currentSelection
+    ? `${currentSelection.name} is benched for recovery. Resume duty before training.`
+    : '';
 
   const desiredSpecialty = (specialtySelect.value ?? '').toLowerCase();
   const alreadySpecialty = currentSelection
@@ -2205,6 +2335,9 @@ const updateTrainingOptions = () => {
     : false;
   specialtyButton.disabled = !canTrain || alreadySpecialty || funds < SPECIALTY_TRAINING_COST;
   specialtyButton.textContent = `Specialty Training (${formatCurrency(SPECIALTY_TRAINING_COST)})`;
+  specialtyButton.title = isResting && currentSelection
+    ? `${currentSelection.name} is benched for recovery. Resume duty before training.`
+    : '';
 
   const selectedAttribute = attributeSelect.value;
   const attributeConfig = CREW_TRAIT_CONFIG[selectedAttribute];
@@ -2212,7 +2345,7 @@ const updateTrainingOptions = () => {
   const attributeMax = Number.isFinite(attributeConfig?.maxLevel) ? attributeConfig.maxLevel : 6;
   const attributeCost = computeAttributeTrainingCost(selectedAttribute, attributeLevel);
 
-  attributeSelect.disabled = !currentSelection;
+  attributeSelect.disabled = !currentSelection || isResting;
 
   attributeButton.disabled =
     !canTrain ||
@@ -2222,6 +2355,8 @@ const updateTrainingOptions = () => {
 
   if (!currentSelection) {
     attributeButton.title = 'Select a crew member to train.';
+  } else if (isResting) {
+    attributeButton.title = `${currentSelection.name} is benched for recovery. Resume duty before training.`;
   } else if (!attributeConfig) {
     attributeButton.title = 'Select an attribute focus.';
   } else if (attributeLevel >= attributeMax) {
@@ -2235,6 +2370,56 @@ const updateTrainingOptions = () => {
   attributeButton.textContent = attributeConfig
     ? `Train ${attributeConfig.label} (${formatCurrency(attributeCost)})`
     : 'Train Attribute';
+};
+
+const handleCrewRestScheduling = () => {
+  const missionSystem = getMissionSystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const restCrewSelect = missionControls.trainingRestCrewSelect;
+  const restDurationSelect = missionControls.trainingRestDurationSelect;
+
+  if (!missionSystem || !state || !restCrewSelect || !restDurationSelect) {
+    setTrainingStatus('Recovery scheduling unavailable.');
+    return;
+  }
+
+  const crew = Array.isArray(state.crew) ? state.crew : [];
+  const selectedId = restCrewSelect.value;
+  const member = crew.find((entry) => entry?.id === selectedId);
+
+  if (!member) {
+    setTrainingStatus('Select crew to rotate into rest.');
+    return;
+  }
+
+  const eligible = typeof member.isRestEligible === 'function'
+    ? member.isRestEligible()
+    : !['on-mission', 'captured'].includes((member.status ?? '').toLowerCase());
+  if (!eligible) {
+    setTrainingStatus(`${member.name} cannot stand down right now.`);
+    return;
+  }
+
+  const rawDays = Number(restDurationSelect.value);
+  const days = Number.isFinite(rawDays) ? Math.max(1, Math.round(rawDays)) : 1;
+
+  const plan = typeof member.markRestOrder === 'function'
+    ? member.markRestOrder({ days })
+    : null;
+
+  if (!plan) {
+    setTrainingStatus('Unable to queue a recovery rotation.');
+    return;
+  }
+
+  const totalDays = Number(plan.remainingDays);
+  const dayLabel = Number.isFinite(totalDays) && totalDays === 1 ? '1 day' : `${totalDays} days`;
+  setTrainingStatus(`${member.name} rotates to recovery duty for ${dayLabel}.`);
+
+  updateTrainingOptions();
+  updateCrewSelectionOptions();
+  updateMissionControls();
+  triggerHudRender();
 };
 
 const handleLoyaltyTraining = () => {
@@ -3308,6 +3493,9 @@ const updateMissionControls = () => {
     trainingAttributeSelect,
     trainingAttributeButton,
     trainingAttributeList,
+    trainingRestCrewSelect,
+    trainingRestDurationSelect,
+    trainingRestButton,
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
@@ -3357,6 +3545,9 @@ const updateMissionControls = () => {
     trainingAttributeSelect,
     trainingAttributeButton,
     trainingAttributeList,
+    trainingRestCrewSelect,
+    trainingRestDurationSelect,
+    trainingRestButton,
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
@@ -3888,6 +4079,9 @@ const setupMissionControls = () => {
   missionControls.trainingAttributeSelect = document.getElementById('mission-training-attribute');
   missionControls.trainingAttributeButton = document.getElementById('mission-training-attribute-btn');
   missionControls.trainingAttributeList = document.getElementById('mission-training-attribute-list');
+  missionControls.trainingRestCrewSelect = document.getElementById('mission-training-rest-crew');
+  missionControls.trainingRestDurationSelect = document.getElementById('mission-training-rest-duration');
+  missionControls.trainingRestButton = document.getElementById('mission-training-rest-btn');
   missionControls.trainingStatus = document.getElementById('mission-training-status');
   missionControls.playerStatsList = document.getElementById('mission-player-stats');
   missionControls.playerSkillSelect = document.getElementById('mission-player-skill');
@@ -3942,6 +4136,9 @@ const setupMissionControls = () => {
     trainingAttributeSelect,
     trainingAttributeButton,
     trainingAttributeList,
+    trainingRestCrewSelect,
+    trainingRestDurationSelect,
+    trainingRestButton,
     trainingStatus,
     playerStatsList,
     playerSkillSelect,
@@ -3992,6 +4189,9 @@ const setupMissionControls = () => {
     trainingAttributeSelect,
     trainingAttributeButton,
     trainingAttributeList,
+    trainingRestCrewSelect,
+    trainingRestDurationSelect,
+    trainingRestButton,
     trainingStatus,
     playerStatsList,
     playerSkillSelect,
@@ -4022,11 +4222,14 @@ const setupMissionControls = () => {
   trainingCrewSelect.addEventListener('change', updateTrainingOptions);
   trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
   trainingAttributeSelect?.addEventListener('change', updateTrainingOptions);
+  trainingRestCrewSelect?.addEventListener('change', updateTrainingOptions);
+  trainingRestDurationSelect?.addEventListener('change', updateTrainingOptions);
   playerSkillSelect.addEventListener('change', updatePlayerDevelopmentPanel);
   playerGearSelect.addEventListener('change', updatePlayerDevelopmentPanel);
   trainingLoyaltyButton.addEventListener('click', handleLoyaltyTraining);
   trainingSpecialtyButton.addEventListener('click', handleSpecialtyTraining);
   trainingAttributeButton?.addEventListener('click', handleAttributeTraining);
+  trainingRestButton?.addEventListener('click', handleCrewRestScheduling);
   playerSkillButton.addEventListener('click', handlePlayerSkillTraining);
   playerGearButton.addEventListener('click', handlePlayerGearAcquisition);
   maintenanceRepairButton.addEventListener('click', handleMaintenanceRepair);

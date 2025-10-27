@@ -158,11 +158,30 @@ class EconomySystem {
 
   recoverCrewFatigue(days = 1) {
     const crew = Array.isArray(this.state.crew) ? this.state.crew : [];
+    let fatigueAdjusted = false;
     crew.forEach((member) => {
-      if (member && typeof member.recoverFatigue === 'function') {
+      if (!member || typeof member !== 'object') {
+        return;
+      }
+
+      const before = Number(member.fatigue);
+
+      if (typeof member.applyRestRecovery === 'function') {
+        member.applyRestRecovery(days);
+      } else if (typeof member.recoverFatigue === 'function') {
         member.recoverFatigue(days);
       }
+
+      const after = Number(member.fatigue);
+      if (Number.isFinite(before) && Number.isFinite(after) && before !== after) {
+        fatigueAdjusted = true;
+      }
     });
+
+    if (fatigueAdjusted && this.state) {
+      this.state.lastCrewRecoveryTimestamp = Date.now();
+      this.state.needsHudRefresh = true;
+    }
   }
 
   adjustFunds(amount) {
@@ -195,6 +214,10 @@ class EconomySystem {
       this.applySafehouseDailyEconomyEffects();
       this.recoverCrewFatigue(1);
       this.state.day += 1;
+      if (this.state) {
+        this.state.needsHudRefresh = true;
+        this.state.lastEconomyTickAt = Date.now();
+      }
       const total =
         this.pendingExpenseReport.base +
         this.pendingExpenseReport.payroll +
