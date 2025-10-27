@@ -1,8 +1,12 @@
+import { getActiveSafehouseFromState } from '../world/safehouse.js';
+
 const defaultHeatTiers = [
   { name: 'calm', label: 'Calm', threshold: 0 },
   { name: 'alert', label: 'Alert', threshold: 3 },
   { name: 'lockdown', label: 'Lockdown', threshold: 7 },
 ];
+
+const DAY_LENGTH_SECONDS = 45;
 
 class HeatSystem {
   constructor(state, { decayRate = 0.05, tiers = defaultHeatTiers } = {}) {
@@ -15,7 +19,37 @@ class HeatSystem {
       this.state.heat = 0;
     }
 
+    this.dayLengthSeconds = DAY_LENGTH_SECONDS;
+    this.timeAccumulator = 0;
+
     this.updateHeatTier();
+  }
+
+  getActiveSafehouse() {
+    return getActiveSafehouseFromState(this.state);
+  }
+
+  getSafehouseHeatReduction() {
+    const safehouse = this.getActiveSafehouse();
+    if (!safehouse || typeof safehouse.getHeatReduction !== 'function') {
+      return 0;
+    }
+
+    const reduction = safehouse.getHeatReduction();
+    return Number.isFinite(reduction) ? reduction : 0;
+  }
+
+  applySafehouseDailyMitigation() {
+    const reduction = this.getSafehouseHeatReduction();
+    if (!Number.isFinite(reduction) || reduction <= 0) {
+      return 0;
+    }
+
+    const beforeHeat = Number.isFinite(this.state.heat) ? this.state.heat : 0;
+    const targetHeat = Math.max(0, beforeHeat - reduction);
+    this.state.heat = targetHeat;
+    this.updateHeatTier();
+    return beforeHeat - targetHeat;
   }
 
   getTierForHeat(heatValue) {
@@ -88,6 +122,17 @@ class HeatSystem {
   }
 
   update(delta) {
+    this.timeAccumulator += delta;
+
+    if (this.timeAccumulator >= this.dayLengthSeconds) {
+      const elapsedDays = Math.floor(this.timeAccumulator / this.dayLengthSeconds);
+      this.timeAccumulator -= elapsedDays * this.dayLengthSeconds;
+
+      for (let index = 0; index < elapsedDays; index += 1) {
+        this.applySafehouseDailyMitigation();
+      }
+    }
+
     if (this.state.heat <= 0) {
       this.state.heat = 0;
       this.updateHeatTier();

@@ -2,6 +2,7 @@ import { createInitialGameState } from './state/gameState.js';
 import { MissionSystem } from './systems/missionSystem.js';
 import { HeatSystem } from './systems/heatSystem.js';
 import { EconomySystem } from './systems/economySystem.js';
+import { getActiveSafehouseFromState } from './world/safehouse.js';
 import { GameLoop } from './loop/gameLoop.js';
 
 const createCarThiefGame = ({ canvas, context }) => {
@@ -19,15 +20,53 @@ const createCarThiefGame = ({ canvas, context }) => {
     const crackdownLabel = crackdownTier?.label ?? 'Unknown';
     const formatExpense = (value) => {
       const numeric = Number.isFinite(value) ? value : 0;
-      return `$${Math.max(0, Math.round(numeric)).toLocaleString()}`;
+      const rounded = Math.round(Math.abs(numeric));
+      const formatted = `$${rounded.toLocaleString()}`;
+      return numeric < 0 ? `-${formatted}` : formatted;
+    };
+    const formatSigned = (value) => {
+      if (!Number.isFinite(value) || value === 0) {
+        return null;
+      }
+      const rounded = Math.round(Math.abs(value));
+      const formatted = `$${rounded.toLocaleString()}`;
+      return value >= 0 ? `+${formatted}` : `-${formatted}`;
     };
     const payroll = economySystem.getCrewPayroll();
     const projectedDaily = economySystem.getProjectedDailyExpenses();
     const lastExpenseReport = economySystem.getLastExpenseReport();
+    const safehouse = getActiveSafehouseFromState(state);
+    const safehouseTier = safehouse?.getCurrentTier?.() ?? null;
+    const safehousePassiveIncome = typeof safehouse?.getPassiveIncome === 'function'
+      ? safehouse.getPassiveIncome()
+      : Number.isFinite(safehouseTier?.passiveIncome)
+        ? safehouseTier.passiveIncome
+        : 0;
+    const safehouseHeatReduction = typeof safehouse?.getHeatReduction === 'function'
+      ? safehouse.getHeatReduction()
+      : Number.isFinite(safehouseTier?.heatReduction)
+        ? safehouseTier.heatReduction
+        : 0;
+    const safehouseOverhead = Number.isFinite(lastExpenseReport?.safehouseOverhead)
+      ? lastExpenseReport.safehouseOverhead
+      : 0;
+    const safehouseIncome = Number.isFinite(lastExpenseReport?.safehouseIncome)
+      ? lastExpenseReport.safehouseIncome
+      : 0;
+    const adjustmentSegments = [];
+    const overheadLabel = formatSigned(safehouseOverhead);
+    if (overheadLabel) {
+      adjustmentSegments.push(`safehouse ${overheadLabel}`);
+    }
+    const perkLabel = formatSigned(-safehouseIncome);
+    if (perkLabel) {
+      adjustmentSegments.push(`perks ${perkLabel}`);
+    }
+    const adjustmentsLabel = adjustmentSegments.length ? ` + ${adjustmentSegments.join(' + ')}` : '';
     const lastExpenseLabel = lastExpenseReport
       ? `${formatExpense(lastExpenseReport.total)} (base ${formatExpense(
           lastExpenseReport.base,
-        )} + crew ${formatExpense(lastExpenseReport.payroll)})`
+        )} + crew ${formatExpense(lastExpenseReport.payroll)}${adjustmentsLabel})`
       : '—';
 
     context.fillStyle = '#121822';
@@ -44,6 +83,18 @@ const createCarThiefGame = ({ canvas, context }) => {
     context.fillText(`Last upkeep: ${lastExpenseLabel}`, 32, 198);
     context.fillText(`Heat: ${state.heat.toFixed(2)}`, 32, 228);
     context.fillText(`Crackdown: ${crackdownLabel}`, 32, 258);
+    const safehouseLabel = safehouse
+      ? `${safehouse.name} — ${safehouseTier?.label ?? 'Unranked'}`
+      : 'None assigned';
+    const safehousePerks = [];
+    if (Number.isFinite(safehousePassiveIncome) && safehousePassiveIncome > 0) {
+      safehousePerks.push(`+${formatExpense(safehousePassiveIncome)}/day`);
+    }
+    if (Number.isFinite(safehouseHeatReduction) && safehouseHeatReduction > 0) {
+      safehousePerks.push(`-${safehouseHeatReduction.toFixed(2)} heat/day`);
+    }
+    const safehousePerksLabel = safehousePerks.length ? ` (${safehousePerks.join(', ')})` : '';
+    context.fillText(`Safehouse: ${safehouseLabel}${safehousePerksLabel}`, 32, 288);
 
     context.fillStyle = '#d1eaff';
     context.font = '16px "Segoe UI", sans-serif';

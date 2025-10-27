@@ -2,6 +2,7 @@ import { Player } from '../entities/player.js';
 import { CrewMember } from '../entities/crewMember.js';
 import { Vehicle } from '../entities/vehicle.js';
 import { CityMap } from '../world/cityMap.js';
+import { SafehouseCollection, createDefaultSafehouseCollection } from '../world/safehouse.js';
 
 class GameState {
   constructor({
@@ -13,6 +14,7 @@ class GameState {
     crew = [],
     garage = [],
     city = new CityMap(),
+    safehouses = createDefaultSafehouseCollection(),
     activeMission = null,
     missionLog = [],
     lastVehicleReport = null,
@@ -23,10 +25,21 @@ class GameState {
     this.funds = funds;
     this.heat = heat;
     this.heatTier = heatTier;
-    this.player = player;
+    this.player = player instanceof Player ? player : new Player(player);
     this.crew = crew;
     this.garage = garage;
     this.city = city;
+    this.safehouses = safehouses instanceof SafehouseCollection
+      ? safehouses
+      : new SafehouseCollection(safehouses ?? []);
+
+    if (!this.player.safehouseId) {
+      const defaultSafehouse = this.safehouses.getDefault();
+      if (defaultSafehouse) {
+        this.player.assignSafehouse(defaultSafehouse.id);
+      }
+    }
+
     this.activeMission = activeMission;
     this.missionLog = Array.isArray(missionLog) ? missionLog : [];
     this.lastVehicleReport = lastVehicleReport;
@@ -35,8 +48,14 @@ class GameState {
   }
 }
 
-const createInitialGameState = () =>
-  new GameState({
+const createInitialGameState = () => {
+  const safehouses = createDefaultSafehouseCollection();
+  const defaultSafehouse = safehouses.getDefault();
+  const player = new Player({ name: 'The Wheelman', safehouseId: defaultSafehouse?.id ?? null });
+
+  return new GameState({
+    player,
+    safehouses,
     crew: [
       new CrewMember({ name: 'Sable', specialty: 'hacker', upkeep: 750, loyalty: 3 }),
       new CrewMember({ name: 'Torque', specialty: 'mechanic', upkeep: 600, loyalty: 2 }),
@@ -76,5 +95,6 @@ const createInitialGameState = () =>
     ],
     lastExpenseReport: null,
   });
+};
 
 export { GameState, createInitialGameState };
