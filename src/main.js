@@ -42,6 +42,11 @@ const missionControls = {
   logList: null,
   recruitList: null,
   recruitStatus: null,
+  eventPrompt: null,
+  eventChoices: null,
+  eventHistory: null,
+  eventStatus: null,
+  eventStatusDetail: '',
   trainingCrewSelect: null,
   trainingSpecialtySelect: null,
   trainingLoyaltyButton: null,
@@ -341,6 +346,8 @@ const formatMissionStatusMessage = (mission) => {
   switch (status) {
     case 'in-progress':
       return `${mission.name} in progress — ${progressPercent}% complete (${roundedRemaining}s remaining, auto-resolving on completion)`;
+    case 'decision-required':
+      return `${mission.name} needs direction — ${progressPercent}% complete (awaiting your call)`;
     case 'awaiting-resolution':
       return `${mission.name} resolving outcome…`;
     case 'completed':
@@ -484,6 +491,17 @@ const setPlayerStatus = (message) => {
   }
 
   missionControls.playerStatus.textContent = message ?? '';
+};
+
+const setMissionEventStatus = (message) => {
+  const { eventStatus } = missionControls;
+  if (!eventStatus) {
+    return;
+  }
+
+  const detail = typeof message === 'string' ? message.trim() : '';
+  missionControls.eventStatusDetail = detail;
+  eventStatus.textContent = detail;
 };
 
 const updateSafehousePanel = () => {
@@ -2210,6 +2228,7 @@ const updateMissionStatusText = () => {
   }
 
   missionControls.statusText.textContent = statusMessage;
+  renderMissionEvents();
   renderMissionLog();
 };
 
@@ -2260,6 +2279,101 @@ const renderMissionLog = () => {
   });
 };
 
+const renderMissionEvents = () => {
+  const { eventPrompt, eventChoices, eventHistory } = missionControls;
+  if (!eventPrompt || !eventChoices || !eventHistory) {
+    return;
+  }
+
+  setMissionEventStatus(missionControls.eventStatusDetail ?? '');
+
+  eventPrompt.textContent = 'No active mission. Event feed idle.';
+  eventChoices.innerHTML = '';
+  eventHistory.innerHTML = '';
+
+  const missionSystem = getMissionSystem();
+  const mission = missionSystem?.state?.activeMission ?? null;
+
+  if (!mission || mission.status === 'completed') {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'No event history yet.';
+    eventHistory.appendChild(placeholder);
+    return;
+  }
+
+  const pending = mission.pendingDecision ?? null;
+  if (pending) {
+    const description = pending.description ? ` — ${pending.description}` : '';
+    const progressPercent = Number.isFinite(pending.triggerProgress)
+      ? ` (${Math.round(pending.triggerProgress * 100)}%)`
+      : '';
+    eventPrompt.textContent = `${pending.label}${progressPercent}${description}`.trim();
+
+    pending.choices
+      .map((choice) => ({
+        id: choice.id,
+        label: choice.label,
+        description: choice.description,
+      }))
+      .forEach((choice) => {
+        const option = document.createElement('div');
+        option.className = 'mission-event__option';
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.eventChoice = 'true';
+        button.dataset.eventId = pending.eventId;
+        button.dataset.choiceId = choice.id;
+        button.textContent = choice.label;
+        option.appendChild(button);
+
+        if (choice.description) {
+          const blurb = document.createElement('p');
+          blurb.className = 'mission-event__option-desc';
+          blurb.textContent = choice.description;
+          option.appendChild(blurb);
+        }
+
+        eventChoices.appendChild(option);
+      });
+  } else {
+    const statusLabel = (() => {
+      switch (mission.status) {
+        case 'awaiting-resolution':
+          return 'Awaiting final outcome…';
+        case 'in-progress':
+          return 'No decisions pending. Operation underway.';
+        default:
+          return 'Mission standing by.';
+      }
+    })();
+    eventPrompt.textContent = statusLabel;
+
+    const idleMessage = document.createElement('p');
+    idleMessage.className = 'mission-event__option-desc';
+    idleMessage.textContent = 'Crew will report in if complications or opportunities arise.';
+    eventChoices.appendChild(idleMessage);
+  }
+
+  const historyEntries = Array.isArray(mission.eventHistory) ? mission.eventHistory : [];
+  if (!historyEntries.length) {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'No events resolved yet.';
+    eventHistory.appendChild(placeholder);
+    return;
+  }
+
+  historyEntries.slice(-5).forEach((entry) => {
+    const item = document.createElement('li');
+    const progressPercent = Number.isFinite(entry?.progressAt)
+      ? `[${Math.round(entry.progressAt * 100)}%] `
+      : '';
+    const summary = entry?.summary ?? `${entry?.eventLabel ?? 'Event'} resolved.`;
+    item.textContent = `${progressPercent}${summary}`;
+    eventHistory.appendChild(item);
+  });
+};
+
 const updateMissionControls = () => {
   const missionSystem = getMissionSystem();
   const economySystem = getEconomySystem();
@@ -2274,6 +2388,10 @@ const updateMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     detailPlayerImpact,
+    eventPrompt,
+    eventChoices,
+    eventHistory,
+    eventStatus,
     crewList,
     vehicleList,
     crackdownText,
@@ -2312,6 +2430,10 @@ const updateMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     detailPlayerImpact,
+    eventPrompt,
+    eventChoices,
+    eventHistory,
+    eventStatus,
     crewList,
     vehicleList,
     crackdownText,
@@ -2533,6 +2655,8 @@ const updateMissionSelect = () => {
       statusLabel = `in progress (${progressPercent}%)`;
     } else if (mission.status === 'awaiting-resolution') {
       statusLabel = 'awaiting outcome';
+    } else if (mission.status === 'decision-required') {
+      statusLabel = `decision pending (${progressPercent}%)`;
     }
 
     const restrictionLabel = mission.restricted ? ' [LOCKED]' : '';
@@ -2546,6 +2670,36 @@ const updateMissionSelect = () => {
   }
 
   renderMissionLog();
+};
+
+const handleMissionEventChoice = (event) => {
+  const target = event?.target;
+  const button = target?.closest ? target.closest('button[data-event-choice]') : null;
+  if (!button) {
+    return;
+  }
+
+  const { eventId, choiceId } = button.dataset;
+  if (!eventId || !choiceId) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  if (!missionSystem) {
+    setMissionEventStatus('Mission control offline — unable to resolve event.');
+    return;
+  }
+
+  const result = missionSystem.chooseMissionEventOption(eventId, choiceId);
+  if (!result) {
+    setMissionEventStatus('Decision could not be processed — event already resolved.');
+  } else {
+    setMissionEventStatus(result.summary ?? 'Decision recorded.');
+  }
+
+  renderMissionEvents();
+  updateMissionStatusText();
+  triggerHudRender();
 };
 
 const handleMissionStart = () => {
@@ -2579,6 +2733,7 @@ const handleMissionStart = () => {
   missionControls.selectedCrewIds = [];
   missionControls.selectedVehicleId = null;
   clearMaintenanceStatusDetail();
+  setMissionEventStatus('Crew standing by for mid-run updates.');
   economySystem.payCrew();
   updateMissionSelect();
   updateMissionControls();
@@ -2734,6 +2889,10 @@ const setupMissionControls = () => {
   missionControls.detailRestriction = document.getElementById('mission-detail-restriction');
   missionControls.detailCrewImpact = document.getElementById('mission-detail-crew-impact');
   missionControls.detailPlayerImpact = document.getElementById('mission-detail-player-impact');
+  missionControls.eventPrompt = document.getElementById('mission-event-prompt');
+  missionControls.eventChoices = document.getElementById('mission-event-choices');
+  missionControls.eventHistory = document.getElementById('mission-event-history');
+  missionControls.eventStatus = document.getElementById('mission-event-status');
   missionControls.crewList = document.getElementById('mission-crew-list');
   missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
@@ -2773,6 +2932,10 @@ const setupMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     detailPlayerImpact,
+    eventPrompt,
+    eventChoices,
+    eventHistory,
+    eventStatus,
     crewList,
     vehicleList,
     crackdownText,
@@ -2861,6 +3024,7 @@ const setupMissionControls = () => {
     clearMaintenanceStatusDetail();
     updateMissionControls();
   });
+  missionControls.eventChoices?.addEventListener('click', handleMissionEventChoice);
   trainingCrewSelect.addEventListener('change', updateTrainingOptions);
   trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
   trainingAttributeSelect?.addEventListener('change', updateTrainingOptions);
@@ -2880,6 +3044,7 @@ const setupMissionControls = () => {
   setRecruitStatus('');
   setTrainingStatus('');
   setPlayerStatus('');
+  setMissionEventStatus('');
   missionControls.safehouseStatusDetail = '';
   clearMaintenanceStatusDetail();
   updateRecruitmentOptions();

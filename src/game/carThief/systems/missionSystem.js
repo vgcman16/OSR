@@ -2,6 +2,7 @@ import { Vehicle } from '../entities/vehicle.js';
 import { CREW_TRAIT_KEYS } from '../entities/crewMember.js';
 import { HeatSystem } from './heatSystem.js';
 import { generateContractsFromDistricts } from './contractFactory.js';
+import { buildMissionEventDeck } from './missionEvents.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
   const numeric = Number(value);
@@ -718,6 +719,9 @@ class MissionSystem {
       assignedVehicleImpact: null,
       assignedVehicleSnapshot: null,
       assignedVehicleLabel: null,
+      eventDeck: [],
+      eventHistory: [],
+      pendingDecision: null,
     };
   }
 
@@ -832,6 +836,251 @@ class MissionSystem {
     return { outcome, roll, successChance };
   }
 
+  initializeMissionEvents(mission) {
+    if (!mission) {
+      return;
+    }
+
+    mission.eventDeck = buildMissionEventDeck(mission);
+    mission.eventHistory = [];
+    mission.pendingDecision = null;
+  }
+
+  advanceMissionEvents(mission) {
+    if (!mission) {
+      return null;
+    }
+
+    if (mission.pendingDecision) {
+      mission.status = 'decision-required';
+      return mission.pendingDecision;
+    }
+
+    const deck = Array.isArray(mission.eventDeck) ? mission.eventDeck : [];
+    const progress = Number.isFinite(mission.progress) ? mission.progress : 0;
+
+    const nextEvent = deck.find((event) => !event.resolved && progress >= event.triggerProgress);
+    if (!nextEvent) {
+      return null;
+    }
+
+    nextEvent.triggered = true;
+    const pendingDecision = {
+      eventId: nextEvent.id,
+      label: nextEvent.label,
+      description: nextEvent.description,
+      triggerProgress: nextEvent.triggerProgress,
+      triggeredAt: Date.now(),
+      choices: nextEvent.choices.map((choice) => ({
+        id: choice.id,
+        label: choice.label,
+        description: choice.description,
+        narrative: choice.narrative ?? null,
+      })),
+    };
+
+    mission.pendingDecision = pendingDecision;
+    mission.status = 'decision-required';
+    return pendingDecision;
+  }
+
+  finalizeMissionProgress(mission) {
+    if (!mission) {
+      return;
+    }
+
+    const duration = sanitizeDuration(mission.duration, mission.difficulty);
+    mission.duration = duration;
+
+    const elapsed = Number.isFinite(mission.elapsedTime) ? mission.elapsedTime : 0;
+    const reachedEnd = elapsed >= duration || (mission.progress ?? 0) >= 1;
+
+    if (!reachedEnd) {
+      mission.progress = Math.min(elapsed / duration, 1);
+      return;
+    }
+
+    mission.progress = 1;
+    mission.elapsedTime = duration;
+    mission.completedAt = mission.completedAt ?? Date.now();
+
+    if (mission.pendingDecision) {
+      mission.status = 'decision-required';
+      return;
+    }
+
+    mission.status = 'awaiting-resolution';
+
+    if (!mission.pendingResolution) {
+      const { outcome } = this.prepareAutomaticResolution(mission);
+      this.resolveMission(mission.id, outcome);
+    }
+  }
+
+  chooseMissionEventOption(eventId, choiceId) {
+    const mission = this.state.activeMission;
+    if (!mission || mission.status === 'completed') {
+      return null;
+    }
+
+    const pending = mission.pendingDecision;
+    if (!pending || pending.eventId !== eventId) {
+      return null;
+    }
+
+    const deck = Array.isArray(mission.eventDeck) ? mission.eventDeck : [];
+    const eventEntry = deck.find((entry) => entry.id === eventId);
+    if (!eventEntry) {
+      return null;
+    }
+
+    const choice = eventEntry.choices.find((entry) => entry.id === choiceId);
+    if (!choice) {
+      return null;
+    }
+
+    const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
+    const assignedCrew = crewPool.filter((member) => mission.assignedCrewIds?.includes(member.id));
+
+    const before = {
+      payout: Number.isFinite(mission.payout) ? mission.payout : 0,
+      heat: Number.isFinite(mission.heat) ? mission.heat : 0,
+      successChance: this.normalizeSuccessChance(mission),
+      duration: sanitizeDuration(mission.duration, mission.difficulty),
+    };
+
+    const effects = choice.effects ?? {};
+
+    if (Number.isFinite(effects.payoutMultiplier)) {
+      mission.payout = Math.max(0, Math.round(mission.payout * effects.payoutMultiplier));
+    }
+
+    if (Number.isFinite(effects.payoutDelta)) {
+      mission.payout = Math.max(0, Math.round(mission.payout + effects.payoutDelta));
+    }
+
+    if (Number.isFinite(effects.heatMultiplier)) {
+      mission.heat = Math.max(0, mission.heat * effects.heatMultiplier);
+    }
+
+    if (Number.isFinite(effects.heatDelta)) {
+      mission.heat = Math.max(0, mission.heat + effects.heatDelta);
+    }
+
+    if (Number.isFinite(effects.successDelta)) {
+      mission.successChance = clamp(mission.successChance + effects.successDelta, 0.01, 0.99);
+    }
+
+    if (Number.isFinite(effects.durationMultiplier)) {
+      const newDuration = Math.max(5, Math.round(before.duration * effects.durationMultiplier));
+      mission.duration = sanitizeDuration(newDuration, mission.difficulty);
+    }
+
+    if (Number.isFinite(effects.durationDelta)) {
+      const newDuration = before.duration + effects.durationDelta;
+      mission.duration = sanitizeDuration(newDuration, mission.difficulty);
+    }
+
+    let crewLoyaltyDelta = 0;
+    if (Number.isFinite(effects.crewLoyaltyDelta) && effects.crewLoyaltyDelta !== 0) {
+      assignedCrew.forEach((member) => {
+        if (!member) {
+          return;
+        }
+
+        if (typeof member.adjustLoyalty === 'function') {
+          member.adjustLoyalty(effects.crewLoyaltyDelta);
+        } else if (Number.isFinite(member.loyalty)) {
+          member.loyalty += effects.crewLoyaltyDelta;
+        }
+
+        crewLoyaltyDelta += effects.crewLoyaltyDelta;
+      });
+    }
+
+    const updatedDuration = sanitizeDuration(mission.duration, mission.difficulty);
+    mission.duration = updatedDuration;
+    const elapsed = Number.isFinite(mission.elapsedTime) ? mission.elapsedTime : 0;
+    mission.progress = Math.min(updatedDuration > 0 ? elapsed / updatedDuration : 0, 1);
+
+    eventEntry.resolved = true;
+    eventEntry.resolvedChoiceId = choice.id;
+    mission.pendingDecision = null;
+    mission.status = 'in-progress';
+
+    const after = {
+      payout: Number.isFinite(mission.payout) ? mission.payout : 0,
+      heat: Number.isFinite(mission.heat) ? mission.heat : 0,
+      successChance: this.normalizeSuccessChance(mission),
+      duration: updatedDuration,
+    };
+
+    const payoutDelta = after.payout - before.payout;
+    const heatDelta = after.heat - before.heat;
+    const successDelta = after.successChance - before.successChance;
+    const durationDelta = after.duration - before.duration;
+
+    const deltaParts = [];
+    if (Math.round(payoutDelta) !== 0) {
+      const amount = Math.abs(Math.round(payoutDelta));
+      deltaParts.push(`Payout ${payoutDelta > 0 ? '+' : '-'}$${amount.toLocaleString()}`);
+    }
+    if (Math.abs(heatDelta) >= 0.05) {
+      deltaParts.push(`${heatDelta > 0 ? '+' : ''}${heatDelta.toFixed(1)} heat`);
+    }
+    if (Math.abs(successDelta) >= 0.005) {
+      deltaParts.push(`${successDelta > 0 ? '+' : ''}${Math.round(successDelta * 100)}% success`);
+    }
+    if (Math.abs(durationDelta) >= 1) {
+      deltaParts.push(`Duration ${durationDelta > 0 ? '+' : ''}${Math.round(durationDelta)}s`);
+    }
+    if (crewLoyaltyDelta !== 0) {
+      deltaParts.push(`Crew loyalty ${crewLoyaltyDelta > 0 ? '+' : ''}${crewLoyaltyDelta} total`);
+    }
+
+    const summaryParts = [];
+    if (choice.narrative) {
+      summaryParts.push(choice.narrative);
+    }
+    if (deltaParts.length) {
+      summaryParts.push(deltaParts.join(', '));
+    }
+
+    const eventSummary = summaryParts.join(' ').trim() || `${choice.label} resolved.`;
+
+    mission.eventHistory = Array.isArray(mission.eventHistory) ? mission.eventHistory : [];
+    const historyEntry = {
+      eventId: eventEntry.id,
+      eventLabel: eventEntry.label,
+      choiceId: choice.id,
+      choiceLabel: choice.label,
+      triggeredAt: pending.triggeredAt ?? Date.now(),
+      resolvedAt: Date.now(),
+      progressAt: pending.triggerProgress ?? mission.progress,
+      summary: eventSummary,
+      deltas: {
+        payout: payoutDelta,
+        heat: heatDelta,
+        successChance: successDelta,
+        duration: durationDelta,
+        crewLoyalty: crewLoyaltyDelta,
+      },
+    };
+    mission.eventHistory.push(historyEntry);
+
+    if (mission.eventHistory.length > 10) {
+      mission.eventHistory = mission.eventHistory.slice(-10);
+    }
+
+    this.advanceMissionEvents(mission);
+
+    if (!mission.pendingDecision && mission.progress >= 1) {
+      this.finalizeMissionProgress(mission);
+    }
+
+    return historyEntry;
+  }
+
   recordMissionTelemetry(mission, outcome) {
     if (!mission) {
       return null;
@@ -859,6 +1108,18 @@ class MissionSystem {
       summary = `${summary} (manual resolution)`;
     }
 
+    const eventHistory = Array.isArray(mission.eventHistory) ? mission.eventHistory : [];
+    if (eventHistory.length) {
+      const highlights = eventHistory
+        .map((entry) => {
+          const eventLabel = entry?.eventLabel ?? 'Event';
+          const choiceLabel = entry?.choiceLabel ?? 'choice';
+          return `${eventLabel}: ${choiceLabel}`;
+        })
+        .join('; ');
+      summary = `${summary} — Events: ${highlights}`;
+    }
+
     mission.resolutionDetails = {
       outcome,
       roll,
@@ -884,6 +1145,14 @@ class MissionSystem {
       automatic,
       timestamp,
       summary,
+      events: eventHistory.map((entry) => ({
+        eventId: entry?.eventId ?? null,
+        eventLabel: entry?.eventLabel ?? null,
+        choiceId: entry?.choiceId ?? null,
+        choiceLabel: entry?.choiceLabel ?? null,
+        summary: entry?.summary ?? null,
+        resolvedAt: entry?.resolvedAt ?? null,
+      })),
     };
 
     this.state.missionLog.unshift(entry);
@@ -1214,6 +1483,8 @@ class MissionSystem {
     mission.startedAt = Date.now();
     mission.elapsedTime = 0;
     mission.progress = 0;
+    this.initializeMissionEvents(mission);
+    this.advanceMissionEvents(mission);
     this.state.activeMission = mission;
     return mission;
   }
@@ -1385,6 +1656,10 @@ class MissionSystem {
     });
 
     this.recordMissionTelemetry(mission, outcome);
+
+    mission.pendingDecision = null;
+    mission.eventDeck = [];
+    mission.eventHistory = [];
 
     mission.assignedCrewIds = [];
     mission.assignedCrewImpact = null;
@@ -1740,7 +2015,24 @@ class MissionSystem {
     this.syncHeatTier();
 
     const mission = this.state.activeMission;
-    if (!mission || mission.status !== 'in-progress') {
+    if (!mission || mission.status === 'completed') {
+      return;
+    }
+
+    if (mission.pendingDecision) {
+      mission.status = 'decision-required';
+      return;
+    }
+
+    if (mission.status === 'awaiting-resolution') {
+      if (!mission.pendingResolution) {
+        const { outcome } = this.prepareAutomaticResolution(mission);
+        this.resolveMission(mission.id, outcome);
+      }
+      return;
+    }
+
+    if (mission.status === 'decision-required') {
       return;
     }
 
@@ -1749,16 +2041,15 @@ class MissionSystem {
     mission.duration = duration;
     mission.progress = Math.min(mission.elapsedTime / duration, 1);
 
-    if (mission.progress >= 1) {
-      mission.progress = 1;
-      mission.elapsedTime = duration;
+    this.advanceMissionEvents(mission);
 
-      if (mission.status !== 'completed') {
-        mission.status = 'awaiting-resolution';
-        mission.completedAt = mission.completedAt ?? Date.now();
-        const { outcome } = this.prepareAutomaticResolution(mission);
-        this.resolveMission(mission.id, outcome);
-      }
+    if (mission.pendingDecision) {
+      mission.status = 'decision-required';
+      return;
+    }
+
+    if (mission.progress >= 1) {
+      this.finalizeMissionProgress(mission);
     }
   }
 }
