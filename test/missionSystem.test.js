@@ -306,6 +306,171 @@ test('mission event deck favors low-risk events for easier contracts', () => {
   }
 });
 
+test('mission event deck surfaces low-risk lockdown responses', () => {
+  const state = createState();
+  const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
+
+  const template = {
+    id: 'lockdown-low-risk',
+    name: 'Lockdown Low-Risk Probe',
+    difficulty: 2,
+    payout: 9_000,
+    heat: 1,
+    duration: 32,
+    riskTier: 'low',
+  };
+
+  const mission = missionSystem.createMissionFromTemplate(template);
+  mission.crackdownTier = 'lockdown';
+
+  missionSystem.initializeMissionEvents(mission);
+  const deck = mission.eventDeck;
+
+  assert.ok(
+    deck.some((event) => event.id === 'lockdown-hush-route'),
+    'lockdown hush route event appears for low-risk lockdown missions',
+  );
+});
+
+test('safehouse facilities unlock perk-driven mission events', () => {
+  const facilitySafehouse = new Safehouse({
+    id: 'facility-safehouse',
+    owned: true,
+    tierIndex: 0,
+    tiers: [
+      {
+        level: 0,
+        storageCapacity: 4,
+        heatReduction: 0.2,
+        amenities: [
+          { id: 'dead-drop-network', status: 'active' },
+          { id: 'workshop-bays', status: 'active' },
+        ],
+      },
+    ],
+  });
+
+  const stateWithFacility = createState();
+  stateWithFacility.safehouses = new SafehouseCollection([facilitySafehouse]);
+  stateWithFacility.player = { safehouseId: facilitySafehouse.id };
+  const missionSystemWithFacility = new MissionSystem(stateWithFacility, {
+    heatSystem: new HeatSystem(stateWithFacility),
+  });
+
+  const template = {
+    id: 'safehouse-event-check',
+    name: 'Safehouse Event Check',
+    difficulty: 2,
+    payout: 10_000,
+    heat: 1,
+    duration: 30,
+    riskTier: 'moderate',
+  };
+
+  const missionWithFacility = missionSystemWithFacility.createMissionFromTemplate({ ...template });
+  missionWithFacility.crackdownTier = 'alert';
+  missionSystemWithFacility.initializeMissionEvents(missionWithFacility, { safehouse: facilitySafehouse });
+  const deckWithFacility = missionWithFacility.eventDeck;
+
+  assert.ok(
+    deckWithFacility.some((event) => event.id === 'safehouse-dead-drop'),
+    'dead drop event appears when safehouse facility is active',
+  );
+  assert.ok(
+    deckWithFacility.some((event) => event.id === 'safehouse-workshop-call'),
+    'workshop call event appears when workshop bays are active',
+  );
+
+  const bareSafehouse = new Safehouse({
+    id: 'bare-safehouse',
+    owned: true,
+    tierIndex: 0,
+    tiers: [
+      {
+        level: 0,
+        storageCapacity: 4,
+        heatReduction: 0.1,
+        amenities: [],
+      },
+    ],
+  });
+
+  const stateWithoutFacility = createState();
+  stateWithoutFacility.safehouses = new SafehouseCollection([bareSafehouse]);
+  stateWithoutFacility.player = { safehouseId: bareSafehouse.id };
+  const missionSystemWithoutFacility = new MissionSystem(stateWithoutFacility, {
+    heatSystem: new HeatSystem(stateWithoutFacility),
+  });
+
+  const missionWithoutFacility = missionSystemWithoutFacility.createMissionFromTemplate({ ...template, id: 'safehouse-event-check-2' });
+  missionWithoutFacility.crackdownTier = 'alert';
+  missionSystemWithoutFacility.initializeMissionEvents(missionWithoutFacility, { safehouse: bareSafehouse });
+  const deckWithoutFacility = missionWithoutFacility.eventDeck;
+
+  assert.ok(
+    !deckWithoutFacility.some((event) => event.id === 'safehouse-dead-drop'),
+    'dead drop event is gated when facility is unavailable',
+  );
+  assert.ok(
+    !deckWithoutFacility.some((event) => event.id === 'safehouse-workshop-call'),
+    'workshop tune-up event is gated when facility is unavailable',
+  );
+});
+
+test('crew specialty hooks unlock matching mission events', () => {
+  const hacker = new CrewMember({
+    id: 'crew-hacker',
+    name: 'Cipher',
+    specialty: 'hacker',
+    traits: { stealth: 3, tech: 5, driving: 1, tactics: 2, charisma: 1, muscle: 1 },
+  });
+
+  const stateWithHacker = createState();
+  stateWithHacker.crew = [hacker];
+  const missionSystemWithHacker = new MissionSystem(stateWithHacker, {
+    heatSystem: new HeatSystem(stateWithHacker),
+  });
+
+  const template = {
+    id: 'crew-specialty-check',
+    name: 'Crew Specialty Check',
+    difficulty: 3,
+    payout: 12_000,
+    heat: 2,
+    duration: 36,
+    riskTier: 'moderate',
+  };
+
+  const missionWithHacker = missionSystemWithHacker.createMissionFromTemplate({ ...template });
+  missionWithHacker.crackdownTier = 'alert';
+  missionWithHacker.assignedCrewIds = [hacker.id];
+  missionSystemWithHacker.initializeMissionEvents(missionWithHacker, { assignedCrew: [hacker] });
+  const deckWithHacker = missionWithHacker.eventDeck;
+
+  assert.ok(
+    deckWithHacker.some((event) => event.id === 'crew-hacker-pivot'),
+    'hacker pivot event appears when a hacker is assigned',
+  );
+
+  const stateWithoutSpecialist = createState();
+  const missionSystemWithoutSpecialist = new MissionSystem(stateWithoutSpecialist, {
+    heatSystem: new HeatSystem(stateWithoutSpecialist),
+  });
+
+  const missionWithoutSpecialist = missionSystemWithoutSpecialist.createMissionFromTemplate({
+    ...template,
+    id: 'crew-specialty-check-2',
+  });
+  missionWithoutSpecialist.crackdownTier = 'alert';
+  missionSystemWithoutSpecialist.initializeMissionEvents(missionWithoutSpecialist, { assignedCrew: [] });
+  const deckWithoutSpecialist = missionWithoutSpecialist.eventDeck;
+
+  assert.ok(
+    !deckWithoutSpecialist.some((event) => event.id === 'crew-hacker-pivot'),
+    'hacker pivot event stays hidden without matching crew',
+  );
+});
+
 test('future debt event effects deduct from next successful mission payout', (t) => {
   const state = createState();
   const heatSystem = new HeatSystem(state);

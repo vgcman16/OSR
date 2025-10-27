@@ -1234,6 +1234,26 @@ const formatEventEffectSummary = (effects) => {
   return parts.join(', ');
 };
 
+const formatEventBadgeLabel = (badge) => {
+  if (!badge || typeof badge !== 'object') {
+    return '';
+  }
+
+  const icon = typeof badge.icon === 'string' && badge.icon.trim() ? badge.icon.trim() : '';
+  const label = typeof badge.label === 'string' && badge.label.trim() ? badge.label.trim() : '';
+  if (icon && label) {
+    return `${icon} ${label}`;
+  }
+  if (label) {
+    return label;
+  }
+  if (icon) {
+    return icon;
+  }
+  const type = typeof badge.type === 'string' && badge.type.trim() ? badge.type.trim() : '';
+  return type;
+};
+
 const updateSafehousePanel = () => {
   const {
     safehouseName,
@@ -3846,6 +3866,27 @@ const renderMissionEvents = () => {
       : '';
     eventPrompt.textContent = `${pending.label}${progressPercent}${description}`.trim();
 
+    if (Array.isArray(pending.badges) && pending.badges.length) {
+      const badgeRow = document.createElement('div');
+      badgeRow.className = 'mission-event__badges';
+      pending.badges.forEach((badge) => {
+        const label = formatEventBadgeLabel(badge);
+        if (!label) {
+          return;
+        }
+        const badgeEl = document.createElement('span');
+        badgeEl.className = 'mission-event__badge';
+        if (badge?.type) {
+          badgeEl.className += ` mission-event__badge--${badge.type}`;
+        }
+        badgeEl.textContent = label;
+        badgeRow.appendChild(badgeEl);
+      });
+      if (badgeRow.childNodes.length) {
+        eventChoices.appendChild(badgeRow);
+      }
+    }
+
     pending.choices
       .map((choice) => ({
         id: choice.id,
@@ -3916,8 +3957,15 @@ const renderMissionEvents = () => {
       : '';
     const summary = entry?.summary ?? `${entry?.eventLabel ?? 'Event'} resolved.`;
     const effectSummary = typeof entry?.effectSummary === 'string' ? entry.effectSummary.trim() : '';
+    const badgeSummary = Array.isArray(entry?.eventBadges) && entry.eventBadges.length
+      ? entry.eventBadges
+          .map((badge) => formatEventBadgeLabel(badge))
+          .filter((label) => label)
+          .join(' | ')
+      : '';
     const detail = effectSummary ? ` (${effectSummary})` : '';
-    item.textContent = `${progressPercent}${summary}${detail}`;
+    const badgeDetail = badgeSummary ? ` [${badgeSummary}]` : '';
+    item.textContent = `${progressPercent}${summary}${badgeDetail}${detail}`;
     eventHistory.appendChild(item);
   });
 };
