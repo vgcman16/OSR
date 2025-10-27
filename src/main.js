@@ -5,6 +5,8 @@ import {
   PLAYER_SKILL_CONFIG,
   PLAYER_GEAR_CATALOG,
   VEHICLE_UPGRADE_CATALOG,
+  getNotorietyProfile,
+  getNextNotorietyProfile,
 } from './game/carThief/systems/missionSystem.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
@@ -806,21 +808,41 @@ const findDistrictForMission = (districts, mission) => {
   return null;
 };
 
-const determineDistrictRiskTier = (securityScore) => {
+const DISTRICT_RISK_TIER_ORDER = ['low', 'moderate', 'high'];
+
+const shiftRiskTier = (tier, shift = 0) => {
+  const index = DISTRICT_RISK_TIER_ORDER.indexOf(tier);
+  const baseIndex = index === -1 ? 0 : index;
+  const offset = Number.isFinite(shift) ? Math.trunc(shift) : 0;
+  const nextIndex = Math.max(0, Math.min(DISTRICT_RISK_TIER_ORDER.length - 1, baseIndex + offset));
+  return DISTRICT_RISK_TIER_ORDER[nextIndex];
+};
+
+const determineDistrictRiskTier = (securityScore, notorietyProfile = null) => {
   const normalized = Number(securityScore);
   if (!Number.isFinite(normalized)) {
     return null;
   }
 
+  let tier = 'low';
   if (normalized >= 4) {
-    return 'high';
+    tier = 'high';
+  } else if (normalized >= 3) {
+    tier = 'moderate';
   }
 
-  if (normalized >= 3) {
-    return 'moderate';
+  const missionSystem = getMissionSystem();
+  const profile =
+    notorietyProfile ??
+    (missionSystem && typeof missionSystem.getPlayerNotorietyProfile === 'function'
+      ? missionSystem.getPlayerNotorietyProfile()
+      : getNotorietyProfile(getSharedState()?.player?.notoriety ?? 0));
+
+  if (profile && Number.isFinite(profile.riskShift) && profile.riskShift > 0) {
+    tier = shiftRiskTier(tier, profile.riskShift);
   }
 
-  return 'low';
+  return tier;
 };
 
 const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeMission = null } = {}) => {
@@ -2990,6 +3012,41 @@ const describePlayerSkillLevel = (skillKey, levelValue) => {
   return adjustments.length ? `${label} — ${adjustments.join(', ')}` : `${label} — steady influence`;
 };
 
+const describeNotorietyLevel = (value) => {
+  const notoriety = Number.isFinite(value) ? Math.max(0, value) : 0;
+  const profile = getNotorietyProfile(notoriety);
+  const nextProfile = getNextNotorietyProfile(notoriety);
+
+  const effectParts = [];
+  if (Number.isFinite(profile.payoutBonus) && profile.payoutBonus !== 0) {
+    effectParts.push(`payout +${Math.round(profile.payoutBonus * 100)}%`);
+  }
+  if (Number.isFinite(profile.heatMultiplier) && profile.heatMultiplier !== 1) {
+    const heatDeltaPercent = Math.round((profile.heatMultiplier - 1) * 100);
+    effectParts.push(`heat +${heatDeltaPercent}%`);
+  }
+  if (Number.isFinite(profile.difficultyDelta) && profile.difficultyDelta !== 0) {
+    effectParts.push(`difficulty +${profile.difficultyDelta}`);
+  }
+  if (Number.isFinite(profile.riskShift) && profile.riskShift > 0) {
+    effectParts.push('risk tier jumps faster');
+  }
+  if (Number.isFinite(profile.crackdownPressure) && profile.crackdownPressure > 0) {
+    effectParts.push(`crackdown heat bias +${profile.crackdownPressure.toFixed(1)}`);
+  }
+
+  const effectsSummary = effectParts.length
+    ? ` Effects: ${effectParts.join(', ')}.`
+    : ' Effects: Standard terms.';
+
+  const nextTierSummary = nextProfile
+    ? ` Next tier (${nextProfile.label}) at ${nextProfile.min} notoriety.`
+    : ' Maximum notoriety tier reached.';
+
+  const rounded = Math.round(notoriety);
+  return `Notoriety: ${rounded} — ${profile.label}. ${profile.summary} ${effectsSummary}${nextTierSummary}`;
+};
+
 const updatePlayerDevelopmentPanel = () => {
   const {
     playerStatsList,
@@ -3022,7 +3079,7 @@ const updatePlayerDevelopmentPanel = () => {
 
     const notorietyValue = Number.isFinite(player.notoriety) ? player.notoriety : 0;
     const notorietyItem = document.createElement('li');
-    notorietyItem.textContent = `Notoriety: ${notorietyValue}`;
+    notorietyItem.textContent = describeNotorietyLevel(notorietyValue);
     playerStatsList.appendChild(notorietyItem);
 
     PLAYER_SKILL_OPTIONS.forEach((option) => {
