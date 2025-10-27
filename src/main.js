@@ -26,6 +26,8 @@ const missionControls = {
   detailPayout: null,
   detailHeat: null,
   detailDuration: null,
+  detailRestriction: null,
+  crackdownText: null,
 };
 
 let missionControlSyncHandle = null;
@@ -34,6 +36,7 @@ const CONTROL_SYNC_INTERVAL_MS = 500;
 
 const getMissionSystem = () => gameInstance?.systems?.mission ?? null;
 const getEconomySystem = () => gameInstance?.systems?.economy ?? null;
+const getHeatSystem = () => gameInstance?.systems?.heat ?? null;
 
 const triggerHudRender = () => {
   if (gameInstance?.loop?.render) {
@@ -41,15 +44,24 @@ const triggerHudRender = () => {
   }
 };
 
-const setMissionDetails = ({ description, payout, heat, duration }) => {
+const setMissionDetails = ({ description, payout, heat, duration, restriction }) => {
   const {
     detailDescription,
     detailPayout,
     detailHeat,
     detailDuration,
+    detailRestriction,
   } = missionControls;
 
-  if (!(detailDescription && detailPayout && detailHeat && detailDuration)) {
+  if (
+    !(
+      detailDescription &&
+      detailPayout &&
+      detailHeat &&
+      detailDuration &&
+      detailRestriction
+    )
+  ) {
     return;
   }
 
@@ -57,6 +69,7 @@ const setMissionDetails = ({ description, payout, heat, duration }) => {
   detailPayout.textContent = payout;
   detailHeat.textContent = heat;
   detailDuration.textContent = duration;
+  detailRestriction.textContent = restriction;
 };
 
 const resetMissionDetails = (descriptionText) => {
@@ -65,6 +78,7 @@ const resetMissionDetails = (descriptionText) => {
     payout: '—',
     heat: '—',
     duration: '—',
+    restriction: 'All contracts are currently open.',
   });
 };
 
@@ -90,6 +104,33 @@ const formatMissionStatusMessage = (mission) => {
   }
 };
 
+const describeCrackdownPolicy = () => {
+  const missionSystem = getMissionSystem();
+  const heatSystem = getHeatSystem();
+
+  if (!missionSystem && !heatSystem) {
+    return null;
+  }
+
+  const policy = missionSystem?.getCurrentCrackdownPolicy?.();
+  const tierName = missionSystem?.currentCrackdownTier ?? heatSystem?.getCurrentTier?.();
+
+  const label = policy?.label ?? (tierName ? tierName.charAt(0).toUpperCase() + tierName.slice(1) : 'Calm');
+  let impact;
+
+  if (!policy || !Number.isFinite(policy.maxMissionHeat)) {
+    impact = 'All contracts are open.';
+  } else {
+    impact = `Contracts generating more than ${policy.maxMissionHeat} heat are grounded.`;
+  }
+
+  return {
+    tierName: tierName ?? 'calm',
+    label,
+    impact,
+  };
+};
+
 const updateMissionStatusText = () => {
   if (!missionControls.statusText) {
     return;
@@ -102,7 +143,30 @@ const updateMissionStatusText = () => {
   }
 
   const activeMission = missionSystem.state.activeMission;
-  missionControls.statusText.textContent = formatMissionStatusMessage(activeMission);
+  let statusMessage = formatMissionStatusMessage(activeMission);
+
+  const crackdownInfo = describeCrackdownPolicy();
+  if (crackdownInfo) {
+    const crackdownSentence = `Crackdown: ${crackdownInfo.label} — ${crackdownInfo.impact}`;
+    statusMessage = `${statusMessage} ${crackdownSentence}`.trim();
+  }
+
+  missionControls.statusText.textContent = statusMessage;
+};
+
+const updateCrackdownIndicator = () => {
+  const { crackdownText } = missionControls;
+  if (!crackdownText) {
+    return;
+  }
+
+  const crackdownInfo = describeCrackdownPolicy();
+  if (!crackdownInfo) {
+    crackdownText.textContent = 'Crackdown systems calibrating…';
+    return;
+  }
+
+  crackdownText.textContent = `Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`;
 };
 
 const updateMissionControls = () => {
@@ -117,10 +181,19 @@ const updateMissionControls = () => {
     detailPayout,
     detailHeat,
     detailDuration,
+    detailRestriction,
+    crackdownText,
   } = missionControls;
 
   const controls = [select, startButton, successButton, failureButton];
-  const detailElements = [detailDescription, detailPayout, detailHeat, detailDuration];
+  const detailElements = [
+    detailDescription,
+    detailPayout,
+    detailHeat,
+    detailDuration,
+    detailRestriction,
+    crackdownText,
+  ];
   const controlsReady = [...controls, ...detailElements].every(Boolean);
 
   if (!controlsReady) {
@@ -141,8 +214,11 @@ const updateMissionControls = () => {
       : 'Mission database initializing…';
     resetMissionDetails(descriptionText);
     updateMissionStatusText();
+    updateCrackdownIndicator();
     return;
   }
+
+  updateCrackdownIndicator();
 
   const selectedMissionId = select.value;
   const selectedMission = missionSystem.availableMissions.find(
@@ -157,11 +233,13 @@ const updateMissionControls = () => {
   );
 
   const isMissionAvailable = Boolean(selectedMission && selectedMission.status === 'available');
+  const isMissionRestricted = Boolean(selectedMission && selectedMission.restricted);
   const isAnotherMissionRunning = Boolean(
     activeMission && activeMission.id !== selectedMissionId && activeMission.status !== 'completed',
   );
 
-  startButton.disabled = !isReady || !isMissionAvailable || isAnotherMissionRunning;
+  startButton.disabled =
+    !isReady || !isMissionAvailable || isAnotherMissionRunning || isMissionRestricted;
   successButton.disabled = !missionReadyForOutcome;
   failureButton.disabled = !missionCanFail;
 
@@ -178,12 +256,19 @@ const updateMissionControls = () => {
     const missionDuration = Number.isFinite(selectedMission.duration)
       ? `${Math.round(selectedMission.duration)}s`
       : '—';
+    const crackdownInfo = describeCrackdownPolicy();
+    const restrictionMessage = selectedMission.restricted
+      ? selectedMission.restrictionReason ?? 'This contract is locked by the current crackdown.'
+      : crackdownInfo
+        ? `Eligible under the ${crackdownInfo.label.toLowerCase()} crackdown.`
+        : 'All contracts are open.';
 
     setMissionDetails({
       description: missionDescription,
       payout: missionPayout,
       heat: missionHeat,
       duration: missionDuration,
+      restriction: restrictionMessage,
     });
   }
 
@@ -229,7 +314,8 @@ const updateMissionSelect = () => {
       statusLabel = 'awaiting outcome';
     }
 
-    option.textContent = `${mission.name} — $${mission.payout.toLocaleString()} (${statusLabel})`;
+    const restrictionLabel = mission.restricted ? ' [LOCKED]' : '';
+    option.textContent = `${mission.name} — $${mission.payout.toLocaleString()} (${statusLabel})${restrictionLabel}`;
     option.selected = selectionStillValid && mission.id === previousSelection;
     select.appendChild(option);
   });
@@ -298,6 +384,8 @@ const setupMissionControls = () => {
   missionControls.detailPayout = document.getElementById('mission-detail-payout');
   missionControls.detailHeat = document.getElementById('mission-detail-heat');
   missionControls.detailDuration = document.getElementById('mission-detail-duration');
+  missionControls.detailRestriction = document.getElementById('mission-detail-restriction');
+  missionControls.crackdownText = document.getElementById('mission-crackdown-text');
 
   const {
     select,
@@ -308,6 +396,8 @@ const setupMissionControls = () => {
     detailPayout,
     detailHeat,
     detailDuration,
+    detailRestriction,
+    crackdownText,
   } = missionControls;
 
   const controlsReady = [
@@ -319,6 +409,8 @@ const setupMissionControls = () => {
     detailPayout,
     detailHeat,
     detailDuration,
+    detailRestriction,
+    crackdownText,
   ].every(Boolean);
 
   if (!controlsReady) {

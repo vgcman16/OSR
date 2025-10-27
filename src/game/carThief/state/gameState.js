@@ -8,6 +8,7 @@ class GameState {
     day = 1,
     funds = 5000,
     heat = 0,
+    heatTier = 'calm',
     player = new Player({ name: 'The Wheelman' }),
     crew = [],
     garage = [],
@@ -17,6 +18,7 @@ class GameState {
     this.day = day;
     this.funds = funds;
     this.heat = heat;
+    this.heatTier = heatTier;
     this.player = player;
     this.crew = crew;
     this.garage = garage;
