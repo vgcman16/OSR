@@ -1,4 +1,5 @@
 import { getActiveSafehouseFromState } from '../world/safehouse.js';
+import { computeSafehouseFacilityBonuses } from '../world/safehouseEffects.js';
 
 const defaultHeatTiers = [
   { name: 'calm', label: 'Calm', threshold: 0 },
@@ -36,7 +37,13 @@ class HeatSystem {
     }
 
     const reduction = safehouse.getHeatReduction();
-    return Number.isFinite(reduction) ? reduction : 0;
+    const facilityBonuses = computeSafehouseFacilityBonuses(safehouse);
+    const facilityReduction = Number.isFinite(facilityBonuses.dailyHeatReductionBonus)
+      ? facilityBonuses.dailyHeatReductionBonus
+      : 0;
+
+    const safeReduction = Number.isFinite(reduction) ? reduction : 0;
+    return safeReduction + facilityReduction;
   }
 
   applySafehouseDailyMitigation() {

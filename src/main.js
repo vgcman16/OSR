@@ -8,6 +8,7 @@ import {
 } from './game/carThief/systems/missionSystem.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
+import { computeSafehouseFacilityBonuses, getFacilityEffectConfig } from './game/carThief/world/safehouseEffects.js';
 
 let gameInstance = null;
 
@@ -267,6 +268,57 @@ const summarizeCrewReadiness = (member) => {
   };
 };
 
+const describeFacilityEffectLine = (facility, { prefix = 'Facility', isActive = false } = {}) => {
+  if (!facility) {
+    return null;
+  }
+
+  const config = getFacilityEffectConfig(facility.id);
+  const name = facility.name ?? config?.name ?? 'Facility';
+  const effectParts = [];
+
+  if (config) {
+    if (Number.isFinite(config.passiveIncomeBonus) && config.passiveIncomeBonus !== 0) {
+      const incomeLabel = `${config.passiveIncomeBonus >= 0 ? '+' : '-'}${formatCurrency(Math.abs(config.passiveIncomeBonus))}`;
+      effectParts.push(`${incomeLabel} passive income/day`);
+    }
+    if (Number.isFinite(config.overheadModifierBonus) && config.overheadModifierBonus !== 0) {
+      const overheadLabel = `${config.overheadModifierBonus <= 0 ? '-' : '+'}${formatCurrency(Math.abs(config.overheadModifierBonus))}`;
+      effectParts.push(`${overheadLabel} daily overhead`);
+    }
+    if (Number.isFinite(config.dailyHeatReductionBonus) && config.dailyHeatReductionBonus > 0) {
+      effectParts.push(`-${config.dailyHeatReductionBonus.toFixed(2)} heat/day`);
+    }
+    if (Number.isFinite(config.crewRestBonus) && config.crewRestBonus > 0) {
+      effectParts.push(`+${Math.round(config.crewRestBonus * 100)}% crew rest recovery`);
+    }
+  }
+
+  if (!effectParts.length && (facility.summary || config?.summary)) {
+    effectParts.push(facility.summary ?? config?.summary ?? '');
+  }
+
+  let line = `${prefix}: ${name}`;
+  const detail = effectParts.filter(Boolean).join('; ');
+  if (detail) {
+    line += ` — ${detail}`;
+  }
+
+  if (isActive) {
+    if (facility.status && facility.status.toLowerCase() !== 'active') {
+      line += ` (Active — status: ${facility.status})`;
+    } else {
+      line += ' (Active)';
+    }
+  } else if (facility.status) {
+    line += ` (Status: ${facility.status})`;
+  } else {
+    line += ' (Locked)';
+  }
+
+  return line;
+};
+
 const describeSafehouseTierEffects = (tier, safehouse = null) => {
   const effectLines = [];
 
@@ -317,6 +369,9 @@ const describeSafehouseTierEffects = (tier, safehouse = null) => {
     );
   }
 
+  const facilityBonuses = safehouse ? computeSafehouseFacilityBonuses(safehouse) : null;
+  const activeFacilityIds = new Set(facilityBonuses?.activeFacilityIds ?? []);
+
   const amenities = safehouse?.getUnlockedAmenities?.()
     ? safehouse.getUnlockedAmenities()
     : Array.isArray(tier?.amenities)
@@ -324,8 +379,13 @@ const describeSafehouseTierEffects = (tier, safehouse = null) => {
       : [];
   if (amenities.length) {
     amenities.forEach((amenity) => {
-      const summary = amenity.summary ? ` — ${amenity.summary}` : '';
-      effectLines.push(`Amenity: ${amenity.name ?? 'Facility'}${summary}`);
+      const line = describeFacilityEffectLine(amenity, {
+        prefix: 'Amenity',
+        isActive: activeFacilityIds.has(amenity.id),
+      });
+      if (line) {
+        effectLines.push(line);
+      }
     });
   } else {
     effectLines.push('No safehouse amenities installed yet.');
@@ -338,8 +398,13 @@ const describeSafehouseTierEffects = (tier, safehouse = null) => {
       : [];
   if (activeProjects.length) {
     activeProjects.forEach((project) => {
-      const summary = project.summary ? ` — ${project.summary}` : '';
-      effectLines.push(`Project: ${project.name ?? 'Facility upgrade'}${summary}`);
+      const line = describeFacilityEffectLine(project, {
+        prefix: 'Project',
+        isActive: activeFacilityIds.has(project.id),
+      });
+      if (line) {
+        effectLines.push(line);
+      }
     });
   }
 
