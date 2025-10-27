@@ -5,7 +5,7 @@ import { generateContractsFromDistricts, generateFalloutContracts } from './cont
 import { buildMissionEventDeck } from './missionEvents.js';
 import { getAvailableCrewStorylineMissions, applyCrewStorylineOutcome } from './crewStorylines.js';
 import { getCrackdownOperationTemplates } from './crackdownOperations.js';
-import { getActiveStorageCapacityFromState } from '../world/safehouse.js';
+import { getActiveStorageCapacityFromState, getActiveSafehouseFromState } from '../world/safehouse.js';
 import { getCrewPerkEffect } from './crewPerks.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
@@ -1369,7 +1369,7 @@ class MissionSystem {
     return { outcome, roll, successChance };
   }
 
-  initializeMissionEvents(mission) {
+  initializeMissionEvents(mission, context = {}) {
     if (!mission) {
       return;
     }
@@ -1385,7 +1385,16 @@ class MissionSystem {
       mission.crackdownTier = crackdownTier;
     }
 
-    mission.eventDeck = buildMissionEventDeck({ ...mission, crackdownTier });
+    let assignedCrew = Array.isArray(context.assignedCrew) ? context.assignedCrew.slice() : null;
+    if (!assignedCrew || !assignedCrew.length) {
+      const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
+      assignedCrew = crewPool.filter((member) => mission.assignedCrewIds?.includes(member?.id));
+    }
+
+    const safehouse =
+      context.safehouse ?? (this.state ? getActiveSafehouseFromState(this.state) : null);
+
+    mission.eventDeck = buildMissionEventDeck({ ...mission, crackdownTier }, { assignedCrew, safehouse });
     mission.eventHistory = [];
     mission.pendingDecision = null;
   }
@@ -1416,6 +1425,9 @@ class MissionSystem {
       triggerProgress: nextEvent.triggerProgress,
       triggeredAt: Date.now(),
       poiContext: nextEvent.poiContext ?? null,
+      badges: Array.isArray(nextEvent.badges)
+        ? nextEvent.badges.map((badge) => ({ ...badge }))
+        : [],
       choices: nextEvent.choices.map((choice) => ({
         id: choice.id,
         label: choice.label,
@@ -1651,6 +1663,9 @@ class MissionSystem {
       progressAt: pending.triggerProgress ?? mission.progress,
       summary: eventSummary,
       effectSummary: deltaParts.length ? deltaParts.join(', ') : null,
+      eventBadges: Array.isArray(eventEntry.badges)
+        ? eventEntry.badges.map((badge) => ({ ...badge }))
+        : [],
       effects:
         typeof choice.effects === 'object' && choice.effects !== null
           ? { ...choice.effects }
@@ -2312,7 +2327,8 @@ class MissionSystem {
     mission.startedAt = Date.now();
     mission.elapsedTime = 0;
     mission.progress = 0;
-    this.initializeMissionEvents(mission);
+    const activeSafehouse = getActiveSafehouseFromState(this.state);
+    this.initializeMissionEvents(mission, { assignedCrew, safehouse: activeSafehouse });
     this.advanceMissionEvents(mission);
     this.state.activeMission = mission;
     return mission;

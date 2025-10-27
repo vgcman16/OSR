@@ -36,6 +36,22 @@ const normalizeTierList = (list, normalizer = normalizeString) => {
   return Array.from(new Set(normalized));
 };
 
+const normalizeIdList = (list, normalizer = normalizeString) => {
+  if (!Array.isArray(list)) {
+    return null;
+  }
+
+  const normalized = list
+    .map((item) => normalizer(item))
+    .filter((item) => typeof item === 'string' && item.length);
+
+  if (!normalized.length) {
+    return null;
+  }
+
+  return Array.from(new Set(normalized));
+};
+
 const normalizeWeightMap = (mapping, normalizer = normalizeString) => {
   if (!mapping || typeof mapping !== 'object') {
     return {};
@@ -77,6 +93,70 @@ const normalizeCrackdownTier = (value) => {
     return normalized;
   }
   return null;
+};
+
+const isFacilityActive = (facility) => {
+  if (!facility || typeof facility !== 'object') {
+    return false;
+  }
+
+  const status = normalizeString(facility.status);
+  if (!status) {
+    return true;
+  }
+
+  return (
+    status === 'active' ||
+    status === 'online' ||
+    status === 'ready' ||
+    status === 'fabricating' ||
+    status === 'operational'
+  );
+};
+
+const collectSafehouseFacilityIds = (safehouse) => {
+  if (!safehouse) {
+    return [];
+  }
+
+  const facilities = new Set();
+
+  const addFacilitiesFromList = (list) => {
+    if (!Array.isArray(list)) {
+      return;
+    }
+
+    list.forEach((facility) => {
+      if (!facility) {
+        return;
+      }
+
+      const id = normalizeString(facility.id);
+      if (!id) {
+        return;
+      }
+
+      if (!isFacilityActive(facility)) {
+        return;
+      }
+
+      facilities.add(id);
+    });
+  };
+
+  if (typeof safehouse.getUnlockedAmenities === 'function') {
+    addFacilitiesFromList(safehouse.getUnlockedAmenities());
+  } else if (Array.isArray(safehouse.amenities)) {
+    addFacilitiesFromList(safehouse.amenities);
+  }
+
+  if (typeof safehouse.getActiveProjects === 'function') {
+    addFacilitiesFromList(safehouse.getActiveProjects());
+  } else if (Array.isArray(safehouse.projects)) {
+    addFacilitiesFromList(safehouse.projects);
+  }
+
+  return Array.from(facilities);
 };
 
 const missionEventTable = [
@@ -373,6 +453,198 @@ const missionEventTable = [
       },
     ],
   },
+  {
+    id: 'lockdown-hush-route',
+    label: 'Lockdown Hush Route',
+    description:
+      'Emergency barricades force detours, but a chain of shuttered alleys stays unwatched.',
+    triggerProgress: 0.42,
+    minDifficulty: 1,
+    maxDifficulty: 3,
+    riskTiers: ['low'],
+    crackdownTiers: ['lockdown'],
+    baseWeight: 1.25,
+    difficultyBandWeights: { low: 1.2 },
+    crackdownTierWeights: { lockdown: 1.1 },
+    badges: [{ type: 'lockdown', icon: '🚨', label: 'Lockdown Gambit' }],
+    choices: [
+      {
+        id: 'lockdown-hush-route-shadow',
+        label: 'Slip through shuttered alleys',
+        description: 'Follow the quiet cut-through, letting spotters scrub the patrol feeds.',
+        narrative: 'Crew ghosted through the barricaded alleys while handlers looped surveillance.',
+        effects: {
+          durationMultiplier: 1.12,
+          heatDelta: -1.1,
+          successDelta: 0.04,
+        },
+      },
+      {
+        id: 'lockdown-hush-route-rush',
+        label: 'Throttle through checkpoints',
+        description: 'Gun past rerouted patrols to stay on schedule, daring the lockdown net.',
+        narrative: 'They redlined through the lockdown cordon, betting on speed over stealth.',
+        effects: {
+          payoutMultiplier: 1.08,
+          durationMultiplier: 0.88,
+          heatDelta: 1.4,
+        },
+      },
+    ],
+  },
+  {
+    id: 'safehouse-dead-drop',
+    label: 'Dead Drop Courier Ping',
+    description: 'Safehouse couriers flag a masked route that could vent tonight’s heat.',
+    triggerProgress: 0.36,
+    minDifficulty: 1,
+    maxDifficulty: 5,
+    riskTiers: ['low', 'moderate'],
+    crackdownTiers: ['calm', 'alert', 'lockdown'],
+    baseWeight: 1,
+    requiredSafehouseFacilities: ['dead-drop-network'],
+    safehouseFacilityWeights: { 'dead-drop-network': 1.4 },
+    badges: [{ type: 'safehouse', icon: '🏚️', label: 'Dead Drop Network' }],
+    choices: [
+      {
+        id: 'safehouse-dead-drop-siphon',
+        label: 'Stage the courier swap',
+        description: 'Route the getaway through the couriers, letting the network bleed away pursuit.',
+        narrative: 'They slipped into the courier chain, bleeding off the crackdown heat.',
+        effects: {
+          durationMultiplier: 1.05,
+          heatDelta: -1.3,
+          successDelta: 0.03,
+        },
+      },
+      {
+        id: 'safehouse-dead-drop-skip',
+        label: 'Wave them off',
+        description: 'Keep the haul close and skip the swap, protecting the take but upping scrutiny.',
+        narrative: 'Crew waved off the dead drop, keeping the prize close as sirens closed in.',
+        effects: {
+          payoutMultiplier: 1.05,
+          heatDelta: 0.6,
+          successDelta: -0.02,
+        },
+      },
+    ],
+  },
+  {
+    id: 'safehouse-workshop-call',
+    label: 'Workshop Tune-Up Call',
+    description: 'Safehouse mechanics prep a mobile bay to tweak the ride mid-run.',
+    triggerProgress: 0.22,
+    minDifficulty: 1,
+    maxDifficulty: 4,
+    riskTiers: ['low', 'moderate'],
+    crackdownTiers: ['calm', 'alert'],
+    baseWeight: 1.05,
+    requiredSafehouseFacilities: ['workshop-bays'],
+    safehouseFacilityWeights: { 'workshop-bays': 1.35 },
+    badges: [{ type: 'safehouse', icon: '🛠️', label: 'Workshop Bays' }],
+    choices: [
+      {
+        id: 'safehouse-workshop-tune',
+        label: 'Break for the tune-up',
+        description: 'Pause for a quick refit, smoothing the getaway but stretching the timer.',
+        narrative: 'Mechanics dialed in the getaway rig mid-mission, trading pace for precision.',
+        effects: {
+          durationMultiplier: 1.08,
+          successDelta: 0.05,
+          heatDelta: -0.6,
+        },
+      },
+      {
+        id: 'safehouse-workshop-ignore',
+        label: 'Stay on pace',
+        description: 'Keep rolling and decline the tune, protecting the clock but heating things up.',
+        narrative: 'They ignored the tune-up call and powered through with a hotter engine.',
+        effects: {
+          durationMultiplier: 0.92,
+          heatDelta: 0.8,
+          payoutMultiplier: 1.04,
+        },
+      },
+    ],
+  },
+  {
+    id: 'crew-hacker-pivot',
+    label: 'Live Firewall Pivot',
+    description: 'Security daisy-chains encryptors mid-run — your hacker spots a pivot.',
+    triggerProgress: 0.51,
+    minDifficulty: 2,
+    maxDifficulty: 6,
+    riskTiers: ['moderate', 'high'],
+    crackdownTiers: ['alert', 'lockdown'],
+    baseWeight: 1.1,
+    requiredCrewSpecialties: ['hacker', 'infiltrator'],
+    crewSpecialtyWeights: { hacker: 1.35, infiltrator: 1.1 },
+    badges: [{ type: 'crew', icon: '🧠', label: 'Hacker Window' }],
+    choices: [
+      {
+        id: 'crew-hacker-pivot-overclock',
+        label: 'Let the hacker overclock defenses',
+        description: 'Authorize a risky live rewrite, leaning on your specialist to steady the odds.',
+        narrative: 'Your hacker overclocked the firewall and iced the intrusion alarms.',
+        effects: {
+          successDelta: 0.06,
+          durationMultiplier: 1.1,
+          heatDelta: -0.5,
+        },
+      },
+      {
+        id: 'crew-hacker-pivot-override',
+        label: 'Force the override manually',
+        description: 'Smash through with brute force, risking alarms for a fatter payout.',
+        narrative: 'They brute forced the lockout, hauling extra loot under a swelling alert.',
+        effects: {
+          payoutMultiplier: 1.12,
+          durationMultiplier: 0.9,
+          successDelta: -0.05,
+          heatDelta: 1.1,
+        },
+      },
+    ],
+  },
+  {
+    id: 'crew-wheelman-gambit',
+    label: 'Wheelman Gambit',
+    description: 'Your driver spots a drainage run that could cut minutes off the escape.',
+    triggerProgress: 0.67,
+    minDifficulty: 1,
+    maxDifficulty: 5,
+    riskTiers: ['low', 'moderate'],
+    crackdownTiers: ['calm', 'alert', 'lockdown'],
+    baseWeight: 1.05,
+    requiredCrewSpecialties: ['wheelman', 'mechanic'],
+    crewSpecialtyWeights: { wheelman: 1.3, mechanic: 1.1 },
+    badges: [{ type: 'crew', icon: '🏎️', label: 'Crew Specialty' }],
+    choices: [
+      {
+        id: 'crew-wheelman-gambit-slide',
+        label: 'Trust the wheelman',
+        description: 'Dive into the runoff tunnel, banking on skill to keep the crew upright.',
+        narrative: 'Wheelman threaded the drainage run, shaving minutes with sparks for company.',
+        effects: {
+          durationMultiplier: 0.85,
+          successDelta: 0.04,
+          heatDelta: 0.7,
+        },
+      },
+      {
+        id: 'crew-wheelman-gambit-play-safe',
+        label: 'Stick to the mapped route',
+        description: 'Hold to the planned path, calming the ride but cooling the final take.',
+        narrative: 'They stuck to the mapped route, trading flash for a cooler getaway.',
+        effects: {
+          successDelta: 0.02,
+          heatDelta: -0.6,
+          payoutMultiplier: 0.95,
+        },
+      },
+    ],
+  },
 ];
 
 const cloneChoice = (choice) => ({
@@ -394,6 +666,39 @@ const cloneEvent = (event) => ({
   crackdownTierWeights: normalizeWeightMap(event.crackdownTierWeights, normalizeCrackdownTier),
   riskTiers: normalizeTierList(event.riskTiers, normalizeRiskTier),
   crackdownTiers: normalizeTierList(event.crackdownTiers, normalizeCrackdownTier),
+  requiredSafehouseFacilities: normalizeIdList(event.requiredSafehouseFacilities),
+  safehouseFacilityWeights: normalizeWeightMap(event.safehouseFacilityWeights),
+  requiredCrewSpecialties: normalizeIdList(event.requiredCrewSpecialties),
+  crewSpecialtyWeights: normalizeWeightMap(event.crewSpecialtyWeights),
+  badges: Array.isArray(event.badges)
+    ? event.badges
+        .map((badge) => {
+          if (!badge || typeof badge !== 'object') {
+            return null;
+          }
+
+          const type = normalizeString(badge.type);
+          const label = typeof badge.label === 'string' ? badge.label.trim() : '';
+          const icon = typeof badge.icon === 'string' ? badge.icon.trim() : '';
+
+          if (!type && !label && !icon) {
+            return null;
+          }
+
+          const cloned = {};
+          if (type) {
+            cloned.type = type;
+          }
+          if (label) {
+            cloned.label = label;
+          }
+          if (icon) {
+            cloned.icon = icon;
+          }
+          return cloned;
+        })
+        .filter(Boolean)
+    : [],
   poiContext:
     typeof event.poiContext === 'object' && event.poiContext !== null
       ? { ...event.poiContext }
@@ -704,13 +1009,28 @@ const buildPoiEvent = (poi) => {
   };
 };
 
-const buildMissionEventDeck = (mission) => {
+const buildMissionEventDeck = (mission, context = {}) => {
   const difficulty = toFiniteNumber(mission?.difficulty, 1);
   const riskTier = normalizeRiskTier(mission?.riskTier) ?? 'low';
   const crackdownTier =
     normalizeCrackdownTier(mission?.crackdownTier ?? mission?.activeCrackdownTier ?? mission?.crackdownLevel) ??
     'calm';
   const difficultyBand = determineDifficultyBand(difficulty);
+
+  const assignedCrew = Array.isArray(context.assignedCrew)
+    ? context.assignedCrew.filter((member) => member)
+    : [];
+  const crewSpecialtySet = new Set(
+    assignedCrew
+      .map((member) => normalizeString(member?.specialty))
+      .filter((specialty) => typeof specialty === 'string' && specialty.length),
+  );
+
+  const safehouseFacilities = new Set(
+    collectSafehouseFacilityIds(context.safehouse)
+      .map((id) => normalizeString(id))
+      .filter((id) => typeof id === 'string' && id.length),
+  );
 
   const candidateEvents = [];
 
@@ -736,6 +1056,20 @@ const buildMissionEventDeck = (mission) => {
     const baseWeight = Number.isFinite(cloned.baseWeight) ? cloned.baseWeight : 1;
     let weight = baseWeight;
 
+    if (
+      cloned.requiredCrewSpecialties &&
+      !cloned.requiredCrewSpecialties.some((specialty) => crewSpecialtySet.has(specialty))
+    ) {
+      return;
+    }
+
+    if (
+      cloned.requiredSafehouseFacilities &&
+      !cloned.requiredSafehouseFacilities.every((facilityId) => safehouseFacilities.has(facilityId))
+    ) {
+      return;
+    }
+
     if (cloned.difficultyBandWeights && cloned.difficultyBandWeights[difficultyBand]) {
       weight *= cloned.difficultyBandWeights[difficultyBand];
     }
@@ -746,6 +1080,24 @@ const buildMissionEventDeck = (mission) => {
 
     if (cloned.crackdownTierWeights && cloned.crackdownTierWeights[crackdownTier]) {
       weight *= cloned.crackdownTierWeights[crackdownTier];
+    }
+
+    if (cloned.safehouseFacilityWeights) {
+      safehouseFacilities.forEach((facilityId) => {
+        const multiplier = cloned.safehouseFacilityWeights?.[facilityId];
+        if (Number.isFinite(multiplier) && multiplier > 0) {
+          weight *= multiplier;
+        }
+      });
+    }
+
+    if (cloned.crewSpecialtyWeights) {
+      crewSpecialtySet.forEach((specialty) => {
+        const multiplier = cloned.crewSpecialtyWeights?.[specialty];
+        if (Number.isFinite(multiplier) && multiplier > 0) {
+          weight *= multiplier;
+        }
+      });
     }
 
     cloned.selectionWeight = Math.max(0, Number.isFinite(weight) ? weight : baseWeight);
