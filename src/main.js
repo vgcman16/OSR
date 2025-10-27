@@ -1149,10 +1149,12 @@ const updateVehicleSelectionOptions = () => {
         return;
       }
 
-      const saleLabel = formatCurrency(result.salePrice ?? result.fundsDelta ?? 0);
-      missionControls.maintenanceStatusDetail = `Sold ${
-        result.vehicleModel ?? 'vehicle'
-      } for ${saleLabel}.`;
+      const summary = describeVehicleReportOutcome(result.report ?? missionSystem.state.lastVehicleReport);
+      missionControls.maintenanceStatusDetail = summary
+        ? summary
+        : `Sold ${result.vehicleModel ?? 'vehicle'} for ${formatCurrency(
+            result.salePrice ?? result.fundsDelta ?? 0,
+          )}.`;
       if (missionControls.selectedVehicleId === vehicle.id) {
         missionControls.selectedVehicleId = null;
       }
@@ -1196,13 +1198,18 @@ const updateVehicleSelectionOptions = () => {
         return;
       }
 
-      const fundsLabel = formatCurrency(result.scrapValue ?? result.fundsDelta ?? 0);
-      const partsLabel = Number.isFinite(result.partsRecovered) && result.partsRecovered > 0
-        ? `${result.partsRecovered} parts recovered.`
-        : 'Minimal salvage recovered.';
-      missionControls.maintenanceStatusDetail = `Scrapped ${
-        result.vehicleModel ?? 'vehicle'
-      } for ${fundsLabel}. ${partsLabel}`;
+      const summary = describeVehicleReportOutcome(result.report ?? missionSystem.state.lastVehicleReport);
+      if (summary) {
+        missionControls.maintenanceStatusDetail = summary;
+      } else {
+        const fundsLabel = formatCurrency(result.scrapValue ?? result.fundsDelta ?? 0);
+        const partsLabel = Number.isFinite(result.partsRecovered) && result.partsRecovered > 0
+          ? `${result.partsRecovered} parts recovered.`
+          : 'Minimal salvage recovered.';
+        missionControls.maintenanceStatusDetail = `Scrapped ${
+          result.vehicleModel ?? 'vehicle'
+        } for ${fundsLabel}. ${partsLabel}`;
+      }
       if (missionControls.selectedVehicleId === vehicle.id) {
         missionControls.selectedVehicleId = null;
       }
