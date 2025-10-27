@@ -1,5 +1,5 @@
 import { Vehicle } from '../entities/vehicle.js';
-import { CREW_TRAIT_KEYS } from '../entities/crewMember.js';
+import { CREW_TRAIT_KEYS, CREW_FATIGUE_CONFIG } from '../entities/crewMember.js';
 import { HeatSystem } from './heatSystem.js';
 import { generateContractsFromDistricts } from './contractFactory.js';
 import { buildMissionEventDeck } from './missionEvents.js';
@@ -232,6 +232,27 @@ const sanitizeDuration = (durationValue, difficultyValue) => {
   }
 
   return fallback;
+};
+
+const computeMissionFatigueImpact = (mission) => {
+  if (!mission || typeof mission !== 'object') {
+    return CREW_FATIGUE_CONFIG.missionFatigueBase;
+  }
+
+  const duration = sanitizeDuration(mission.duration ?? mission.baseDuration, mission.difficulty);
+  const durationReference = CREW_FATIGUE_CONFIG.missionDurationReference;
+  const durationFactor = Number.isFinite(durationReference) && durationReference > 0
+    ? clamp(duration / durationReference, 0.5, 2.2)
+    : 1;
+
+  const difficultyReference = CREW_FATIGUE_CONFIG.missionDifficultyReference;
+  const difficultyValue = coerceFiniteNumber(mission.difficulty, difficultyReference);
+  const difficultyOffset = difficultyValue - difficultyReference;
+  const difficultyFactor = clamp(1 + difficultyOffset * 0.1, 0.6, 1.8);
+
+  const base = CREW_FATIGUE_CONFIG.missionFatigueBase;
+  const fatigue = Math.round(base * durationFactor * difficultyFactor);
+  return clamp(fatigue, 8, Math.round(CREW_FATIGUE_CONFIG.maxFatigue * 0.6));
 };
 
 const deriveBaseSuccessChance = (difficultyValue) => {
@@ -1428,7 +1449,18 @@ class MissionSystem {
     const requestedCrewIds = Array.isArray(crewIds) ? crewIds : [];
     const assignedCrew = crewPool.filter((member) => requestedCrewIds.includes(member.id));
 
-    const crewUnavailable = assignedCrew.some((member) => member.status && member.status !== 'idle');
+    const crewUnavailable = assignedCrew.some((member) => {
+      if (!member) {
+        return true;
+      }
+
+      if (typeof member.isMissionReady === 'function') {
+        return !member.isMissionReady();
+      }
+
+      const statusLabel = (member.status ?? 'idle').toLowerCase();
+      return statusLabel !== 'idle';
+    });
     if (crewUnavailable) {
       return null;
     }
@@ -1505,9 +1537,16 @@ class MissionSystem {
         }
       : null;
     mission.assignedVehicleLabel = assignedVehicle ? assignedVehicle.model ?? 'Assigned vehicle' : null;
+    mission.assignedCrewFatigue = computeMissionFatigueImpact(mission);
 
     assignedCrew.forEach((member) => {
-      if (typeof member.setStatus === 'function') {
+      if (!member) {
+        return;
+      }
+
+      if (typeof member.beginMission === 'function') {
+        member.beginMission();
+      } else if (typeof member.setStatus === 'function') {
         member.setStatus('on-mission');
       } else {
         member.status = 'on-mission';
@@ -1721,8 +1760,18 @@ class MissionSystem {
       };
     }
 
+    const missionFatigue = Number.isFinite(mission.assignedCrewFatigue)
+      ? mission.assignedCrewFatigue
+      : computeMissionFatigueImpact(mission);
+
     assignedCrew.forEach((member) => {
-      if (typeof member.setStatus === 'function') {
+      if (!member) {
+        return;
+      }
+
+      if (typeof member.finishMission === 'function') {
+        member.finishMission({ fatigueImpact: missionFatigue, mission, outcome });
+      } else if (typeof member.setStatus === 'function') {
         member.setStatus('idle');
       } else {
         member.status = 'idle';
@@ -1742,6 +1791,7 @@ class MissionSystem {
     mission.assignedVehicleImpact = null;
     mission.assignedVehicleSnapshot = null;
     mission.assignedVehicleLabel = null;
+    mission.assignedCrewFatigue = null;
 
     if (vehicleReport) {
       this.state.lastVehicleReport = vehicleReport;

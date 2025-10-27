@@ -1,5 +1,5 @@
 import { createCarThiefGame } from './game/carThief/index.js';
-import { CrewMember, CREW_TRAIT_CONFIG } from './game/carThief/entities/crewMember.js';
+import { CrewMember, CREW_TRAIT_CONFIG, CREW_FATIGUE_CONFIG } from './game/carThief/entities/crewMember.js';
 import {
   GARAGE_MAINTENANCE_CONFIG,
   PLAYER_SKILL_CONFIG,
@@ -158,6 +158,64 @@ const formatCrewTraitSummary = (entity, limit = 3) => {
   return selection
     .map((entry) => `${entry.label} ${entry.value}`)
     .join(', ');
+};
+
+const summarizeCrewReadiness = (member) => {
+  const defaults = {
+    label: 'Readiness unknown',
+    tooltip: 'Crew readiness data unavailable.',
+    fatiguePercent: null,
+    state: 'unknown',
+  };
+
+  if (!member || typeof member !== 'object') {
+    return defaults;
+  }
+
+  const summary = typeof member.getReadinessSummary === 'function'
+    ? member.getReadinessSummary()
+    : null;
+
+  const maxFatigue = Number.isFinite(CREW_FATIGUE_CONFIG?.maxFatigue)
+    ? CREW_FATIGUE_CONFIG.maxFatigue
+    : 100;
+  const fatigueValue = summary?.fatigue ?? Number(member.fatigue);
+  const fatigue = Number.isFinite(fatigueValue)
+    ? Math.max(0, Math.min(maxFatigue, fatigueValue))
+    : null;
+  const recoveryRate = summary?.recoveryPerDay ?? Number(member.fatigueRecoveryPerDay);
+  const fatiguePercent = fatigue !== null ? Math.round((fatigue / maxFatigue) * 100) : null;
+  const readinessState = summary?.state ?? (member.status ?? 'idle');
+
+  let readinessLabel = 'Ready';
+  const normalizedState = typeof readinessState === 'string' ? readinessState.toLowerCase() : 'ready';
+  if (normalizedState === 'exhausted' || normalizedState === 'needs-rest') {
+    readinessLabel = 'Needs rest';
+  } else if (normalizedState === 'tired') {
+    readinessLabel = 'Tired';
+  } else if (normalizedState === 'on-mission') {
+    readinessLabel = 'In the field';
+  }
+
+  const fatigueLabel = fatiguePercent !== null ? `${fatiguePercent}% fatigue` : 'Fatigue unknown';
+  const tooltipParts = [`${fatigueLabel}.`];
+
+  if (Number.isFinite(recoveryRate) && recoveryRate > 0) {
+    tooltipParts.push(`Recovers about ${Math.round(recoveryRate)} fatigue per day.`);
+  }
+
+  if (normalizedState === 'exhausted' || normalizedState === 'needs-rest') {
+    tooltipParts.push('Unavailable for missions until rested.');
+  } else if (normalizedState === 'tired') {
+    tooltipParts.push('Pushing further could sideline them.');
+  }
+
+  return {
+    label: fatiguePercent !== null ? `${readinessLabel} • ${fatigueLabel}` : readinessLabel,
+    tooltip: tooltipParts.join(' '),
+    fatiguePercent,
+    state: normalizedState,
+  };
 };
 
 const describeSafehouseTierEffects = (tier, safehouse = null) => {
@@ -2709,12 +2767,14 @@ const updateCrewSelectionOptions = () => {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.value = member.id;
-    const isAvailable = (member.status ?? 'idle') === 'idle';
-    if (!isAvailable) {
+    const missionReady = typeof member.isMissionReady === 'function'
+      ? member.isMissionReady()
+      : (member.status ?? 'idle') === 'idle';
+    if (!missionReady) {
       selectedSet.delete(member.id);
     }
     checkbox.checked = selectedSet.has(member.id);
-    checkbox.disabled = !isAvailable;
+    checkbox.disabled = !missionReady;
 
     checkbox.addEventListener('change', () => {
       const currentSelection = new Set(missionControls.selectedCrewIds ?? []);
@@ -2732,12 +2792,18 @@ const updateCrewSelectionOptions = () => {
     descriptor.className = 'mission-crew__label';
     const loyaltyLabel = Number.isFinite(member.loyalty) ? `L${member.loyalty}` : 'L?';
     const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
+    const readiness = summarizeCrewReadiness(member);
+    const readinessLabel = readiness?.label ? ` • ${readiness.label}` : '';
     const backgroundName = member.background?.name || member.background?.perkLabel || '';
     const backgroundLabel = backgroundName ? ` • ${backgroundName}` : '';
     const traitSummary = formatCrewTraitSummary(member, 3);
     const traitsLabel = traitSummary ? ` • ${traitSummary}` : '';
-    const descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${backgroundLabel}${traitsLabel}`;
+    const descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${readinessLabel}${backgroundLabel}${traitsLabel}`;
     descriptor.textContent = descriptorText;
+    if (readiness?.tooltip) {
+      descriptor.title = readiness.tooltip;
+      checkbox.title = readiness.tooltip;
+    }
 
     optionLabel.appendChild(checkbox);
     optionLabel.appendChild(descriptor);
