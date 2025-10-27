@@ -26,8 +26,12 @@ const missionControls = {
   detailPayout: null,
   detailHeat: null,
   detailDuration: null,
+  detailSuccess: null,
   detailRestriction: null,
+  detailCrewImpact: null,
+  crewList: null,
   crackdownText: null,
+  selectedCrewIds: [],
 };
 
 let missionControlSyncHandle = null;
@@ -44,13 +48,23 @@ const triggerHudRender = () => {
   }
 };
 
-const setMissionDetails = ({ description, payout, heat, duration, restriction }) => {
+const setMissionDetails = ({
+  description,
+  payout,
+  heat,
+  duration,
+  success,
+  restriction,
+  crewImpact,
+}) => {
   const {
     detailDescription,
     detailPayout,
     detailHeat,
     detailDuration,
+    detailSuccess,
     detailRestriction,
+    detailCrewImpact,
   } = missionControls;
 
   if (
@@ -59,7 +73,9 @@ const setMissionDetails = ({ description, payout, heat, duration, restriction })
       detailPayout &&
       detailHeat &&
       detailDuration &&
-      detailRestriction
+      detailSuccess &&
+      detailRestriction &&
+      detailCrewImpact
     )
   ) {
     return;
@@ -69,7 +85,16 @@ const setMissionDetails = ({ description, payout, heat, duration, restriction })
   detailPayout.textContent = payout;
   detailHeat.textContent = heat;
   detailDuration.textContent = duration;
+  detailSuccess.textContent = success;
   detailRestriction.textContent = restriction;
+
+  detailCrewImpact.innerHTML = '';
+  const impactItems = Array.isArray(crewImpact) ? crewImpact : [crewImpact ?? 'No crew assigned.'];
+  impactItems.forEach((line) => {
+    const item = document.createElement('li');
+    item.textContent = line;
+    detailCrewImpact.appendChild(item);
+  });
 };
 
 const resetMissionDetails = (descriptionText) => {
@@ -78,7 +103,9 @@ const resetMissionDetails = (descriptionText) => {
     payout: '—',
     heat: '—',
     duration: '—',
+    success: '—',
     restriction: 'All contracts are currently open.',
+    crewImpact: ['No crew assigned.'],
   });
 };
 
@@ -102,6 +129,122 @@ const formatMissionStatusMessage = (mission) => {
     default:
       return `${mission.name} — status: ${status}`;
   }
+};
+
+const formatCurrency = (value) => {
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
+
+  return `$${Math.round(value).toLocaleString()}`;
+};
+
+const formatSeconds = (value) => {
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
+
+  return `${Math.round(value)}s`;
+};
+
+const formatPercent = (value) => {
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
+
+  return `${Math.round(value * 100)}%`;
+};
+
+const formatAdjustedValue = (
+  base,
+  adjusted,
+  formatValue,
+  formatDelta,
+  tolerance = 0.01,
+) => {
+  if (!Number.isFinite(adjusted)) {
+    return '—';
+  }
+
+  if (!Number.isFinite(base) || Math.abs(adjusted - base) <= tolerance) {
+    return formatValue(adjusted);
+  }
+
+  const delta = adjusted - base;
+  const sign = delta >= 0 ? '+' : '-';
+  return `${formatValue(base)} → ${formatValue(adjusted)} (${sign}${formatDelta(Math.abs(delta))})`;
+};
+
+const updateCrewSelectionOptions = () => {
+  const crewContainer = missionControls.crewList;
+  if (!crewContainer) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const crewRoster = Array.isArray(missionSystem?.state?.crew) ? missionSystem.state.crew : [];
+  const selectedSet = new Set(missionControls.selectedCrewIds ?? []);
+
+  crewContainer.innerHTML = '';
+
+  if (!missionSystem) {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = 'Crew manifest loading…';
+    crewContainer.appendChild(placeholder);
+    missionControls.selectedCrewIds = Array.from(selectedSet);
+    return;
+  }
+
+  if (!crewRoster.length) {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = 'No crew recruited yet.';
+    crewContainer.appendChild(placeholder);
+    missionControls.selectedCrewIds = Array.from(selectedSet);
+    return;
+  }
+
+  crewRoster.forEach((member) => {
+    if (!member) {
+      return;
+    }
+
+    const optionLabel = document.createElement('label');
+    optionLabel.className = 'mission-crew__option';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = member.id;
+    const isAvailable = (member.status ?? 'idle') === 'idle';
+    if (!isAvailable) {
+      selectedSet.delete(member.id);
+    }
+    checkbox.checked = selectedSet.has(member.id);
+    checkbox.disabled = !isAvailable;
+
+    checkbox.addEventListener('change', () => {
+      const currentSelection = new Set(missionControls.selectedCrewIds ?? []);
+      if (checkbox.checked) {
+        currentSelection.add(member.id);
+      } else {
+        currentSelection.delete(member.id);
+      }
+
+      missionControls.selectedCrewIds = Array.from(currentSelection);
+      updateMissionControls();
+    });
+
+    const descriptor = document.createElement('span');
+    descriptor.className = 'mission-crew__label';
+    const loyaltyLabel = Number.isFinite(member.loyalty) ? `L${member.loyalty}` : 'L?';
+    const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
+    descriptor.textContent = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}`;
+
+    optionLabel.appendChild(checkbox);
+    optionLabel.appendChild(descriptor);
+    crewContainer.appendChild(optionLabel);
+  });
+
+  missionControls.selectedCrewIds = Array.from(selectedSet);
 };
 
 const describeCrackdownPolicy = () => {
@@ -181,7 +324,10 @@ const updateMissionControls = () => {
     detailPayout,
     detailHeat,
     detailDuration,
+    detailSuccess,
     detailRestriction,
+    detailCrewImpact,
+    crewList,
     crackdownText,
   } = missionControls;
 
@@ -191,7 +337,10 @@ const updateMissionControls = () => {
     detailPayout,
     detailHeat,
     detailDuration,
+    detailSuccess,
     detailRestriction,
+    detailCrewImpact,
+    crewList,
     crackdownText,
   ];
   const controlsReady = [...controls, ...detailElements].every(Boolean);
@@ -199,6 +348,8 @@ const updateMissionControls = () => {
   if (!controlsReady) {
     return;
   }
+
+  updateCrewSelectionOptions();
 
   const isReady = Boolean(missionSystem && economySystem);
   controls.forEach((control) => {
@@ -247,15 +398,38 @@ const updateMissionControls = () => {
     resetMissionDetails('Select a mission to view its briefing.');
   } else {
     const missionDescription = selectedMission.description ?? 'No description available.';
-    const missionPayout = Number.isFinite(selectedMission.payout)
-      ? `$${Math.round(selectedMission.payout).toLocaleString()}`
-      : '—';
+    const selectedCrewIds = missionControls.selectedCrewIds ?? [];
+    const preview =
+      selectedMission.status === 'available'
+        ? missionSystem.previewCrewAssignment(selectedMission.id, selectedCrewIds)
+        : null;
+
+    const basePayout = Number.isFinite(selectedMission.basePayout)
+      ? selectedMission.basePayout
+      : selectedMission.payout;
+    const baseDuration = Number.isFinite(selectedMission.baseDuration)
+      ? selectedMission.baseDuration
+      : selectedMission.duration;
+    const baseSuccess = Number.isFinite(selectedMission.baseSuccessChance)
+      ? selectedMission.baseSuccessChance
+      : selectedMission.successChance;
+
+    const payoutValue = preview?.adjustedPayout ?? selectedMission.payout ?? basePayout;
+    const durationValue = preview?.adjustedDuration ?? selectedMission.duration ?? baseDuration;
+    const successValue = preview?.adjustedSuccessChance ?? selectedMission.successChance ?? baseSuccess;
+
+    const missionPayout = selectedMission.status === 'available'
+      ? formatAdjustedValue(basePayout, payoutValue, formatCurrency, formatCurrency, 1)
+      : formatCurrency(payoutValue);
     const missionHeat = Number.isFinite(selectedMission.heat)
       ? `${selectedMission.heat}`
       : '—';
-    const missionDuration = Number.isFinite(selectedMission.duration)
-      ? `${Math.round(selectedMission.duration)}s`
-      : '—';
+    const missionDuration = selectedMission.status === 'available'
+      ? formatAdjustedValue(baseDuration, durationValue, formatSeconds, formatSeconds, 1)
+      : formatSeconds(durationValue);
+    const missionSuccess = selectedMission.status === 'available'
+      ? formatAdjustedValue(baseSuccess, successValue, formatPercent, formatPercent, 0.005)
+      : formatPercent(successValue);
     const crackdownInfo = describeCrackdownPolicy();
     const restrictionMessage = selectedMission.restricted
       ? selectedMission.restrictionReason ?? 'This contract is locked by the current crackdown.'
@@ -263,12 +437,26 @@ const updateMissionControls = () => {
         ? `Eligible under the ${crackdownInfo.label.toLowerCase()} crackdown.`
         : 'All contracts are open.';
 
+    const crewImpact = (() => {
+      if (selectedMission.status === 'available') {
+        const summary = preview?.summary ?? [];
+        return summary.length ? summary : ['No crew bonuses applied.'];
+      }
+
+      const summary = Array.isArray(selectedMission.crewEffectSummary)
+        ? selectedMission.crewEffectSummary
+        : [];
+      return summary.length ? summary : ['Crew assignments locked in.'];
+    })();
+
     setMissionDetails({
       description: missionDescription,
       payout: missionPayout,
       heat: missionHeat,
       duration: missionDuration,
+      success: missionSuccess,
       restriction: restrictionMessage,
+      crewImpact,
     });
   }
 
@@ -339,12 +527,17 @@ const handleMissionStart = () => {
     return;
   }
 
-  const mission = missionSystem.startMission(missionId);
+  const crewIds = Array.isArray(missionControls.selectedCrewIds)
+    ? missionControls.selectedCrewIds
+    : [];
+
+  const mission = missionSystem.startMission(missionId, crewIds);
   if (!mission) {
     updateMissionStatusText();
     return;
   }
 
+  missionControls.selectedCrewIds = [];
   economySystem.payCrew();
   updateMissionSelect();
   updateMissionControls();
@@ -369,6 +562,7 @@ const handleMissionResolution = (outcome) => {
     return;
   }
 
+  missionControls.selectedCrewIds = [];
   updateMissionSelect();
   updateMissionControls();
   triggerHudRender();
@@ -384,7 +578,10 @@ const setupMissionControls = () => {
   missionControls.detailPayout = document.getElementById('mission-detail-payout');
   missionControls.detailHeat = document.getElementById('mission-detail-heat');
   missionControls.detailDuration = document.getElementById('mission-detail-duration');
+  missionControls.detailSuccess = document.getElementById('mission-detail-success');
   missionControls.detailRestriction = document.getElementById('mission-detail-restriction');
+  missionControls.detailCrewImpact = document.getElementById('mission-detail-crew-impact');
+  missionControls.crewList = document.getElementById('mission-crew-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
 
   const {
@@ -396,7 +593,10 @@ const setupMissionControls = () => {
     detailPayout,
     detailHeat,
     detailDuration,
+    detailSuccess,
     detailRestriction,
+    detailCrewImpact,
+    crewList,
     crackdownText,
   } = missionControls;
 
@@ -409,7 +609,10 @@ const setupMissionControls = () => {
     detailPayout,
     detailHeat,
     detailDuration,
+    detailSuccess,
     detailRestriction,
+    detailCrewImpact,
+    crewList,
     crackdownText,
   ].every(Boolean);
 
@@ -420,7 +623,10 @@ const setupMissionControls = () => {
   startButton.addEventListener('click', handleMissionStart);
   successButton.addEventListener('click', () => handleMissionResolution('success'));
   failureButton.addEventListener('click', () => handleMissionResolution('failure'));
-  select.addEventListener('change', updateMissionControls);
+  select.addEventListener('change', () => {
+    missionControls.selectedCrewIds = [];
+    updateMissionControls();
+  });
 
   if (!missionControlSyncHandle) {
     missionControlSyncHandle = window.setInterval(() => {
