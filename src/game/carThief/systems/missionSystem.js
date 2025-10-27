@@ -55,7 +55,9 @@ class MissionSystem {
 
   resolveMission(missionId, outcome) {
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
-    if (!mission) {
+    const isActiveMission = this.state.activeMission && this.state.activeMission.id === missionId;
+
+    if (!mission || mission.status !== 'in-progress' || !isActiveMission) {
       return null;
     }
 
