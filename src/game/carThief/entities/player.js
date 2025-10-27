@@ -1,5 +1,5 @@
 class Player {
-  constructor({ name, notoriety = 0, skills = {}, inventory = [] } = {}) {
+  constructor({ name, notoriety = 0, skills = {}, inventory = [], safehouseId = null } = {}) {
     this.name = name ?? 'Unknown Driver';
     this.notoriety = notoriety;
     this.skills = {
@@ -11,7 +11,7 @@ class Player {
     };
     this.inventory = [...inventory];
     this.currentVehicleId = null;
-    this.safehouseId = null;
+    this.safehouseId = safehouseId;
   }
 
   assignVehicle(vehicleId) {

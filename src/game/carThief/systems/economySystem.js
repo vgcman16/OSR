@@ -1,3 +1,7 @@
+import { getActiveSafehouseFromState } from '../world/safehouse.js';
+
+const DAY_LENGTH_SECONDS = 45;
+
 class EconomySystem {
   constructor(state) {
     this.state = state;
@@ -8,10 +12,34 @@ class EconomySystem {
       this.state.day = 1;
     }
     this.baseDailyOverhead = 500;
-    this.dayLengthSeconds = 45;
+    this.dayLengthSeconds = DAY_LENGTH_SECONDS;
     this.timeAccumulator = 0;
     this.lastExpenseReport = null;
     this.pendingExpenseReport = null;
+  }
+
+  getActiveSafehouse() {
+    return getActiveSafehouseFromState(this.state);
+  }
+
+  getSafehouseOverheadModifier() {
+    const safehouse = this.getActiveSafehouse();
+    if (!safehouse || typeof safehouse.getOverheadModifier !== 'function') {
+      return 0;
+    }
+
+    const modifier = safehouse.getOverheadModifier();
+    return Number.isFinite(modifier) ? modifier : 0;
+  }
+
+  getSafehousePassiveIncome() {
+    const safehouse = this.getActiveSafehouse();
+    if (!safehouse || typeof safehouse.getPassiveIncome !== 'function') {
+      return 0;
+    }
+
+    const income = safehouse.getPassiveIncome();
+    return Number.isFinite(income) ? income : 0;
   }
 
   getCrewPayroll() {
@@ -34,7 +62,11 @@ class EconomySystem {
   getProjectedDailyExpenses() {
     const payroll = this.getCrewPayroll();
     const safePayroll = Number.isFinite(payroll) ? payroll : 0;
-    return this.baseDailyOverhead + safePayroll;
+    const overheadModifier = this.getSafehouseOverheadModifier();
+    const passiveIncome = this.getSafehousePassiveIncome();
+
+    const projected = this.baseDailyOverhead + overheadModifier + safePayroll - passiveIncome;
+    return Math.max(0, projected);
   }
 
   getBaseDailyOverhead() {
@@ -77,11 +109,37 @@ class EconomySystem {
   }
 
   applyDailyExpenses() {
-    this.state.funds -= this.baseDailyOverhead;
+    if (!Number.isFinite(this.state.funds)) {
+      this.state.funds = 0;
+    }
+
+    const overheadModifier = this.getSafehouseOverheadModifier();
+    const totalOverhead = Math.max(0, this.baseDailyOverhead + overheadModifier);
+
+    this.state.funds -= totalOverhead;
     if (this.pendingExpenseReport) {
       this.pendingExpenseReport.base += this.baseDailyOverhead;
+      this.pendingExpenseReport.safehouseOverhead += overheadModifier;
     }
-    return this.baseDailyOverhead;
+    return totalOverhead;
+  }
+
+  applySafehouseDailyEconomyEffects() {
+    const passiveIncome = this.getSafehousePassiveIncome();
+    if (!Number.isFinite(passiveIncome) || passiveIncome <= 0) {
+      return 0;
+    }
+
+    if (!Number.isFinite(this.state.funds)) {
+      this.state.funds = 0;
+    }
+
+    this.state.funds += passiveIncome;
+    if (this.pendingExpenseReport) {
+      this.pendingExpenseReport.safehouseIncome += passiveIncome;
+    }
+
+    return passiveIncome;
   }
 
   adjustFunds(amount) {
@@ -104,16 +162,26 @@ class EconomySystem {
       this.pendingExpenseReport = {
         base: 0,
         payroll: 0,
+        safehouseOverhead: 0,
+        safehouseIncome: 0,
         day: this.state.day + index,
         timestamp: Date.now(),
       };
       this.applyDailyExpenses();
       this.payCrew(true);
+      this.applySafehouseDailyEconomyEffects();
       this.state.day += 1;
+      const total =
+        this.pendingExpenseReport.base +
+        this.pendingExpenseReport.payroll +
+        this.pendingExpenseReport.safehouseOverhead -
+        this.pendingExpenseReport.safehouseIncome;
       this.lastExpenseReport = {
         base: this.pendingExpenseReport.base,
         payroll: this.pendingExpenseReport.payroll,
-        total: this.pendingExpenseReport.base + this.pendingExpenseReport.payroll,
+        safehouseOverhead: this.pendingExpenseReport.safehouseOverhead,
+        safehouseIncome: this.pendingExpenseReport.safehouseIncome,
+        total,
         day: this.pendingExpenseReport.day + 1,
         timestamp: this.pendingExpenseReport.timestamp,
       };

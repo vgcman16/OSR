@@ -6,6 +6,7 @@ import {
   PLAYER_GEAR_CATALOG,
 } from './game/carThief/systems/missionSystem.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
+import { getActiveSafehouseFromState } from './game/carThief/world/safehouse.js';
 
 let gameInstance = null;
 
@@ -61,6 +62,13 @@ const missionControls = {
   heatStatus: null,
   heatStatusDetail: '',
   heatHistoryList: null,
+  safehouseSection: null,
+  safehouseName: null,
+  safehouseTier: null,
+  safehouseEffects: null,
+  safehouseUpgradeButton: null,
+  safehouseStatus: null,
+  safehouseStatusDetail: '',
   selectedCrewIds: [],
   selectedVehicleId: null,
 };
@@ -366,6 +374,138 @@ const setPlayerStatus = (message) => {
   }
 
   missionControls.playerStatus.textContent = message ?? '';
+};
+
+const updateSafehousePanel = () => {
+  const {
+    safehouseName,
+    safehouseTier,
+    safehouseEffects,
+    safehouseUpgradeButton,
+    safehouseStatus,
+  } = missionControls;
+
+  if (!safehouseName || !safehouseTier || !safehouseEffects || !safehouseUpgradeButton || !safehouseStatus) {
+    return;
+  }
+
+  const economySystem = getEconomySystem();
+  const state = getSharedState();
+
+  const renderEffects = (lines) => {
+    safehouseEffects.innerHTML = '';
+    if (!lines.length) {
+      const item = document.createElement('li');
+      item.textContent = 'No safehouse perks available.';
+      safehouseEffects.appendChild(item);
+      return;
+    }
+
+    lines.forEach((line) => {
+      const item = document.createElement('li');
+      item.textContent = line;
+      safehouseEffects.appendChild(item);
+    });
+  };
+
+  if (!state) {
+    safehouseName.textContent = 'Safehouse network offline.';
+    safehouseTier.textContent = '—';
+    renderEffects(['Safehouse systems syncing…']);
+    safehouseUpgradeButton.disabled = true;
+    safehouseUpgradeButton.title = 'Safehouse systems offline.';
+    safehouseUpgradeButton.textContent = 'Upgrade Safehouse';
+    const detail = missionControls.safehouseStatusDetail?.trim();
+    const summary = 'Safehouse telemetry unavailable.';
+    safehouseStatus.textContent = [detail, summary].filter(Boolean).join(' ');
+    return;
+  }
+
+  const safehouse = getActiveSafehouseFromState(state);
+  const tier = safehouse?.getCurrentTier?.() ?? null;
+  const nameLabel = safehouse
+    ? `${safehouse.name}${safehouse.location ? ` — ${safehouse.location}` : ''}`
+    : 'No safehouse assigned';
+  safehouseName.textContent = nameLabel;
+  safehouseTier.textContent = tier?.label ?? 'Unranked';
+
+  const passiveIncome = typeof safehouse?.getPassiveIncome === 'function'
+    ? safehouse.getPassiveIncome()
+    : Number.isFinite(tier?.passiveIncome)
+      ? tier.passiveIncome
+      : 0;
+  const heatReduction = typeof safehouse?.getHeatReduction === 'function'
+    ? safehouse.getHeatReduction()
+    : Number.isFinite(tier?.heatReduction)
+      ? tier.heatReduction
+      : 0;
+  const storageCapacity = Number.isFinite(tier?.storageCapacity) ? tier.storageCapacity : null;
+  const overheadModifier = typeof safehouse?.getOverheadModifier === 'function'
+    ? safehouse.getOverheadModifier()
+    : Number.isFinite(tier?.overheadModifier)
+      ? tier.overheadModifier
+      : 0;
+
+  const effectLines = [];
+  if (Number.isFinite(passiveIncome) && passiveIncome > 0) {
+    effectLines.push(`Passive income ${formatCurrency(passiveIncome)} per day.`);
+  } else {
+    effectLines.push('No passive income bonus yet.');
+  }
+
+  if (Number.isFinite(heatReduction) && heatReduction > 0) {
+    effectLines.push(`Automatic heat reduction ${heatReduction.toFixed(2)} each day.`);
+  } else {
+    effectLines.push('No automatic heat reduction.');
+  }
+
+  if (Number.isFinite(storageCapacity) && storageCapacity > 0) {
+    effectLines.push(`Storage capacity: ${storageCapacity} contraband loads.`);
+  }
+
+  if (Number.isFinite(overheadModifier) && overheadModifier !== 0) {
+    effectLines.push(
+      overheadModifier < 0
+        ? `Cuts daily overhead by ${formatCurrency(Math.abs(overheadModifier))}.`
+        : `Adds ${formatCurrency(overheadModifier)} to daily overhead.`,
+    );
+  }
+
+  if (tier?.description) {
+    effectLines.push(tier.description);
+  }
+
+  renderEffects(effectLines);
+
+  const nextTier = safehouse?.getNextTier?.() ?? null;
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  let summaryMessage;
+
+  if (!economySystem || !safehouse) {
+    safehouseUpgradeButton.disabled = true;
+    safehouseUpgradeButton.title = safehouse ? 'Economy systems offline.' : 'Assign a safehouse to unlock bonuses.';
+    safehouseUpgradeButton.textContent = 'Upgrade Safehouse';
+    summaryMessage = safehouse ? 'Economy systems offline.' : 'Assign a safehouse to unlock bonuses.';
+  } else if (!nextTier) {
+    safehouseUpgradeButton.disabled = true;
+    safehouseUpgradeButton.title = 'Safehouse fully upgraded.';
+    safehouseUpgradeButton.textContent = 'Max Tier Reached';
+    summaryMessage = 'Safehouse fully upgraded.';
+  } else {
+    const upgradeCost = Number.isFinite(nextTier.upgradeCost) ? nextTier.upgradeCost : 0;
+    const canAfford = funds >= upgradeCost;
+    safehouseUpgradeButton.disabled = !canAfford;
+    safehouseUpgradeButton.title = canAfford
+      ? `Advance to ${nextTier.label ?? 'next tier'}`
+      : 'Insufficient funds for upgrade.';
+    safehouseUpgradeButton.textContent = `Upgrade (${formatCurrency(upgradeCost)})`;
+    summaryMessage = canAfford
+      ? `Upgrade to ${nextTier.label ?? 'next tier'} for ${formatCurrency(upgradeCost)}.`
+      : `Requires ${formatCurrency(upgradeCost)} — available ${formatCurrency(funds)}.`;
+  }
+
+  const detail = missionControls.safehouseStatusDetail?.trim();
+  safehouseStatus.textContent = [detail, summaryMessage].filter(Boolean).join(' ');
 };
 
 const clearMaintenanceStatusDetail = () => {
@@ -771,6 +911,53 @@ const performHeatMitigation = (actionKey) => {
 
 const handleHeatLayLow = () => performHeatMitigation('layLow');
 const handleHeatBribe = () => performHeatMitigation('bribeOfficials');
+
+const handleSafehouseUpgrade = () => {
+  const economySystem = getEconomySystem();
+  const state = getSharedState();
+
+  if (!economySystem || !state) {
+    missionControls.safehouseStatusDetail = 'Safehouse systems offline.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const safehouse = getActiveSafehouseFromState(state);
+  if (!safehouse) {
+    missionControls.safehouseStatusDetail = 'No safehouse assigned — expand operations to unlock one.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const nextTier = safehouse.getNextTier?.() ?? null;
+  if (!nextTier) {
+    missionControls.safehouseStatusDetail = 'Safehouse already at maximum tier.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const upgradeCost = Number.isFinite(nextTier.upgradeCost) ? nextTier.upgradeCost : 0;
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+
+  if (funds < upgradeCost) {
+    missionControls.safehouseStatusDetail = `Insufficient funds — requires ${formatCurrency(upgradeCost)}, available ${formatCurrency(funds)}.`;
+    updateSafehousePanel();
+    return;
+  }
+
+  economySystem.adjustFunds(-upgradeCost);
+  const result = safehouse.upgrade?.();
+  if (result && result.success === false) {
+    missionControls.safehouseStatusDetail = 'Safehouse upgrade failed to initialize.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const tierLabel = result?.tier?.label ?? nextTier.label ?? 'new tier';
+  missionControls.safehouseStatusDetail = `Upgraded safehouse to ${tierLabel} for ${formatCurrency(upgradeCost)}.`;
+  updateMissionControls();
+  triggerHudRender();
+};
 
 const handleRecruitHire = (candidateId) => {
   const missionSystem = getMissionSystem();
@@ -1838,6 +2025,11 @@ const updateMissionControls = () => {
     crackdownText,
     logList,
     recruitList,
+    safehouseName,
+    safehouseTier,
+    safehouseEffects,
+    safehouseUpgradeButton,
+    safehouseStatus,
     trainingCrewSelect,
     trainingSpecialtySelect,
     trainingLoyaltyButton,
@@ -1868,6 +2060,11 @@ const updateMissionControls = () => {
     crackdownText,
     logList,
     recruitList,
+    safehouseName,
+    safehouseTier,
+    safehouseEffects,
+    safehouseUpgradeButton,
+    safehouseStatus,
     trainingCrewSelect,
     trainingSpecialtySelect,
     trainingLoyaltyButton,
@@ -1912,6 +2109,7 @@ const updateMissionControls = () => {
     updateCrackdownIndicator();
     updateHeatManagementPanel();
     updateMaintenancePanel();
+    updateSafehousePanel();
     return;
   }
 
@@ -2035,6 +2233,7 @@ const updateMissionControls = () => {
   updateMissionStatusText();
   updateHeatManagementPanel();
   updateMaintenancePanel();
+  updateSafehousePanel();
 };
 
 const updateMissionSelect = () => {
@@ -2128,6 +2327,91 @@ const handleMissionStart = () => {
 };
 
 const setupMissionControls = () => {
+  const controlPanel = document.querySelector('.control-panel');
+  if (controlPanel) {
+    let safehouseSection = controlPanel.querySelector('.mission-safehouse');
+    if (!safehouseSection) {
+      safehouseSection = document.createElement('section');
+      safehouseSection.className = 'mission-safehouse';
+      safehouseSection.setAttribute('aria-labelledby', 'mission-safehouse-title');
+
+      const title = document.createElement('h3');
+      title.id = 'mission-safehouse-title';
+      title.className = 'mission-details__title';
+      title.textContent = 'Safehouse Operations';
+
+      const hint = document.createElement('p');
+      hint.className = 'mission-details__hint';
+      hint.textContent = 'Upgrade the hideout to unlock passive income and daily heat reduction.';
+
+      const grid = document.createElement('dl');
+      grid.className = 'mission-details__grid mission-safehouse__grid';
+
+      const createRow = (labelText, valueElement) => {
+        const row = document.createElement('div');
+        row.className = 'mission-details__row';
+        const label = document.createElement('dt');
+        label.textContent = labelText;
+        const value = document.createElement('dd');
+        value.appendChild(valueElement);
+        row.append(label, value);
+        return row;
+      };
+
+      const nameValue = document.createElement('span');
+      nameValue.id = 'mission-safehouse-name';
+      nameValue.textContent = 'Safehouse systems initializing…';
+      grid.appendChild(createRow('Current Safehouse', nameValue));
+
+      const tierValue = document.createElement('span');
+      tierValue.id = 'mission-safehouse-tier';
+      tierValue.textContent = '—';
+      grid.appendChild(createRow('Tier', tierValue));
+
+      const effectsList = document.createElement('ul');
+      effectsList.id = 'mission-safehouse-effects';
+      effectsList.className = 'mission-details__list mission-safehouse__effects';
+      const effectsPlaceholder = document.createElement('li');
+      effectsPlaceholder.textContent = 'Safehouse intel unavailable.';
+      effectsList.appendChild(effectsPlaceholder);
+      const effectsWrapper = document.createElement('dd');
+      effectsWrapper.appendChild(effectsList);
+      const effectsRow = document.createElement('div');
+      effectsRow.className = 'mission-details__row';
+      const effectsLabel = document.createElement('dt');
+      effectsLabel.textContent = 'Perks';
+      effectsRow.append(effectsLabel, effectsWrapper);
+      grid.appendChild(effectsRow);
+
+      const upgradeButton = document.createElement('button');
+      upgradeButton.id = 'mission-safehouse-upgrade-btn';
+      upgradeButton.type = 'button';
+      upgradeButton.textContent = 'Upgrade Safehouse';
+
+      const status = document.createElement('p');
+      status.id = 'mission-safehouse-status';
+      status.className = 'control-panel__status mission-safehouse__status';
+      status.setAttribute('role', 'status');
+      status.setAttribute('aria-live', 'polite');
+
+      safehouseSection.append(title, hint, grid, upgradeButton, status);
+
+      const heatSection = controlPanel.querySelector('.mission-heat');
+      if (heatSection && heatSection.parentElement === controlPanel) {
+        controlPanel.insertBefore(safehouseSection, heatSection);
+      } else {
+        controlPanel.appendChild(safehouseSection);
+      }
+    }
+
+    missionControls.safehouseSection = safehouseSection;
+    missionControls.safehouseName = safehouseSection.querySelector('#mission-safehouse-name');
+    missionControls.safehouseTier = safehouseSection.querySelector('#mission-safehouse-tier');
+    missionControls.safehouseEffects = safehouseSection.querySelector('#mission-safehouse-effects');
+    missionControls.safehouseUpgradeButton = safehouseSection.querySelector('#mission-safehouse-upgrade-btn');
+    missionControls.safehouseStatus = safehouseSection.querySelector('#mission-safehouse-status');
+  }
+
   missionControls.select = document.getElementById('mission-select');
   missionControls.startButton = document.getElementById('start-mission-btn');
   missionControls.statusText = document.getElementById('mission-status-text');
@@ -2181,6 +2465,11 @@ const setupMissionControls = () => {
     logList,
     recruitList,
     recruitStatus,
+    safehouseName,
+    safehouseTier,
+    safehouseEffects,
+    safehouseUpgradeButton,
+    safehouseStatus,
     trainingCrewSelect,
     trainingSpecialtySelect,
     trainingLoyaltyButton,
@@ -2217,6 +2506,11 @@ const setupMissionControls = () => {
     logList,
     recruitList,
     recruitStatus,
+    safehouseName,
+    safehouseTier,
+    safehouseEffects,
+    safehouseUpgradeButton,
+    safehouseStatus,
     trainingCrewSelect,
     trainingSpecialtySelect,
     trainingLoyaltyButton,
@@ -2259,10 +2553,12 @@ const setupMissionControls = () => {
   maintenanceHeatButton.addEventListener('click', handleMaintenanceHeat);
   heatLayLowButton.addEventListener('click', handleHeatLayLow);
   heatBribeButton.addEventListener('click', handleHeatBribe);
+  missionControls.safehouseUpgradeButton?.addEventListener('click', handleSafehouseUpgrade);
 
   setRecruitStatus('');
   setTrainingStatus('');
   setPlayerStatus('');
+  missionControls.safehouseStatusDetail = '';
   clearMaintenanceStatusDetail();
   updateRecruitmentOptions();
   updateTrainingOptions();
@@ -2270,6 +2566,7 @@ const setupMissionControls = () => {
   missionControls.heatStatusDetail = '';
   updateMaintenancePanel();
   updateHeatManagementPanel();
+  updateSafehousePanel();
 
   renderMissionLog();
 
