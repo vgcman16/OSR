@@ -319,6 +319,142 @@ const createCarThiefGame = ({ canvas, context }) => {
       return;
     }
 
+    const clampNormalized = (value) => {
+      if (!Number.isFinite(value)) {
+        return 0;
+      }
+
+      if (value <= 0) {
+        return 0;
+      }
+
+      if (value >= 1) {
+        return 1;
+      }
+
+      return value;
+    };
+
+    const renderBarGauge = ({
+      x,
+      y,
+      width,
+      height,
+      value,
+      backgroundColor = 'rgba(8, 12, 20, 0.75)',
+      fillColor = '#78beff',
+      borderColor = 'rgba(120, 190, 255, 0.6)',
+      innerPadding = 2,
+    }) => {
+      if (!width || !height) {
+        return null;
+      }
+
+      const normalized = clampNormalized(value);
+      const innerWidth = Math.max(0, width - innerPadding * 2);
+      const innerHeight = Math.max(0, height - innerPadding * 2);
+
+      context.save();
+      context.fillStyle = backgroundColor;
+      context.fillRect(x, y, width, height);
+
+      if (innerWidth > 0 && innerHeight > 0 && normalized > 0) {
+        context.fillStyle = fillColor;
+        context.fillRect(
+          x + innerPadding,
+          y + innerPadding,
+          innerWidth * normalized,
+          innerHeight,
+        );
+      }
+
+      if (borderColor) {
+        context.strokeStyle = borderColor;
+        context.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+      }
+      context.restore();
+
+      return { x, y, width, height };
+    };
+
+    const renderArcGauge = ({
+      x,
+      y,
+      radius,
+      thickness = 10,
+      value,
+      startAngle = Math.PI * 0.75,
+      endAngle = Math.PI * 2.25,
+      backgroundColor = 'rgba(8, 12, 20, 0.9)',
+      trackColor = 'rgba(120, 190, 255, 0.25)',
+      fillColor = '#ff9266',
+      label = '',
+      labelFont = '12px "Segoe UI", sans-serif',
+      labelColor = '#9ac7ff',
+      valueLabel = '',
+      valueFont = '16px "Segoe UI", sans-serif',
+      valueColor = '#ffe27a',
+    }) => {
+      if (!radius || radius <= 0) {
+        return null;
+      }
+
+      const normalized = clampNormalized(value);
+      const sweep = endAngle - startAngle;
+      const filledAngle = startAngle + sweep * normalized;
+      const innerRadius = Math.max(0, radius - thickness * 0.5);
+      const bounds = {
+        x: x - radius,
+        y: y - radius,
+        width: radius * 2,
+        height: radius * 2,
+      };
+
+      context.save();
+
+      if (backgroundColor) {
+        context.beginPath();
+        context.fillStyle = backgroundColor;
+        context.arc(x, y, innerRadius, 0, Math.PI * 2, false);
+        context.fill();
+      }
+
+      context.lineWidth = thickness;
+      context.lineCap = 'round';
+
+      if (trackColor) {
+        context.beginPath();
+        context.strokeStyle = trackColor;
+        context.arc(x, y, innerRadius, startAngle, endAngle, false);
+        context.stroke();
+      }
+
+      if (normalized > 0) {
+        context.beginPath();
+        context.strokeStyle = fillColor;
+        context.arc(x, y, innerRadius, startAngle, filledAngle, false);
+        context.stroke();
+      }
+
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+
+      if (valueLabel) {
+        context.fillStyle = valueColor;
+        context.font = valueFont;
+        context.fillText(valueLabel, x, y);
+      }
+
+      if (label) {
+        context.fillStyle = labelColor;
+        context.font = labelFont;
+        context.fillText(label, x, y + innerRadius + 16);
+      }
+
+      context.restore();
+      return bounds;
+    };
+
     const renderDistrictMiniMap = () => {
       const city = state.city ?? null;
       const districts = Array.isArray(city?.districts) ? city.districts : [];
@@ -520,7 +656,17 @@ const createCarThiefGame = ({ canvas, context }) => {
     context.fillText(`Projected burn: ${formatExpense(projectedDaily)}/day`, 32, 198);
     context.fillText(`Last upkeep: ${lastExpenseLabel}`, 32, 228);
     context.fillText(`Heat: ${state.heat.toFixed(2)}`, 32, 258);
-    context.fillText(`Crackdown: ${crackdownLabel}`, 32, 288);
+    const heatGaugeBounds = renderArcGauge({
+      x: 320,
+      y: 256,
+      radius: 42,
+      thickness: 12,
+      value: clampNormalized(state.heat / 10),
+      valueLabel: state.heat.toFixed(1),
+      label: 'Heat level',
+    });
+    const crackdownLabelY = heatGaugeBounds ? heatGaugeBounds.y + heatGaugeBounds.height + 8 : 288;
+    context.fillText(`Crackdown: ${crackdownLabel}`, 32, crackdownLabelY);
     const safehouseLabel = safehouse
       ? `${safehouse.name} — ${safehouseTier?.label ?? 'Unranked'}`
       : 'None assigned';
@@ -535,19 +681,22 @@ const createCarThiefGame = ({ canvas, context }) => {
       safehousePerks.push(`${safehouseAmenities.length} amenities online`);
     }
     const safehousePerksLabel = safehousePerks.length ? ` (${safehousePerks.join(', ')})` : '';
-    context.fillText(`Safehouse: ${safehouseLabel}${safehousePerksLabel}`, 32, 318);
+    const safehouseLineY = Math.max(318, crackdownLabelY + 30);
+    context.fillText(`Safehouse: ${safehouseLabel}${safehousePerksLabel}`, 32, safehouseLineY);
 
     context.fillStyle = '#d1eaff';
     context.font = '16px "Segoe UI", sans-serif';
-    context.fillText('Crew:', 32, 332);
+    const crewLabelY = Math.max(safehouseLineY + 14, 332);
+    context.fillText('Crew:', 32, crewLabelY);
+    const crewListStartY = crewLabelY + 30;
     state.crew.forEach((member, index) => {
       const loyaltyLabel = Number.isFinite(member.loyalty) ? `L${member.loyalty}` : 'L?';
       const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
       const line = `- ${member.name} (${member.specialty}) — ${loyaltyLabel} • ${statusLabel}`;
-      context.fillText(line, 48, 362 + index * 26);
+      context.fillText(line, 48, crewListStartY + index * 26);
     });
 
-    const crewSectionBottom = 362 + state.crew.length * 26;
+    const crewSectionBottom = crewListStartY + state.crew.length * 26;
     const garageLabelY = crewSectionBottom + 40;
     context.fillText('Garage:', 32, garageLabelY);
 
@@ -678,10 +827,31 @@ const createCarThiefGame = ({ canvas, context }) => {
     const garageColumnsUsed = Math.min(Math.max(garage.length, 1), maxGarageColumns);
     const missionInfoXBase = Math.max(420, 32 + garageColumnsUsed * garageColumnWidth + 48);
     const miniMapBounds = renderDistrictMiniMap();
+    const desiredMissionWidth = 300;
     let missionInfoX = missionInfoXBase;
     if (miniMapBounds) {
-      missionInfoX = Math.min(missionInfoXBase, miniMapBounds.x - 32);
-      missionInfoX = Math.max(420, missionInfoX);
+      const maxMissionX = miniMapBounds.x - 24 - desiredMissionWidth;
+      if (maxMissionX < missionInfoX) {
+        missionInfoX = Math.max(420, maxMissionX);
+      }
+    }
+    missionInfoX = Math.max(420, missionInfoX);
+    const missionInfoRightLimit = miniMapBounds ? miniMapBounds.x - 24 : canvas.width - 32;
+    let missionPanelWidth = desiredMissionWidth;
+    if (miniMapBounds) {
+      const rawMissionWidth = missionInfoRightLimit - missionInfoX;
+      if (rawMissionWidth <= 0) {
+        missionPanelWidth = desiredMissionWidth;
+      } else if (rawMissionWidth < 180) {
+        missionPanelWidth = rawMissionWidth;
+      } else {
+        missionPanelWidth = Math.min(340, rawMissionWidth);
+      }
+    } else {
+      missionPanelWidth = Math.min(desiredMissionWidth, canvas.width - missionInfoX - 32);
+    }
+    if (!Number.isFinite(missionPanelWidth) || missionPanelWidth <= 0) {
+      missionPanelWidth = desiredMissionWidth;
     }
     let missionInfoY = 48;
     context.fillText('Mission Status:', missionInfoX, missionInfoY);
@@ -730,9 +900,29 @@ const createCarThiefGame = ({ canvas, context }) => {
           missionInfoX,
           missionInfoY,
         );
+        missionInfoY += 24;
+        renderBarGauge({
+          x: missionInfoX,
+          y: missionInfoY,
+          width: missionPanelWidth,
+          height: 14,
+          value: clampNormalized(activeMission.progress ?? 0),
+          fillColor: '#ffe27a',
+          borderColor: 'rgba(255, 214, 102, 0.8)',
+        });
         missionInfoY += 26;
       } else if (activeMission.status === 'awaiting-resolution') {
         context.fillText(`Progress: ${progressPercent}% — Resolving outcome`, missionInfoX, missionInfoY);
+        missionInfoY += 24;
+        renderBarGauge({
+          x: missionInfoX,
+          y: missionInfoY,
+          width: missionPanelWidth,
+          height: 14,
+          value: clampNormalized(activeMission.progress ?? 0),
+          fillColor: '#ffd15c',
+          borderColor: 'rgba(255, 214, 102, 0.7)',
+        });
         missionInfoY += 26;
       } else if (activeMission.status === 'completed') {
         context.fillText(`Payout: $${activeMission.payout.toLocaleString()}`, missionInfoX, missionInfoY);
