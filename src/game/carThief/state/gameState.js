@@ -16,6 +16,8 @@ class GameState {
     activeMission = null,
     missionLog = [],
     lastVehicleReport = null,
+    recruitPool = [],
+    lastExpenseReport = null,
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -28,6 +30,8 @@ class GameState {
     this.activeMission = activeMission;
     this.missionLog = Array.isArray(missionLog) ? missionLog : [];
     this.lastVehicleReport = lastVehicleReport;
+    this.recruitPool = Array.isArray(recruitPool) ? recruitPool : [];
+    this.lastExpenseReport = lastExpenseReport;
   }
 }
 
@@ -41,6 +45,36 @@ const createInitialGameState = () =>
       new Vehicle({ model: 'Safehouse Van', topSpeed: 95, handling: 4 }),
     ],
     lastVehicleReport: null,
+    recruitPool: [
+      {
+        id: 'candidate-glitch',
+        name: 'Glitch',
+        specialty: 'infiltrator',
+        upkeep: 680,
+        loyalty: 2,
+        hiringCost: 6500,
+        description: 'Ghosts through security to keep heat low and plans steady exits.',
+      },
+      {
+        id: 'candidate-omen',
+        name: 'Omen',
+        specialty: 'tactician',
+        upkeep: 720,
+        loyalty: 3,
+        hiringCost: 7800,
+        description: 'Charts contingencies that trim mission time and risk.',
+      },
+      {
+        id: 'candidate-keystroke',
+        name: 'Keystroke',
+        specialty: 'spotter',
+        upkeep: 560,
+        loyalty: 2,
+        hiringCost: 5200,
+        description: 'Feeds intel from rooftops to tighten odds and payouts.',
+      },
+    ],
+    lastExpenseReport: null,
   });
 
 export { GameState, createInitialGameState };

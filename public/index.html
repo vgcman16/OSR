@@ -78,6 +78,46 @@
             aria-labelledby="mission-crew-hint"
           ></div>
         </section>
+        <section class="mission-recruit" aria-labelledby="mission-recruit-title">
+          <h3 id="mission-recruit-title" class="mission-details__title">Recruit Specialists</h3>
+          <p class="mission-details__hint">
+            Spend funds to expand the crew—each hire increases daily payroll.
+          </p>
+          <div
+            id="mission-recruit-list"
+            class="mission-recruit__list"
+            role="group"
+            aria-live="polite"
+          ></div>
+          <p
+            id="mission-recruit-status"
+            class="control-panel__status mission-recruit__status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </section>
+        <section class="mission-training" aria-labelledby="mission-training-title">
+          <h3 id="mission-training-title" class="mission-details__title">Crew Training</h3>
+          <p class="mission-details__hint">
+            Invest in loyalty or retrain specialists to unlock new mission modifiers.
+          </p>
+          <label class="mission-training__label" for="mission-training-crew">Crew member</label>
+          <select id="mission-training-crew" name="mission-training-crew"></select>
+          <div class="mission-training__actions">
+            <button id="mission-training-loyalty-btn" type="button">Boost Loyalty</button>
+          </div>
+          <label class="mission-training__label" for="mission-training-specialty">Specialty focus</label>
+          <select id="mission-training-specialty" name="mission-training-specialty"></select>
+          <div class="mission-training__actions">
+            <button id="mission-training-specialty-btn" type="button">Specialty Training</button>
+          </div>
+          <p
+            id="mission-training-status"
+            class="control-panel__status mission-training__status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </section>
         <section class="mission-vehicle" aria-labelledby="mission-vehicle-title">
           <h3 id="mission-vehicle-title" class="mission-details__title">Select Vehicle</h3>
           <p id="mission-vehicle-hint" class="mission-details__hint">

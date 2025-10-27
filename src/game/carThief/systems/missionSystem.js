@@ -43,7 +43,10 @@ const deriveBaseSuccessChance = (difficultyValue) => {
   return Math.max(0.3, Math.min(0.85, baseline));
 };
 
-const summarizeCrewEffect = (member, { durationDelta = 0, payoutDelta = 0, successDelta = 0 }) => {
+const summarizeCrewEffect = (
+  member,
+  { durationDelta = 0, payoutDelta = 0, successDelta = 0, heatDelta = 0 },
+) => {
   const adjustments = [];
   if (durationDelta) {
     const label = durationDelta < 0 ? 'faster' : 'slower';
@@ -55,6 +58,10 @@ const summarizeCrewEffect = (member, { durationDelta = 0, payoutDelta = 0, succe
   }
   if (successDelta) {
     adjustments.push(`${successDelta > 0 ? '+' : '-'}${Math.abs(Math.round(successDelta * 100))}% success`);
+  }
+  if (heatDelta) {
+    const label = heatDelta < 0 ? 'less' : 'more';
+    adjustments.push(`${Math.abs(Math.round(heatDelta * 100))}% ${label} heat`);
   }
 
   if (!adjustments.length) {
@@ -405,6 +412,7 @@ class MissionSystem {
     let durationMultiplier = 1;
     let payoutMultiplier = 1;
     let successBonus = 0;
+    let heatMultiplier = 1;
     const summary = [];
 
     crewMembers.forEach((member) => {
@@ -414,7 +422,7 @@ class MissionSystem {
 
       const loyalty = Number(member.loyalty) >= 0 ? Number(member.loyalty) : 0;
       const safeLoyalty = Number.isFinite(loyalty) ? loyalty : 0;
-      const contribution = { durationDelta: 0, payoutDelta: 0, successDelta: 0 };
+      const contribution = { durationDelta: 0, payoutDelta: 0, successDelta: 0, heatDelta: 0 };
 
       switch ((member.specialty ?? '').toLowerCase()) {
         case 'wheelman': {
@@ -450,6 +458,39 @@ class MissionSystem {
           contribution.successDelta += success;
           break;
         }
+        case 'infiltrator': {
+          const stealthEdge = Math.min(0.45, 0.18 + 0.05 * safeLoyalty);
+          heatMultiplier *= Math.max(0.25, 1 - stealthEdge);
+          contribution.heatDelta = -stealthEdge;
+          const tempoBoost = Math.min(0.12, 0.02 * (safeLoyalty + 1));
+          durationMultiplier -= tempoBoost;
+          contribution.durationDelta -= tempoBoost;
+          const precisionBonus = 0.015 * (safeLoyalty + 1);
+          successBonus += precisionBonus;
+          contribution.successDelta += precisionBonus;
+          break;
+        }
+        case 'tactician': {
+          const tempoBoost = Math.min(0.25, 0.05 + 0.015 * safeLoyalty);
+          durationMultiplier -= tempoBoost;
+          contribution.durationDelta -= tempoBoost;
+          const strategyBonus = 0.05 + 0.015 * safeLoyalty;
+          successBonus += strategyBonus;
+          contribution.successDelta += strategyBonus;
+          const heatTrim = Math.min(0.25, 0.05 * (1 + safeLoyalty / 2));
+          heatMultiplier *= Math.max(0.3, 1 - heatTrim);
+          contribution.heatDelta = -heatTrim;
+          break;
+        }
+        case 'spotter': {
+          const intelBonus = 0.03 + 0.01 * safeLoyalty;
+          successBonus += intelBonus;
+          contribution.successDelta += intelBonus;
+          const payoutBoost = 0.015 * (1 + safeLoyalty / 3);
+          payoutMultiplier += payoutBoost;
+          contribution.payoutDelta = payoutBoost;
+          break;
+        }
         default: {
           const genericBonus = 0.02 * (1 + safeLoyalty / 2);
           successBonus += genericBonus;
@@ -464,8 +505,11 @@ class MissionSystem {
     durationMultiplier = Math.max(0.5, durationMultiplier);
     payoutMultiplier = Math.max(0.5, payoutMultiplier);
 
-    let heatAdjustment = 0;
-    let adjustedHeat = baseHeat;
+    heatMultiplier = Math.max(0.2, Math.min(2.5, heatMultiplier));
+
+    const crewAdjustedHeat = Math.max(0, baseHeat * heatMultiplier);
+    let heatAdjustment = crewAdjustedHeat - baseHeat;
+    let adjustedHeat = crewAdjustedHeat;
     let vehicleImpact = null;
 
     if (vehicle) {
@@ -494,8 +538,9 @@ class MissionSystem {
       const difficulty = coerceFiniteNumber(mission.difficulty, 1);
       const conditionHeat = Math.max(0, (1 - safeCondition) * (0.8 + 0.2 * difficulty));
       const maneuverMitigation = Math.max(0, handlingRatio - 1) * 0.15;
-      heatAdjustment = safeHeatRating * 0.3 + conditionHeat - maneuverMitigation;
-      adjustedHeat = Math.max(0, baseHeat + heatAdjustment);
+      const vehicleHeatDelta = safeHeatRating * 0.3 + conditionHeat - maneuverMitigation;
+      heatAdjustment = crewAdjustedHeat - baseHeat + vehicleHeatDelta;
+      adjustedHeat = Math.max(0, crewAdjustedHeat + vehicleHeatDelta);
 
       const wearBaseline = 0.07 + 0.025 * difficulty;
       const wearModifier = clamp(
@@ -553,8 +598,8 @@ class MissionSystem {
       };
     } else {
       summary.push('Vehicle: No assignment selected.');
-      adjustedHeat = Math.max(0, baseHeat);
-      heatAdjustment = 0;
+      adjustedHeat = crewAdjustedHeat;
+      heatAdjustment = crewAdjustedHeat - baseHeat;
     }
 
     const adjustedDuration = Math.max(5, Math.round(baseDuration * durationMultiplier));
@@ -575,6 +620,7 @@ class MissionSystem {
       durationMultiplier,
       payoutMultiplier,
       successBonus,
+      heatMultiplier,
       vehicleImpact,
     };
   }

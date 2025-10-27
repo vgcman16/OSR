@@ -17,6 +17,18 @@ const createCarThiefGame = ({ canvas, context }) => {
 
     const crackdownTier = heatSystem.getCurrentTierConfig();
     const crackdownLabel = crackdownTier?.label ?? 'Unknown';
+    const formatExpense = (value) => {
+      const numeric = Number.isFinite(value) ? value : 0;
+      return `$${Math.max(0, Math.round(numeric)).toLocaleString()}`;
+    };
+    const payroll = economySystem.getCrewPayroll();
+    const projectedDaily = economySystem.getProjectedDailyExpenses();
+    const lastExpenseReport = economySystem.getLastExpenseReport();
+    const lastExpenseLabel = lastExpenseReport
+      ? `${formatExpense(lastExpenseReport.total)} (base ${formatExpense(
+          lastExpenseReport.base,
+        )} + crew ${formatExpense(lastExpenseReport.payroll)})`
+      : '—';
 
     context.fillStyle = '#121822';
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -27,20 +39,23 @@ const createCarThiefGame = ({ canvas, context }) => {
     context.fillText(`City: ${state.city.name}`, 32, 48);
     context.fillText(`Day ${state.day}`, 32, 78);
     context.fillText(`Funds: $${state.funds.toLocaleString()}`, 32, 108);
-    context.fillText(`Heat: ${state.heat.toFixed(2)}`, 32, 138);
-    context.fillText(`Crackdown: ${crackdownLabel}`, 32, 168);
+    context.fillText(`Payroll: ${formatExpense(payroll)}/day`, 32, 138);
+    context.fillText(`Projected burn: ${formatExpense(projectedDaily)}/day`, 32, 168);
+    context.fillText(`Last upkeep: ${lastExpenseLabel}`, 32, 198);
+    context.fillText(`Heat: ${state.heat.toFixed(2)}`, 32, 228);
+    context.fillText(`Crackdown: ${crackdownLabel}`, 32, 258);
 
     context.fillStyle = '#d1eaff';
     context.font = '16px "Segoe UI", sans-serif';
-    context.fillText('Crew:', 32, 212);
+    context.fillText('Crew:', 32, 302);
     state.crew.forEach((member, index) => {
       const loyaltyLabel = Number.isFinite(member.loyalty) ? `L${member.loyalty}` : 'L?';
       const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
       const line = `- ${member.name} (${member.specialty}) — ${loyaltyLabel} • ${statusLabel}`;
-      context.fillText(line, 48, 242 + index * 26);
+      context.fillText(line, 48, 332 + index * 26);
     });
 
-    const crewSectionBottom = 242 + state.crew.length * 26;
+    const crewSectionBottom = 332 + state.crew.length * 26;
     const garageLabelY = crewSectionBottom + 40;
     context.fillText('Garage:', 32, garageLabelY);
 
