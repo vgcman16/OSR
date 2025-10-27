@@ -21,6 +21,7 @@ class GameState {
     recruitPool = [],
     lastExpenseReport = null,
     pendingDebts = [],
+    followUpSequence = 0,
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -47,6 +48,104 @@ class GameState {
     this.recruitPool = Array.isArray(recruitPool) ? recruitPool : [];
     this.lastExpenseReport = lastExpenseReport;
     this.pendingDebts = Array.isArray(pendingDebts) ? pendingDebts : [];
+    this.followUpSequence = Number.isFinite(followUpSequence) ? followUpSequence : 0;
+  }
+
+  toJSON() {
+    const serializeArray = (collection) => {
+      if (!Array.isArray(collection)) {
+        return [];
+      }
+
+      return collection.map((entry) => {
+        if (entry && typeof entry.toJSON === 'function') {
+          return entry.toJSON();
+        }
+
+        if (entry && typeof entry === 'object') {
+          return { ...entry };
+        }
+
+        return entry;
+      });
+    };
+
+    const serializeObject = (value) => {
+      if (!value || typeof value !== 'object') {
+        return value ?? null;
+      }
+
+      if (typeof value.toJSON === 'function') {
+        return value.toJSON();
+      }
+
+      return { ...value };
+    };
+
+    return {
+      day: this.day,
+      funds: this.funds,
+      heat: this.heat,
+      heatTier: this.heatTier,
+      player: serializeObject(this.player),
+      crew: serializeArray(this.crew),
+      garage: serializeArray(this.garage),
+      city: this.city instanceof CityMap
+        ? {
+            name: this.city.name,
+            districts: Array.isArray(this.city.districts)
+              ? this.city.districts.map((district) => ({ ...district }))
+              : [],
+          }
+        : serializeObject(this.city),
+      safehouses: this.safehouses?.toJSON ? this.safehouses.toJSON() : serializeObject(this.safehouses),
+      activeMission: serializeObject(this.activeMission),
+      missionLog: serializeArray(this.missionLog),
+      lastVehicleReport: serializeObject(this.lastVehicleReport),
+      recruitPool: serializeArray(this.recruitPool),
+      lastExpenseReport: serializeObject(this.lastExpenseReport),
+      pendingDebts: serializeArray(this.pendingDebts),
+      followUpSequence: this.followUpSequence,
+    };
+  }
+
+  static fromJSON(data = {}) {
+    if (data instanceof GameState) {
+      return data;
+    }
+
+    if (!data || typeof data !== 'object') {
+      return new GameState();
+    }
+
+    const safehouses = SafehouseCollection.fromJSON
+      ? SafehouseCollection.fromJSON(data.safehouses)
+      : new SafehouseCollection(data.safehouses ?? []);
+
+    const player = Player.fromJSON ? Player.fromJSON(data.player) : new Player(data.player);
+
+    const crew = Array.isArray(data.crew)
+      ? data.crew
+          .map((entry) => CrewMember.fromJSON?.(entry) ?? (entry ? new CrewMember(entry) : null))
+          .filter(Boolean)
+      : [];
+
+    const garage = Array.isArray(data.garage)
+      ? data.garage
+          .map((entry) => Vehicle.fromJSON?.(entry) ?? (entry ? new Vehicle(entry) : null))
+          .filter(Boolean)
+      : [];
+
+    const city = data.city instanceof CityMap ? data.city : new CityMap(data.city ?? {});
+
+    return new GameState({
+      ...data,
+      player,
+      crew,
+      garage,
+      city,
+      safehouses,
+    });
   }
 }
 
