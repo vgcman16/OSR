@@ -1,4 +1,5 @@
 import { createCarThiefGame } from './game/carThief/index.js';
+import { CrewMember } from './game/carThief/entities/crewMember.js';
 
 let gameInstance = null;
 
@@ -31,6 +32,13 @@ const missionControls = {
   vehicleList: null,
   crackdownText: null,
   logList: null,
+  recruitList: null,
+  recruitStatus: null,
+  trainingCrewSelect: null,
+  trainingSpecialtySelect: null,
+  trainingLoyaltyButton: null,
+  trainingSpecialtyButton: null,
+  trainingStatus: null,
   selectedCrewIds: [],
   selectedVehicleId: null,
 };
@@ -39,9 +47,23 @@ let missionControlSyncHandle = null;
 
 const CONTROL_SYNC_INTERVAL_MS = 500;
 
+const SPECIALTY_OPTIONS = [
+  { value: 'wheelman', label: 'Wheelman — getaways and pace' },
+  { value: 'hacker', label: 'Hacker — disable security grids' },
+  { value: 'mechanic', label: 'Mechanic — squeeze extra payout' },
+  { value: 'face', label: 'Face — social leverage' },
+  { value: 'infiltrator', label: 'Infiltrator — slip past surveillance' },
+  { value: 'tactician', label: 'Tactician — choreograph operations' },
+  { value: 'spotter', label: 'Spotter — relay recon intel' },
+];
+
+const LOYALTY_TRAINING_COST = 2000;
+const SPECIALTY_TRAINING_COST = 3500;
+
 const getMissionSystem = () => gameInstance?.systems?.mission ?? null;
 const getEconomySystem = () => gameInstance?.systems?.economy ?? null;
 const getHeatSystem = () => gameInstance?.systems?.heat ?? null;
+const getSharedState = () => gameInstance?.state ?? getMissionSystem()?.state ?? null;
 
 const triggerHudRender = () => {
   if (gameInstance?.loop?.render) {
@@ -187,6 +209,325 @@ const formatAdjustedValue = (
   const delta = adjusted - base;
   const sign = delta >= 0 ? '+' : '-';
   return `${formatValue(base)} → ${formatValue(adjusted)} (${sign}${formatDelta(Math.abs(delta))})`;
+};
+
+const setRecruitStatus = (message) => {
+  if (!missionControls.recruitStatus) {
+    return;
+  }
+
+  missionControls.recruitStatus.textContent = message ?? '';
+};
+
+const setTrainingStatus = (message) => {
+  if (!missionControls.trainingStatus) {
+    return;
+  }
+
+  missionControls.trainingStatus.textContent = message ?? '';
+};
+
+const handleRecruitHire = (candidateId) => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+
+  if (!missionSystem || !economySystem || !state) {
+    setRecruitStatus('Crew manifest unavailable.');
+    return;
+  }
+
+  const recruitPool = Array.isArray(state.recruitPool) ? state.recruitPool : [];
+  const candidateIndex = recruitPool.findIndex((entry) => entry?.id === candidateId);
+
+  if (candidateIndex === -1) {
+    setRecruitStatus('Candidate data not found.');
+    return;
+  }
+
+  const candidate = recruitPool[candidateIndex];
+  const hireCost = Number(candidate?.hiringCost);
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+
+  if (!Number.isFinite(hireCost) || hireCost < 0) {
+    setRecruitStatus('This recruit has an invalid contract.');
+    return;
+  }
+
+  if (funds < hireCost) {
+    setRecruitStatus('Insufficient funds to bring this specialist onboard.');
+    return;
+  }
+
+  economySystem.adjustFunds(-hireCost);
+
+  const newMember = new CrewMember({
+    name: candidate.name,
+    specialty: candidate.specialty,
+    upkeep: candidate.upkeep,
+    loyalty: candidate.loyalty,
+  });
+
+  if (!Array.isArray(state.crew)) {
+    state.crew = [];
+  }
+
+  state.crew.push(newMember);
+  recruitPool.splice(candidateIndex, 1);
+
+  setRecruitStatus(`${candidate.name} joins the crew as our newest ${candidate.specialty}.`);
+  updateCrewSelectionOptions();
+  updateRecruitmentOptions();
+  updateTrainingOptions();
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const updateRecruitmentOptions = () => {
+  const recruitContainer = missionControls.recruitList;
+  if (!recruitContainer) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+
+  recruitContainer.innerHTML = '';
+
+  if (!missionSystem || !economySystem || !state) {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = 'Crew management channel syncing…';
+    recruitContainer.appendChild(placeholder);
+    return;
+  }
+
+  const recruitPool = Array.isArray(state.recruitPool) ? state.recruitPool : [];
+
+  if (!recruitPool.length) {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = 'No new leads at the moment. Complete missions to surface more talent.';
+    recruitContainer.appendChild(placeholder);
+    return;
+  }
+
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+
+  recruitPool.forEach((candidate) => {
+    if (!candidate) {
+      return;
+    }
+
+    const card = document.createElement('article');
+    card.className = 'mission-recruit__card';
+
+    const title = document.createElement('h4');
+    title.className = 'mission-recruit__name';
+    const loyaltyLabel = Number.isFinite(candidate.loyalty) ? `L${candidate.loyalty}` : 'L?';
+    title.textContent = `${candidate.name} — ${candidate.specialty} (${loyaltyLabel})`;
+
+    const description = document.createElement('p');
+    description.className = 'mission-recruit__description';
+    description.textContent = candidate.description ?? 'Eager to prove their worth on the next score.';
+
+    const cost = Number(candidate.hiringCost);
+    const upkeep = Number(candidate.upkeep);
+    const costLine = document.createElement('p');
+    costLine.className = 'mission-recruit__cost';
+    costLine.textContent = `${formatCurrency(Number.isFinite(cost) ? cost : 0)} hire • ${formatCurrency(Number.isFinite(upkeep) ? upkeep : 0)}/day`;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mission-recruit__button';
+    button.textContent = 'Recruit';
+    const canAfford = Number.isFinite(cost) ? funds >= cost : true;
+    button.disabled = !canAfford;
+    if (!canAfford) {
+      button.title = 'Insufficient funds';
+    }
+    button.addEventListener('click', () => handleRecruitHire(candidate.id));
+
+    card.appendChild(title);
+    card.appendChild(description);
+    card.appendChild(costLine);
+    card.appendChild(button);
+
+    recruitContainer.appendChild(card);
+  });
+};
+
+const updateTrainingOptions = () => {
+  const crewSelect = missionControls.trainingCrewSelect;
+  const specialtySelect = missionControls.trainingSpecialtySelect;
+  const loyaltyButton = missionControls.trainingLoyaltyButton;
+  const specialtyButton = missionControls.trainingSpecialtyButton;
+
+  if (!crewSelect || !specialtySelect || !loyaltyButton || !specialtyButton) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const crew = Array.isArray(state?.crew) ? state.crew : [];
+  const funds = Number.isFinite(state?.funds) ? state.funds : 0;
+
+  const previousSelection = crewSelect.value;
+  crewSelect.innerHTML = '';
+
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = crew.length ? 'Select crew member' : 'No crew available';
+  placeholder.disabled = true;
+  placeholder.selected = true;
+  crewSelect.appendChild(placeholder);
+
+  crew.forEach((member) => {
+    if (!member) {
+      return;
+    }
+
+    const option = document.createElement('option');
+    option.value = member.id;
+    const loyaltyLabel = Number.isFinite(member.loyalty) ? `L${member.loyalty}` : 'L?';
+    option.textContent = `${member.name} — ${member.specialty} (${loyaltyLabel})`;
+    crewSelect.appendChild(option);
+  });
+
+  if (crew.some((member) => member?.id === previousSelection)) {
+    crewSelect.value = previousSelection;
+  }
+
+  const currentSelection = crew.find((member) => member?.id === crewSelect.value) ?? null;
+
+  const previousSpecialty = specialtySelect.value;
+  specialtySelect.innerHTML = '';
+  SPECIALTY_OPTIONS.forEach((entry) => {
+    const option = document.createElement('option');
+    option.value = entry.value;
+    option.textContent = entry.label;
+    specialtySelect.appendChild(option);
+  });
+
+  if (SPECIALTY_OPTIONS.some((entry) => entry.value === previousSpecialty)) {
+    specialtySelect.value = previousSpecialty;
+  }
+
+  if (!specialtySelect.value && SPECIALTY_OPTIONS.length) {
+    specialtySelect.value = SPECIALTY_OPTIONS[0].value;
+  }
+
+  const canTrain = Boolean(missionSystem && economySystem && currentSelection);
+  const atMaxLoyalty = currentSelection ? Number(currentSelection.loyalty) >= 5 : true;
+
+  loyaltyButton.disabled =
+    !canTrain ||
+    atMaxLoyalty ||
+    funds < LOYALTY_TRAINING_COST;
+  loyaltyButton.textContent = `Boost Loyalty (${formatCurrency(LOYALTY_TRAINING_COST)})`;
+
+  const desiredSpecialty = specialtySelect.value;
+  const alreadySpecialty = currentSelection
+    ? (currentSelection.specialty ?? '').toLowerCase() === desiredSpecialty
+    : false;
+  specialtyButton.disabled =
+    !canTrain ||
+    alreadySpecialty ||
+    funds < SPECIALTY_TRAINING_COST;
+  specialtyButton.textContent = `Specialty Training (${formatCurrency(SPECIALTY_TRAINING_COST)})`;
+};
+
+const handleLoyaltyTraining = () => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const crewSelect = missionControls.trainingCrewSelect;
+
+  if (!missionSystem || !economySystem || !state || !crewSelect) {
+    setTrainingStatus('Training systems unavailable.');
+    return;
+  }
+
+  const crew = Array.isArray(state.crew) ? state.crew : [];
+  const selectedId = crewSelect.value;
+  const member = crew.find((entry) => entry?.id === selectedId);
+
+  if (!member) {
+    setTrainingStatus('Select a crew member to coach.');
+    return;
+  }
+
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  if (funds < LOYALTY_TRAINING_COST) {
+    setTrainingStatus('Insufficient funds for loyalty training.');
+    return;
+  }
+
+  if (Number(member.loyalty) >= 5) {
+    setTrainingStatus(`${member.name} is already fiercely loyal.`);
+    return;
+  }
+
+  economySystem.adjustFunds(-LOYALTY_TRAINING_COST);
+  if (typeof member.adjustLoyalty === 'function') {
+    member.adjustLoyalty(1);
+  } else {
+    const currentLoyalty = Number.isFinite(member.loyalty) ? member.loyalty : 0;
+    member.loyalty = Math.max(0, Math.min(5, currentLoyalty + 1));
+  }
+
+  setTrainingStatus(`${member.name}'s loyalty climbs to L${member.loyalty}.`);
+  updateTrainingOptions();
+  updateCrewSelectionOptions();
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleSpecialtyTraining = () => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const crewSelect = missionControls.trainingCrewSelect;
+  const specialtySelect = missionControls.trainingSpecialtySelect;
+
+  if (!missionSystem || !economySystem || !state || !crewSelect || !specialtySelect) {
+    setTrainingStatus('Training systems unavailable.');
+    return;
+  }
+
+  const crew = Array.isArray(state.crew) ? state.crew : [];
+  const selectedId = crewSelect.value;
+  const member = crew.find((entry) => entry?.id === selectedId);
+
+  if (!member) {
+    setTrainingStatus('Select a crew member to specialize.');
+    return;
+  }
+
+  const desiredSpecialty = specialtySelect.value;
+  if (!desiredSpecialty) {
+    setTrainingStatus('Choose a specialty focus before training.');
+    return;
+  }
+
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  if (funds < SPECIALTY_TRAINING_COST) {
+    setTrainingStatus('Insufficient funds for specialty training.');
+    return;
+  }
+
+  if ((member.specialty ?? '').toLowerCase() === desiredSpecialty.toLowerCase()) {
+    setTrainingStatus(`${member.name} already operates as a ${desiredSpecialty}.`);
+    return;
+  }
+
+  economySystem.adjustFunds(-SPECIALTY_TRAINING_COST);
+  member.specialty = desiredSpecialty;
+  setTrainingStatus(`${member.name} retrains as a ${desiredSpecialty}.`);
+  updateTrainingOptions();
+  updateCrewSelectionOptions();
+  updateMissionControls();
+  triggerHudRender();
 };
 
 const updateCrewSelectionOptions = () => {
@@ -489,6 +830,11 @@ const updateMissionControls = () => {
     vehicleList,
     crackdownText,
     logList,
+    recruitList,
+    trainingCrewSelect,
+    trainingSpecialtySelect,
+    trainingLoyaltyButton,
+    trainingSpecialtyButton,
   } = missionControls;
 
   const controls = [select, startButton];
@@ -504,6 +850,11 @@ const updateMissionControls = () => {
     vehicleList,
     crackdownText,
     logList,
+    recruitList,
+    trainingCrewSelect,
+    trainingSpecialtySelect,
+    trainingLoyaltyButton,
+    trainingSpecialtyButton,
   ];
   const controlsReady = [...controls, ...detailElements].every(Boolean);
 
@@ -513,6 +864,8 @@ const updateMissionControls = () => {
 
   updateCrewSelectionOptions();
   updateVehicleSelectionOptions();
+  updateRecruitmentOptions();
+  updateTrainingOptions();
 
   const isReady = Boolean(missionSystem && economySystem);
   controls.forEach((control) => {
@@ -737,6 +1090,13 @@ const setupMissionControls = () => {
   missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
   missionControls.logList = document.getElementById('mission-log-list');
+  missionControls.recruitList = document.getElementById('mission-recruit-list');
+  missionControls.recruitStatus = document.getElementById('mission-recruit-status');
+  missionControls.trainingCrewSelect = document.getElementById('mission-training-crew');
+  missionControls.trainingSpecialtySelect = document.getElementById('mission-training-specialty');
+  missionControls.trainingLoyaltyButton = document.getElementById('mission-training-loyalty-btn');
+  missionControls.trainingSpecialtyButton = document.getElementById('mission-training-specialty-btn');
+  missionControls.trainingStatus = document.getElementById('mission-training-status');
 
   const {
     select,
@@ -752,6 +1112,13 @@ const setupMissionControls = () => {
     vehicleList,
     crackdownText,
     logList,
+    recruitList,
+    recruitStatus,
+    trainingCrewSelect,
+    trainingSpecialtySelect,
+    trainingLoyaltyButton,
+    trainingSpecialtyButton,
+    trainingStatus,
   } = missionControls;
 
   const controlsReady = [
@@ -768,6 +1135,13 @@ const setupMissionControls = () => {
     vehicleList,
     crackdownText,
     logList,
+    recruitList,
+    recruitStatus,
+    trainingCrewSelect,
+    trainingSpecialtySelect,
+    trainingLoyaltyButton,
+    trainingSpecialtyButton,
+    trainingStatus,
   ].every(Boolean);
 
   if (!controlsReady) {
@@ -780,6 +1154,15 @@ const setupMissionControls = () => {
     missionControls.selectedVehicleId = null;
     updateMissionControls();
   });
+  trainingCrewSelect.addEventListener('change', updateTrainingOptions);
+  trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
+  trainingLoyaltyButton.addEventListener('click', handleLoyaltyTraining);
+  trainingSpecialtyButton.addEventListener('click', handleSpecialtyTraining);
+
+  setRecruitStatus('');
+  setTrainingStatus('');
+  updateRecruitmentOptions();
+  updateTrainingOptions();
 
   renderMissionLog();
 
