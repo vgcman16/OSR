@@ -1,4 +1,5 @@
 import { getActiveSafehouseFromState } from '../world/safehouse.js';
+import { computeSafehouseFacilityBonuses } from '../world/safehouseEffects.js';
 
 const DAY_LENGTH_SECONDS = 45;
 
@@ -29,7 +30,13 @@ class EconomySystem {
     }
 
     const modifier = safehouse.getOverheadModifier();
-    return Number.isFinite(modifier) ? modifier : 0;
+    const facilityBonuses = computeSafehouseFacilityBonuses(safehouse);
+    const facilityModifier = Number.isFinite(facilityBonuses.overheadModifierBonus)
+      ? facilityBonuses.overheadModifierBonus
+      : 0;
+
+    const safeModifier = Number.isFinite(modifier) ? modifier : 0;
+    return safeModifier + facilityModifier;
   }
 
   getSafehousePassiveIncome() {
@@ -39,7 +46,13 @@ class EconomySystem {
     }
 
     const income = safehouse.getPassiveIncome();
-    return Number.isFinite(income) ? income : 0;
+    const facilityBonuses = computeSafehouseFacilityBonuses(safehouse);
+    const facilityIncome = Number.isFinite(facilityBonuses.passiveIncomeBonus)
+      ? facilityBonuses.passiveIncomeBonus
+      : 0;
+
+    const safeIncome = Number.isFinite(income) ? income : 0;
+    return safeIncome + facilityIncome;
   }
 
   getActiveStorageCapacity() {
@@ -159,6 +172,12 @@ class EconomySystem {
   recoverCrewFatigue(days = 1) {
     const crew = Array.isArray(this.state.crew) ? this.state.crew : [];
     let fatigueAdjusted = false;
+    const safehouse = this.getActiveSafehouse();
+    const facilityBonuses = computeSafehouseFacilityBonuses(safehouse);
+    const restBonus = Number.isFinite(facilityBonuses.crewRestBonus)
+      ? facilityBonuses.crewRestBonus
+      : 0;
+    const recoveryMultiplier = 1 + Math.max(0, restBonus);
     crew.forEach((member) => {
       if (!member || typeof member !== 'object') {
         return;
@@ -167,9 +186,9 @@ class EconomySystem {
       const before = Number(member.fatigue);
 
       if (typeof member.applyRestRecovery === 'function') {
-        member.applyRestRecovery(days);
+        member.applyRestRecovery(days, { recoveryMultiplier });
       } else if (typeof member.recoverFatigue === 'function') {
-        member.recoverFatigue(days);
+        member.recoverFatigue(days, { recoveryMultiplier });
       }
 
       const after = Number(member.fatigue);

@@ -558,31 +558,41 @@ class CrewMember {
     return this.perks.slice();
   }
 
-  applyRestRecovery(days = 1) {
+  applyRestRecovery(days = 1, { recoveryMultiplier = 1 } = {}) {
     const normalizedDays = Number.isFinite(days) ? Math.max(0, days) : 0;
     if (normalizedDays <= 0) {
       return this.getFatigueLevel();
     }
 
     if (!this.hasActiveRestOrder()) {
-      return this.recoverFatigue(normalizedDays);
+      return this.recoverFatigue(normalizedDays, { recoveryMultiplier });
     }
 
     const plan = this.restPlan;
     const restMultiplier = Number.isFinite(plan.recoveryMultiplier)
       ? Math.max(1, plan.recoveryMultiplier)
       : CREW_REST_CONFIG.recoveryMultiplier;
+    const normalizedRecoveryMultiplier = Number.isFinite(recoveryMultiplier) && recoveryMultiplier > 0
+      ? recoveryMultiplier
+      : 1;
+    const combinedMultiplier = restMultiplier * normalizedRecoveryMultiplier;
 
     let remainingDays = normalizedDays;
     const acceleratedDays = Math.min(plan.remainingDays, remainingDays);
     if (acceleratedDays > 0) {
-      this.recoverFatigue(acceleratedDays, { recoveryMultiplier: restMultiplier, preserveStatus: true });
+      this.recoverFatigue(acceleratedDays, {
+        recoveryMultiplier: combinedMultiplier,
+        preserveStatus: true,
+      });
       plan.remainingDays -= acceleratedDays;
       remainingDays -= acceleratedDays;
     }
 
     if (remainingDays > 0) {
-      this.recoverFatigue(remainingDays, { preserveStatus: true });
+      this.recoverFatigue(remainingDays, {
+        recoveryMultiplier: normalizedRecoveryMultiplier,
+        preserveStatus: true,
+      });
     }
 
     if (plan.remainingDays <= 0 || this.getFatigueLevel() === 0) {
