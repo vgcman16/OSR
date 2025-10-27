@@ -51,11 +51,15 @@ const createCarThiefGame = ({ canvas, context }) => {
       const vehicleX = 32 + columnIndex * garageColumnWidth;
       const vehicleY = garageStartY + rowIndex * garageRowHeight;
 
-      const condition = typeof vehicle.condition === 'number' ? Math.round(vehicle.condition) : 'N/A';
+      const conditionPercent =
+        typeof vehicle.condition === 'number'
+          ? Math.round(Math.max(0, Math.min(vehicle.condition, 1)) * 100)
+          : null;
+      const conditionLabel = conditionPercent === null ? 'N/A' : `${conditionPercent}%`;
       const heat = typeof vehicle.heat === 'number' ? vehicle.heat.toFixed(1) : 'N/A';
 
       context.fillText(vehicle.model ?? 'Unknown vehicle', vehicleX, vehicleY);
-      context.fillText(`Condition: ${condition}%`, vehicleX, vehicleY + 20);
+      context.fillText(`Condition: ${conditionLabel}`, vehicleX, vehicleY + 20);
       context.fillText(`Heat: ${heat}`, vehicleX, vehicleY + 40);
     });
 
