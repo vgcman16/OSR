@@ -4059,9 +4059,9 @@ const updateMissionControls = () => {
         ? `Eligible under the ${crackdownInfo.label.toLowerCase()} crackdown.`
         : 'All contracts are open.';
 
-    let crewImpact = (() => {
+    const crewImpactSummary = (() => {
       if (selectedMission.status === 'available') {
-        const summary = preview?.summary ?? [];
+        const summary = Array.isArray(preview?.summary) ? preview.summary : [];
         return summary.length ? summary : ['No crew bonuses applied.'];
       }
 
@@ -4072,6 +4072,30 @@ const updateMissionControls = () => {
         ? summary
         : ['Crew assignments locked in.', 'Vehicle assignment locked in.'];
     })();
+
+    const crewPerkSummary = (() => {
+      if (selectedMission.status === 'available') {
+        return Array.isArray(preview?.perkSummary) ? preview.perkSummary : [];
+      }
+
+      if (Array.isArray(selectedMission.crewPerkSummary) && selectedMission.crewPerkSummary.length) {
+        return selectedMission.crewPerkSummary;
+      }
+
+      if (Array.isArray(selectedMission.assignedCrewPerkSummary) && selectedMission.assignedCrewPerkSummary.length) {
+        return selectedMission.assignedCrewPerkSummary;
+      }
+
+      return [];
+    })();
+
+    let crewImpact = crewImpactSummary.slice();
+    if (!crewImpact.length) {
+      crewImpact = ['Crew impact steady.'];
+    }
+    if (crewPerkSummary.length) {
+      crewImpact = crewImpact.concat(['Perk bonuses triggered:'], crewPerkSummary);
+    }
 
     let playerImpact = (() => {
       if (selectedMission.status === 'available') {

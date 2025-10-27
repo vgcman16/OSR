@@ -6,6 +6,7 @@ import { buildMissionEventDeck } from './missionEvents.js';
 import { getAvailableCrewStorylineMissions, applyCrewStorylineOutcome } from './crewStorylines.js';
 import { getCrackdownOperationTemplates } from './crackdownOperations.js';
 import { getActiveStorageCapacityFromState } from '../world/safehouse.js';
+import { getCrewPerkEffect } from './crewPerks.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
   const numeric = Number(value);
@@ -81,6 +82,65 @@ const getCrewTraitLevel = (member, traitKey) => {
   }
 
   return Math.max(0, rawValue);
+};
+
+const buildCrewTraitSupport = (crewMembers = []) => {
+  const support = {};
+  crewMembers.forEach((member) => {
+    if (!member) {
+      return;
+    }
+    CREW_TRAIT_KEYS.forEach((traitKey) => {
+      if (getCrewTraitLevel(member, traitKey) >= 3) {
+        if (!Array.isArray(support[traitKey])) {
+          support[traitKey] = [];
+        }
+        support[traitKey].push(member);
+      }
+    });
+  });
+  return support;
+};
+
+const computeCrewPerkImpact = (member, mission, context = {}) => {
+  const perks = Array.isArray(member?.perks) ? member.perks : [];
+  if (!perks.length) {
+    return {
+      durationMultiplier: 1,
+      payoutMultiplier: 1,
+      heatMultiplier: 1,
+      successBonus: 0,
+      summaries: [],
+    };
+  }
+
+  let durationMultiplier = 1;
+  let payoutMultiplier = 1;
+  let heatMultiplier = 1;
+  let successBonus = 0;
+  const summaries = [];
+
+  perks.forEach((perkLabel) => {
+    const effect = getCrewPerkEffect(perkLabel, { ...context, member, mission });
+    if (!effect) {
+      return;
+    }
+    durationMultiplier *= effect.durationMultiplier ?? 1;
+    payoutMultiplier *= effect.payoutMultiplier ?? 1;
+    heatMultiplier *= effect.heatMultiplier ?? 1;
+    successBonus += effect.successBonus ?? 0;
+    if (effect.summary) {
+      summaries.push(effect.summary);
+    }
+  });
+
+  return {
+    durationMultiplier,
+    payoutMultiplier,
+    heatMultiplier,
+    successBonus,
+    summaries,
+  };
 };
 
 const GARAGE_MAINTENANCE_CONFIG = {
@@ -293,7 +353,7 @@ const summarizeCrewEffect = (
   return `${member.name}: ${adjustments.join(', ')}`;
 };
 
-const computeCrewMemberTraitImpact = (member, mission) => {
+const computeCrewMemberTraitImpact = (member, mission, context = {}) => {
   const normalizedSpecialty = typeof member?.specialty === 'string'
     ? member.specialty.toLowerCase()
     : '';
@@ -356,34 +416,41 @@ const computeCrewMemberTraitImpact = (member, mission) => {
   const backgroundEffects = (member?.background?.effects && typeof member.background.effects === 'object')
     ? member.background.effects
     : {};
+  const backgroundPerkLabel = typeof member?.background?.perkLabel === 'string'
+    ? member.background.perkLabel
+    : null;
+  const hasBackgroundPerk = backgroundPerkLabel
+    && Array.isArray(member?.perks)
+    && member.perks.includes(backgroundPerkLabel);
 
-  const durationMultiplier = Math.max(
-    0.3,
-    (1 - totals.durationReduction) * (Number.isFinite(backgroundEffects.durationMultiplier)
-      ? backgroundEffects.durationMultiplier
-      : 1),
-  );
+  const baseDurationMultiplier = Math.max(0.3, 1 - totals.durationReduction);
+  const basePayoutMultiplier = Math.max(0.4, 1 + totals.payoutBonus);
+  const baseHeatMultiplier = Math.max(0.2, Math.min(2.5, 1 - totals.heatReduction + totals.heatIncrease));
+  const baseSuccessBonus = totals.successBonus;
 
-  const payoutMultiplier = Math.max(
-    0.4,
-    (1 + totals.payoutBonus) * (Number.isFinite(backgroundEffects.payoutMultiplier)
-      ? backgroundEffects.payoutMultiplier
-      : 1),
-  );
-
-  const heatMultiplier = Math.max(
-    0.2,
-    Math.min(
-      2.5,
-      (1 - totals.heatReduction + totals.heatIncrease) * (Number.isFinite(backgroundEffects.heatMultiplier)
-        ? backgroundEffects.heatMultiplier
-        : 1),
-    ),
-  );
-
-  const successBonus = totals.successBonus + (Number.isFinite(backgroundEffects.successBonus)
+  const fallbackDurationMultiplier = Number.isFinite(backgroundEffects.durationMultiplier)
+    ? backgroundEffects.durationMultiplier
+    : 1;
+  const fallbackPayoutMultiplier = Number.isFinite(backgroundEffects.payoutMultiplier)
+    ? backgroundEffects.payoutMultiplier
+    : 1;
+  const fallbackHeatMultiplier = Number.isFinite(backgroundEffects.heatMultiplier)
+    ? backgroundEffects.heatMultiplier
+    : 1;
+  const fallbackSuccessBonus = Number.isFinite(backgroundEffects.successBonus)
     ? backgroundEffects.successBonus
-    : 0);
+    : 0;
+
+  let durationMultiplier = baseDurationMultiplier * (hasBackgroundPerk ? 1 : fallbackDurationMultiplier);
+  let payoutMultiplier = basePayoutMultiplier * (hasBackgroundPerk ? 1 : fallbackPayoutMultiplier);
+  let heatMultiplier = Math.max(0.2, Math.min(2.5, baseHeatMultiplier * (hasBackgroundPerk ? 1 : fallbackHeatMultiplier)));
+  let successBonus = baseSuccessBonus + (hasBackgroundPerk ? 0 : fallbackSuccessBonus);
+
+  const perkImpact = computeCrewPerkImpact(member, mission, context);
+  durationMultiplier *= perkImpact.durationMultiplier ?? 1;
+  payoutMultiplier *= perkImpact.payoutMultiplier ?? 1;
+  heatMultiplier = Math.max(0.2, Math.min(2.5, heatMultiplier * (perkImpact.heatMultiplier ?? 1)));
+  successBonus += perkImpact.successBonus ?? 0;
 
   const summary = summarizeCrewEffect(member, {
     durationDelta: durationMultiplier - 1,
@@ -392,15 +459,18 @@ const computeCrewMemberTraitImpact = (member, mission) => {
     heatDelta: heatMultiplier - 1,
   });
 
-  const perkLabel = member?.background?.perkLabel;
-  const summaryWithPerk = perkLabel ? `${summary} — ${perkLabel}` : summary;
+  const perkSuffix = perkImpact.summaries?.length
+    ? ` — Perks: ${perkImpact.summaries.join('; ')}.`
+    : '';
+  const summaryWithPerks = perkSuffix ? `${summary}${perkSuffix}` : summary;
 
   return {
     durationMultiplier,
     payoutMultiplier,
     heatMultiplier,
     successBonus,
-    summary: summaryWithPerk,
+    summary: summaryWithPerks,
+    perkSummaries: perkImpact.summaries ?? [],
   };
 };
 
@@ -801,7 +871,9 @@ class MissionSystem {
       resolutionDetails: null,
       assignedCrewIds: [],
       assignedCrewImpact: null,
+      assignedCrewPerkSummary: [],
       crewEffectSummary: [],
+      crewPerkSummary: [],
       playerEffectSummary: [],
       assignedVehicleId: null,
       assignedVehicleImpact: null,
@@ -1517,6 +1589,9 @@ class MissionSystem {
     let successBonus = 0;
     let heatMultiplier = 1;
     const summary = [];
+    const perkSummary = [];
+
+    const support = buildCrewTraitSupport(crewMembers);
 
     const playerImpact = computePlayerImpact(mission, this.state?.player ?? null);
     if (playerImpact) {
@@ -1531,7 +1606,11 @@ class MissionSystem {
         return;
       }
 
-      const impact = computeCrewMemberTraitImpact(member, mission);
+      const impact = computeCrewMemberTraitImpact(member, mission, {
+        support,
+        baseHeat,
+        vehicle,
+      });
       durationMultiplier *= impact?.durationMultiplier ?? 1;
       payoutMultiplier *= impact?.payoutMultiplier ?? 1;
       successBonus += impact?.successBonus ?? 0;
@@ -1539,6 +1618,11 @@ class MissionSystem {
 
       if (impact?.summary) {
         summary.push(impact.summary);
+      }
+      if (Array.isArray(impact?.perkSummaries) && impact.perkSummaries.length) {
+        impact.perkSummaries.forEach((entry) => {
+          perkSummary.push(`${member.name}: ${entry}`);
+        });
       }
     });
 
@@ -1750,6 +1834,7 @@ class MissionSystem {
       adjustedHeat,
       heatAdjustment,
       summary,
+      perkSummary,
       durationMultiplier,
       payoutMultiplier,
       successBonus,
@@ -1872,6 +1957,9 @@ class MissionSystem {
       mission.playerEffectSummary = Array.isArray(crewImpact.playerImpact?.summary)
         ? crewImpact.playerImpact.summary
         : [];
+      mission.assignedCrewPerkSummary = Array.isArray(crewImpact.perkSummary)
+        ? crewImpact.perkSummary.slice()
+        : [];
     } else {
       mission.duration = sanitizeDuration(mission.baseDuration ?? mission.duration, mission.difficulty);
       mission.payout = coerceFiniteNumber(mission.basePayout ?? mission.payout, 0);
@@ -1884,10 +1972,12 @@ class MissionSystem {
         : coerceFiniteNumber(mission.heat, 0);
       mission.assignedVehicleImpact = null;
       mission.playerEffectSummary = [];
+      mission.assignedCrewPerkSummary = [];
     }
 
     mission.assignedCrewIds = assignedCrew.map((member) => member.id);
     mission.crewEffectSummary = crewImpact?.summary ?? [];
+    mission.crewPerkSummary = crewImpact?.perkSummary ?? [];
     mission.assignedVehicleId = assignedVehicle ? assignedVehicle.id : null;
     mission.assignedVehicleSnapshot = assignedVehicle
       ? {
@@ -2402,7 +2492,9 @@ class MissionSystem {
 
     mission.assignedCrewIds = [];
     mission.assignedCrewImpact = null;
+    mission.assignedCrewPerkSummary = [];
     mission.crewEffectSummary = [];
+    mission.crewPerkSummary = [];
     mission.assignedVehicleId = null;
     mission.assignedVehicleImpact = null;
     mission.assignedVehicleSnapshot = null;
