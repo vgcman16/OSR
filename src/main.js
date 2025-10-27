@@ -36,6 +36,15 @@ const missionControls = {
   detailRestriction: null,
   detailCrewImpact: null,
   detailPlayerImpact: null,
+  cityIntelSection: null,
+  cityIntelDistrictName: null,
+  cityIntelDistrictDescription: null,
+  cityIntelRisk: null,
+  cityIntelPoiName: null,
+  cityIntelPoiDescription: null,
+  cityIntelPoiPerks: null,
+  cityIntelCanvas: null,
+  cityIntelCanvasContext: null,
   crewList: null,
   vehicleList: null,
   crackdownText: null,
@@ -376,6 +385,365 @@ const resetMissionDetails = (descriptionText) => {
     crewImpact: ['No crew assigned.', 'No vehicle selected.'],
     playerImpact: ['Player expertise steady — train to unlock bonuses.'],
   });
+};
+
+const RISK_TIER_DESCRIPTIONS = {
+  low: 'Low risk — light patrols and complacent security teams.',
+  moderate: 'Moderate risk — rotating patrols and sensor sweeps.',
+  high: 'High risk — fortified response teams and dense surveillance.',
+};
+
+const describeRiskTier = (tier) => {
+  const normalized = String(tier ?? '').trim().toLowerCase();
+  if (!normalized) {
+    return 'Risk profile pending.';
+  }
+
+  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  const summary = RISK_TIER_DESCRIPTIONS[normalized];
+  return summary ? `${label} — ${summary}` : `${label} risk tier.`;
+};
+
+const describePoiModifiers = (modifiers = {}) => {
+  if (!modifiers || typeof modifiers !== 'object') {
+    return ['No unique perks detected.'];
+  }
+
+  const perks = [];
+
+  const addPercentPerk = (label, multiplier) => {
+    if (!Number.isFinite(multiplier)) {
+      return;
+    }
+
+    const deltaPercent = Math.round((multiplier - 1) * 100);
+    if (deltaPercent === 0) {
+      return;
+    }
+
+    const prefix = deltaPercent > 0 ? '+' : '−';
+    perks.push(`${label} ${prefix}${Math.abs(deltaPercent)}%`);
+  };
+
+  const addDeltaPerk = (label, value, { decimals = 0, unit = '' } = {}) => {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    const threshold = decimals > 0 ? 1 / 10 ** decimals : 1;
+    if (Math.abs(value) < threshold) {
+      return;
+    }
+
+    const prefix = value > 0 ? '+' : '−';
+    const formatted = decimals > 0 ? Math.abs(value).toFixed(decimals) : Math.round(Math.abs(value));
+    const suffix = unit ? unit : '';
+    perks.push(`${label} ${prefix}${formatted}${suffix}`);
+  };
+
+  addPercentPerk('Payout', Number(modifiers.payoutMultiplier));
+
+  if (Number.isFinite(modifiers.payoutDelta) && Math.abs(modifiers.payoutDelta) >= 1) {
+    const currency = formatCurrency(Math.abs(modifiers.payoutDelta));
+    const normalizedCurrency = currency.startsWith('$-') ? `$${currency.slice(2)}` : currency;
+    perks.push(`Payout ${modifiers.payoutDelta >= 0 ? '+' : '−'}${normalizedCurrency}`);
+  }
+
+  addPercentPerk('Heat', Number(modifiers.heatMultiplier));
+  addDeltaPerk('Heat', Number(modifiers.heatDelta), { decimals: 1 });
+
+  addPercentPerk('Duration', Number(modifiers.durationMultiplier));
+  addDeltaPerk('Duration', Number(modifiers.durationDelta), { unit: 's' });
+
+  addPercentPerk('Success', Number(modifiers.successMultiplier));
+  if (Number.isFinite(modifiers.successBonus) && Math.abs(modifiers.successBonus) >= 0.005) {
+    const percent = Math.round(modifiers.successBonus * 100);
+    if (percent !== 0) {
+      perks.push(`Success ${percent > 0 ? '+' : '−'}${Math.abs(percent)}%`);
+    }
+  }
+  if (Number.isFinite(modifiers.successDelta) && Math.abs(modifiers.successDelta) >= 0.005) {
+    const percent = Math.round(modifiers.successDelta * 100);
+    if (percent !== 0) {
+      perks.push(`Success ${percent > 0 ? '+' : '−'}${Math.abs(percent)}%`);
+    }
+  }
+
+  if (!perks.length) {
+    return ['No unique perks detected.'];
+  }
+
+  return [...new Set(perks)];
+};
+
+const setCityIntelDetails = ({
+  districtName,
+  districtDescription,
+  risk,
+  poiName,
+  poiDescription,
+  poiPerks,
+}) => {
+  const {
+    cityIntelDistrictName,
+    cityIntelDistrictDescription,
+    cityIntelRisk,
+    cityIntelPoiName,
+    cityIntelPoiDescription,
+    cityIntelPoiPerks,
+  } = missionControls;
+
+  if (
+    !(
+      cityIntelDistrictName &&
+      cityIntelDistrictDescription &&
+      cityIntelRisk &&
+      cityIntelPoiName &&
+      cityIntelPoiDescription &&
+      cityIntelPoiPerks
+    )
+  ) {
+    return;
+  }
+
+  cityIntelDistrictName.textContent = districtName;
+  cityIntelDistrictDescription.textContent = districtDescription;
+  cityIntelRisk.textContent = risk;
+  cityIntelPoiName.textContent = poiName;
+  cityIntelPoiDescription.textContent = poiDescription;
+
+  cityIntelPoiPerks.innerHTML = '';
+  const perkLines = Array.isArray(poiPerks) && poiPerks.length ? poiPerks : ['No unique perks detected.'];
+  perkLines.forEach((line) => {
+    const item = document.createElement('li');
+    item.textContent = line;
+    cityIntelPoiPerks.appendChild(item);
+  });
+};
+
+const resetCityIntelPanel = () => {
+  setCityIntelDetails({
+    districtName: 'District intel unavailable.',
+    districtDescription: 'Select a contract to load local surveillance notes.',
+    risk: 'Risk profile pending.',
+    poiName: 'No special target flagged.',
+    poiDescription: 'District sweep awaiting recon.',
+    poiPerks: ['No unique perks detected.'],
+  });
+};
+
+const normalizeDistrictKey = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const key = String(value).trim().toLowerCase();
+  return key ? key : null;
+};
+
+const createDistrictKeyFromDistrict = (district) => {
+  const idKey = normalizeDistrictKey(district?.id);
+  if (idKey) {
+    return `id:${idKey}`;
+  }
+
+  const nameKey = normalizeDistrictKey(district?.name);
+  if (nameKey) {
+    return `name:${nameKey}`;
+  }
+
+  return null;
+};
+
+const createDistrictKeyFromMission = (mission) => {
+  if (!mission) {
+    return null;
+  }
+
+  const idKey = normalizeDistrictKey(mission.districtId);
+  if (idKey) {
+    return `id:${idKey}`;
+  }
+
+  const nameKey = normalizeDistrictKey(mission.districtName);
+  if (nameKey) {
+    return `name:${nameKey}`;
+  }
+
+  return null;
+};
+
+const findDistrictForMission = (districts, mission) => {
+  if (!Array.isArray(districts) || !mission) {
+    return null;
+  }
+
+  const idKey = normalizeDistrictKey(mission.districtId);
+  if (idKey) {
+    const byId = districts.find((district) => normalizeDistrictKey(district?.id) === idKey);
+    if (byId) {
+      return byId;
+    }
+  }
+
+  const nameKey = normalizeDistrictKey(mission.districtName);
+  if (nameKey) {
+    const byName = districts.find((district) => normalizeDistrictKey(district?.name) === nameKey);
+    if (byName) {
+      return byName;
+    }
+  }
+
+  return null;
+};
+
+const determineDistrictRiskTier = (securityScore) => {
+  const normalized = Number(securityScore);
+  if (!Number.isFinite(normalized)) {
+    return null;
+  }
+
+  if (normalized >= 4) {
+    return 'high';
+  }
+
+  if (normalized >= 3) {
+    return 'moderate';
+  }
+
+  return 'low';
+};
+
+const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeMission = null } = {}) => {
+  const canvas = missionControls.cityIntelCanvas;
+  if (!canvas) {
+    return;
+  }
+
+  const context =
+    missionControls.cityIntelCanvasContext &&
+    missionControls.cityIntelCanvasContext.canvas === canvas
+      ? missionControls.cityIntelCanvasContext
+      : canvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+
+  missionControls.cityIntelCanvasContext = context;
+
+  context.save();
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#0b131d';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = 'rgba(120, 190, 255, 0.45)';
+  context.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
+
+  const districtList = Array.isArray(districts) ? districts : [];
+  if (!districtList.length) {
+    context.fillStyle = '#9ac7ff';
+    context.font = '14px "Segoe UI", sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText('City intel offline', canvas.width / 2, canvas.height / 2);
+    context.restore();
+    return;
+  }
+
+  const highlightKey = createDistrictKeyFromMission(highlightedMission);
+  const activeKey = createDistrictKeyFromMission(activeMission);
+
+  const paddingX = 12;
+  const paddingY = 18;
+  const availableHeight = Math.max(canvas.height - paddingY * 2, 20);
+  const rowHeightRaw = availableHeight / Math.max(districtList.length, 1);
+  const rowHeight = Math.max(26, Math.min(48, rowHeightRaw));
+  const totalRowsHeight = rowHeight * districtList.length;
+  const verticalOffset = paddingY + Math.max(0, (availableHeight - totalRowsHeight) / 2);
+
+  context.font = '14px "Segoe UI", sans-serif';
+  context.textAlign = 'left';
+  context.textBaseline = 'top';
+
+  districtList.forEach((district, index) => {
+    const cellX = paddingX;
+    const cellWidth = canvas.width - paddingX * 2;
+    const cellY = verticalOffset + index * rowHeight;
+    const cellHeight = rowHeight - 6;
+
+    const districtKey = createDistrictKeyFromDistrict(district);
+    const isHighlighted = Boolean(highlightKey && districtKey === highlightKey);
+    const isActive = Boolean(activeKey && districtKey === activeKey);
+
+    let fillColor = 'rgba(80, 120, 180, 0.18)';
+    let borderColor = 'rgba(120, 190, 255, 0.3)';
+    let nameColor = '#d1eaff';
+    let detailColor = '#9ac7ff';
+
+    if (isActive && !isHighlighted) {
+      fillColor = 'rgba(120, 190, 255, 0.28)';
+      borderColor = 'rgba(120, 190, 255, 0.55)';
+      nameColor = '#c2e6ff';
+    }
+
+    if (isHighlighted) {
+      fillColor = 'rgba(255, 214, 102, 0.38)';
+      borderColor = 'rgba(255, 214, 102, 0.8)';
+      nameColor = '#ffe27a';
+      detailColor = '#ffd15c';
+    }
+
+    context.fillStyle = fillColor;
+    context.fillRect(cellX, cellY, cellWidth, cellHeight);
+    context.strokeStyle = borderColor;
+    context.strokeRect(cellX + 0.5, cellY + 0.5, cellWidth - 1, cellHeight - 1);
+
+    const riskTier = determineDistrictRiskTier(district?.security);
+    const riskLabel = riskTier
+      ? `${riskTier.charAt(0).toUpperCase() + riskTier.slice(1)} risk`
+      : 'Risk unknown';
+
+    const labelY = cellY + 6;
+    context.fillStyle = nameColor;
+    context.fillText(district?.name ?? 'Unknown District', cellX + 8, labelY);
+    context.fillStyle = detailColor;
+    context.fillText(riskLabel, cellX + 8, labelY + 16);
+  });
+
+  context.restore();
+};
+
+const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission }) => {
+  const city = missionSystem?.state?.city ?? null;
+  const districts = Array.isArray(city?.districts) ? city.districts : [];
+
+  const mission = highlightedMission ?? activeMission ?? null;
+  if (!mission) {
+    resetCityIntelPanel();
+    renderCityIntelMap({ districts, highlightedMission: null, activeMission });
+    return;
+  }
+
+  const district = findDistrictForMission(districts, mission);
+  const districtName = district?.name ?? mission.districtName ?? 'Unknown District';
+  const districtDescription =
+    district?.description ?? mission.description ?? 'No additional intel available.';
+  const riskTier = mission.riskTier ?? determineDistrictRiskTier(district?.security);
+  const riskLabel = describeRiskTier(riskTier);
+  const poi = mission.pointOfInterest ?? null;
+  const poiName = poi?.name ?? 'No special target flagged.';
+  const poiDescription = poi?.description ?? 'No notable point of interest for this contract.';
+  const poiPerks = describePoiModifiers(poi?.modifiers ?? {});
+
+  setCityIntelDetails({
+    districtName,
+    districtDescription,
+    risk: riskLabel,
+    poiName,
+    poiDescription,
+    poiPerks,
+  });
+
+  renderCityIntelMap({ districts, highlightedMission: mission, activeMission });
 };
 
 const formatMissionStatusMessage = (mission) => {
@@ -2829,6 +3197,12 @@ const updateMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     detailPlayerImpact,
+    cityIntelDistrictName,
+    cityIntelDistrictDescription,
+    cityIntelRisk,
+    cityIntelPoiName,
+    cityIntelPoiDescription,
+    cityIntelPoiPerks,
     eventPrompt,
     eventChoices,
     eventHistory,
@@ -2872,6 +3246,12 @@ const updateMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     detailPlayerImpact,
+    cityIntelDistrictName,
+    cityIntelDistrictDescription,
+    cityIntelRisk,
+    cityIntelPoiName,
+    cityIntelPoiDescription,
+    cityIntelPoiPerks,
     eventPrompt,
     eventChoices,
     eventHistory,
@@ -2930,6 +3310,13 @@ const updateMissionControls = () => {
       ? 'Select a mission to view its briefing.'
       : 'Mission database initializing…';
     resetMissionDetails(descriptionText);
+    resetCityIntelPanel();
+    const fallbackDistricts = missionSystem?.state?.city?.districts ?? [];
+    renderCityIntelMap({
+      districts: fallbackDistricts,
+      highlightedMission: null,
+      activeMission: missionSystem?.state?.activeMission ?? null,
+    });
     updateMissionStatusText();
     updateCrackdownIndicator();
     updateHeatManagementPanel();
@@ -2959,6 +3346,8 @@ const updateMissionControls = () => {
     isAnotherMissionRunning ||
     isMissionRestricted ||
     !hasVehicleSelection;
+
+  let missionForIntel = null;
 
   if (!selectedMission) {
     resetMissionDetails('Select a mission to view its briefing.');
@@ -3053,7 +3442,15 @@ const updateMissionControls = () => {
       crewImpact,
       playerImpact,
     });
+
+    missionForIntel = selectedMission;
   }
+
+  updateCityIntelPanel({
+    missionSystem,
+    highlightedMission: missionForIntel,
+    activeMission,
+  });
 
   updateMissionStatusText();
   updateHeatManagementPanel();
@@ -3341,6 +3738,19 @@ const setupMissionControls = () => {
   missionControls.detailRestriction = document.getElementById('mission-detail-restriction');
   missionControls.detailCrewImpact = document.getElementById('mission-detail-crew-impact');
   missionControls.detailPlayerImpact = document.getElementById('mission-detail-player-impact');
+  missionControls.cityIntelSection = document.querySelector('.mission-city-intel');
+  missionControls.cityIntelDistrictName = document.getElementById('mission-city-intel-district-name');
+  missionControls.cityIntelDistrictDescription = document.getElementById(
+    'mission-city-intel-district-description',
+  );
+  missionControls.cityIntelRisk = document.getElementById('mission-city-intel-risk');
+  missionControls.cityIntelPoiName = document.getElementById('mission-city-intel-poi-name');
+  missionControls.cityIntelPoiDescription = document.getElementById('mission-city-intel-poi-description');
+  missionControls.cityIntelPoiPerks = document.getElementById('mission-city-intel-poi-perks');
+  missionControls.cityIntelCanvas = document.getElementById('mission-city-intel-map');
+  if (missionControls.cityIntelCanvas) {
+    missionControls.cityIntelCanvasContext = missionControls.cityIntelCanvas.getContext('2d');
+  }
   missionControls.eventPrompt = document.getElementById('mission-event-prompt');
   missionControls.eventChoices = document.getElementById('mission-event-choices');
   missionControls.eventHistory = document.getElementById('mission-event-history');
@@ -3384,6 +3794,12 @@ const setupMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     detailPlayerImpact,
+    cityIntelDistrictName,
+    cityIntelDistrictDescription,
+    cityIntelRisk,
+    cityIntelPoiName,
+    cityIntelPoiDescription,
+    cityIntelPoiPerks,
     eventPrompt,
     eventChoices,
     eventHistory,
@@ -3432,6 +3848,12 @@ const setupMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     detailPlayerImpact,
+    cityIntelDistrictName,
+    cityIntelDistrictDescription,
+    cityIntelRisk,
+    cityIntelPoiName,
+    cityIntelPoiDescription,
+    cityIntelPoiPerks,
     crewList,
     vehicleList,
     crackdownText,

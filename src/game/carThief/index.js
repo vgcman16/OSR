@@ -5,6 +5,56 @@ import { EconomySystem } from './systems/economySystem.js';
 import { getActiveSafehouseFromState } from './world/safehouse.js';
 import { GameLoop } from './loop/gameLoop.js';
 
+const normalizeDistrictKey = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const key = String(value).trim().toLowerCase();
+  return key ? key : null;
+};
+
+const createDistrictKey = (district) => {
+  const idKey = normalizeDistrictKey(district?.id);
+  if (idKey) {
+    return `id:${idKey}`;
+  }
+
+  const nameKey = normalizeDistrictKey(district?.name);
+  return nameKey ? `name:${nameKey}` : null;
+};
+
+const createMissionDistrictKey = (mission) => {
+  if (!mission) {
+    return null;
+  }
+
+  const idKey = normalizeDistrictKey(mission.districtId);
+  if (idKey) {
+    return `id:${idKey}`;
+  }
+
+  const nameKey = normalizeDistrictKey(mission.districtName);
+  return nameKey ? `name:${nameKey}` : null;
+};
+
+const determineDistrictRiskTier = (securityScore) => {
+  const numeric = Number(securityScore);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  if (numeric >= 4) {
+    return 'high';
+  }
+
+  if (numeric >= 3) {
+    return 'moderate';
+  }
+
+  return 'low';
+};
+
 const createCarThiefGame = ({ canvas, context }) => {
   const state = createInitialGameState();
   const heatSystem = new HeatSystem(state);
@@ -15,6 +65,80 @@ const createCarThiefGame = ({ canvas, context }) => {
     if (!context || !canvas) {
       return;
     }
+
+    const renderDistrictMiniMap = () => {
+      const city = state.city ?? null;
+      const districts = Array.isArray(city?.districts) ? city.districts : [];
+      if (!districts.length) {
+        return null;
+      }
+
+      const mapWidth = 220;
+      const mapX = canvas.width - mapWidth - 32;
+      const mapY = 32;
+      const maxHeight = canvas.height - mapY - 32;
+      const mapHeight = Math.max(120, Math.min(maxHeight, 24 + districts.length * 34));
+
+      context.save();
+      context.fillStyle = 'rgba(12, 20, 32, 0.88)';
+      context.fillRect(mapX, mapY, mapWidth, mapHeight);
+      context.strokeStyle = 'rgba(120, 190, 255, 0.65)';
+      context.strokeRect(mapX + 0.5, mapY + 0.5, mapWidth - 1, mapHeight - 1);
+
+      context.font = '15px "Segoe UI", sans-serif';
+      context.textAlign = 'left';
+      context.textBaseline = 'top';
+      context.fillStyle = '#9ac7ff';
+      context.fillText('Districts', mapX + 16, mapY + 8);
+
+      const availableHeight = mapHeight - 32;
+      const rowHeightRaw = availableHeight / Math.max(districts.length, 1);
+      const rowHeight = Math.max(26, Math.min(48, rowHeightRaw));
+      const totalRowsHeight = rowHeight * districts.length;
+      const startY = mapY + 28 + Math.max(0, (availableHeight - totalRowsHeight) / 2);
+
+      const activeKey = createMissionDistrictKey(state.activeMission);
+
+      districts.forEach((district, index) => {
+        const cellX = mapX + 12;
+        const cellWidth = mapWidth - 24;
+        const cellY = startY + index * rowHeight;
+        const cellHeight = rowHeight - 6;
+
+        const districtKey = createDistrictKey(district);
+        const isActive = Boolean(activeKey && districtKey === activeKey);
+
+        let fillColor = 'rgba(80, 120, 180, 0.2)';
+        let borderColor = 'rgba(120, 190, 255, 0.35)';
+        let nameColor = '#d1eaff';
+        let detailColor = '#9ac7ff';
+
+        if (isActive) {
+          fillColor = 'rgba(255, 214, 102, 0.3)';
+          borderColor = 'rgba(255, 214, 102, 0.8)';
+          nameColor = '#ffe27a';
+          detailColor = '#ffd15c';
+        }
+
+        context.fillStyle = fillColor;
+        context.fillRect(cellX, cellY, cellWidth, cellHeight);
+        context.strokeStyle = borderColor;
+        context.strokeRect(cellX + 0.5, cellY + 0.5, cellWidth - 1, cellHeight - 1);
+
+        const riskTier = determineDistrictRiskTier(district.security);
+        const riskLabel = riskTier
+          ? `${riskTier.charAt(0).toUpperCase() + riskTier.slice(1)} risk`
+          : 'Risk unknown';
+
+        context.fillStyle = nameColor;
+        context.fillText(district.name ?? 'Unknown', cellX + 8, cellY + 6);
+        context.fillStyle = detailColor;
+        context.fillText(riskLabel, cellX + 8, cellY + 22);
+      });
+
+      context.restore();
+      return { x: mapX, y: mapY, width: mapWidth, height: mapHeight };
+    };
 
     const crackdownTier = heatSystem.getCurrentTierConfig();
     const crackdownLabel = crackdownTier?.label ?? 'Unknown';
@@ -235,7 +359,13 @@ const createCarThiefGame = ({ canvas, context }) => {
     }
 
     const garageColumnsUsed = Math.min(Math.max(garage.length, 1), maxGarageColumns);
-    const missionInfoX = Math.max(420, 32 + garageColumnsUsed * garageColumnWidth + 48);
+    const missionInfoXBase = Math.max(420, 32 + garageColumnsUsed * garageColumnWidth + 48);
+    const miniMapBounds = renderDistrictMiniMap();
+    let missionInfoX = missionInfoXBase;
+    if (miniMapBounds) {
+      missionInfoX = Math.min(missionInfoXBase, miniMapBounds.x - 32);
+      missionInfoX = Math.max(420, missionInfoX);
+    }
     let missionInfoY = 48;
     context.fillText('Mission Status:', missionInfoX, missionInfoY);
 
