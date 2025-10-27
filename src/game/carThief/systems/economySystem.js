@@ -14,9 +14,30 @@ class EconomySystem {
 
   payCrew() {
     const crew = Array.isArray(this.state.crew) ? this.state.crew : [];
-    const upkeep = crew.reduce((total, member) => total + member.upkeep, 0);
-    this.state.funds -= upkeep;
-    return upkeep;
+    const upkeep = crew.reduce((total, member) => {
+      if (!member || typeof member !== 'object') {
+        return total;
+      }
+
+      const normalizedUpkeep = Number(member.upkeep);
+
+      if (!Number.isFinite(normalizedUpkeep) || normalizedUpkeep < 0) {
+        return total;
+      }
+
+      const nextTotal = total + normalizedUpkeep;
+
+      return Number.isFinite(nextTotal) ? nextTotal : total;
+    }, 0);
+
+    const safeUpkeep = Number.isFinite(upkeep) ? upkeep : 0;
+
+    if (!Number.isFinite(this.state.funds)) {
+      this.state.funds = 0;
+    }
+
+    this.state.funds -= safeUpkeep;
+    return safeUpkeep;
   }
 
   applyDailyExpenses() {
