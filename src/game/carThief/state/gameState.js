@@ -22,6 +22,7 @@ class GameState {
     lastExpenseReport = null,
     pendingDebts = [],
     followUpSequence = 0,
+    safehouseIncursions = [],
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -49,6 +50,11 @@ class GameState {
     this.lastExpenseReport = lastExpenseReport;
     this.pendingDebts = Array.isArray(pendingDebts) ? pendingDebts : [];
     this.followUpSequence = Number.isFinite(followUpSequence) ? followUpSequence : 0;
+    this.safehouseIncursions = Array.isArray(safehouseIncursions)
+      ? safehouseIncursions
+          .filter((entry) => entry && typeof entry === 'object' && entry.id)
+          .map((entry) => ({ ...entry }))
+      : [];
   }
 
   toJSON() {
@@ -108,6 +114,7 @@ class GameState {
       lastExpenseReport: serializeObject(this.lastExpenseReport),
       pendingDebts: serializeArray(this.pendingDebts),
       followUpSequence: this.followUpSequence,
+      safehouseIncursions: serializeArray(this.safehouseIncursions),
     };
   }
 
@@ -147,6 +154,11 @@ class GameState {
       garage,
       city,
       safehouses,
+      safehouseIncursions: Array.isArray(data.safehouseIncursions)
+        ? data.safehouseIncursions
+            .filter((entry) => entry && typeof entry === 'object' && entry.id)
+            .map((entry) => ({ ...entry }))
+        : [],
     });
   }
 }

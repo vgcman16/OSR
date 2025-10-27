@@ -1151,4 +1151,4 @@ const buildMissionEventDeck = (mission, context = {}) => {
   });
 };
 
-export { buildMissionEventDeck, missionEventTable };
+export { buildMissionEventDeck, missionEventTable, collectSafehouseFacilityIds };

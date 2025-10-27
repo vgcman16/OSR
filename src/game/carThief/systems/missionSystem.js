@@ -3,6 +3,7 @@ import { CREW_TRAIT_KEYS, CREW_FATIGUE_CONFIG } from '../entities/crewMember.js'
 import { HeatSystem } from './heatSystem.js';
 import { generateContractsFromDistricts, generateFalloutContracts } from './contractFactory.js';
 import { buildMissionEventDeck } from './missionEvents.js';
+import { buildSafehouseIncursionEvents } from './safehouseIncursionEvents.js';
 import { getAvailableCrewStorylineMissions, applyCrewStorylineOutcome } from './crewStorylines.js';
 import { getCrackdownOperationTemplates } from './crackdownOperations.js';
 import { getActiveStorageCapacityFromState, getActiveSafehouseFromState } from '../world/safehouse.js';
@@ -1544,6 +1545,151 @@ class MissionSystem {
     return { outcome, roll, successChance };
   }
 
+  normalizeSafehouseIncursions(currentDay = this.state?.day ?? 1) {
+    const numericDay = Number.isFinite(currentDay) ? currentDay : null;
+    const entries = Array.isArray(this.state?.safehouseIncursions)
+      ? this.state.safehouseIncursions
+      : [];
+
+    const normalized = entries
+      .filter((entry) => entry && typeof entry === 'object' && entry.id)
+      .reduce((list, entry) => {
+        const status = typeof entry.status === 'string' ? entry.status : 'alert';
+        const cooldownEndsOnDay = Number.isFinite(entry.cooldownEndsOnDay)
+          ? entry.cooldownEndsOnDay
+          : null;
+
+        if (
+          status === 'cooldown' &&
+          cooldownEndsOnDay !== null &&
+          numericDay !== null &&
+          numericDay >= cooldownEndsOnDay
+        ) {
+          return list;
+        }
+
+        const cloned = { ...entry, status };
+        list.push(cloned);
+        return list;
+      }, []);
+
+    if (this.state) {
+      this.state.safehouseIncursions = normalized;
+    }
+
+    return normalized;
+  }
+
+  upsertSafehouseAlerts(alerts = []) {
+    if (!Array.isArray(alerts) || !alerts.length) {
+      return this.normalizeSafehouseIncursions();
+    }
+
+    const currentDay = Number.isFinite(this.state?.day) ? this.state.day : null;
+    const normalized = this.normalizeSafehouseIncursions(currentDay ?? undefined);
+    const indexMap = new Map();
+    normalized.forEach((entry, index) => {
+      if (entry?.id) {
+        indexMap.set(entry.id, index);
+      }
+    });
+
+    let mutated = false;
+
+    alerts.forEach((alert) => {
+      if (!alert || typeof alert !== 'object' || !alert.id) {
+        return;
+      }
+
+      const payload = {
+        id: alert.id,
+        label: typeof alert.label === 'string' ? alert.label : alert.id,
+        summary: typeof alert.summary === 'string' ? alert.summary : '',
+        status: typeof alert.status === 'string' ? alert.status : 'alert',
+        severity: typeof alert.severity === 'string' ? alert.severity : 'warning',
+        facilityId: alert.facilityId ?? null,
+        facilityName: typeof alert.facilityName === 'string' ? alert.facilityName : null,
+        heatTier: typeof alert.heatTier === 'string' ? alert.heatTier : null,
+        safehouseId: alert.safehouseId ?? null,
+        safehouseLabel: typeof alert.safehouseLabel === 'string' ? alert.safehouseLabel : null,
+        cooldownDays: Number.isFinite(alert.cooldownDays) ? Math.max(0, alert.cooldownDays) : null,
+        triggeredAt: Number.isFinite(alert.triggeredAt) ? alert.triggeredAt : Date.now(),
+        resolvedAt: Number.isFinite(alert.resolvedAt) ? alert.resolvedAt : null,
+        lastResolutionSummary:
+          typeof alert.lastResolutionSummary === 'string' ? alert.lastResolutionSummary : null,
+      };
+
+      if (payload.status === 'alert') {
+        payload.resolvedAt = null;
+        payload.cooldownEndsOnDay = null;
+      } else if (payload.status === 'cooldown') {
+        if (Number.isFinite(alert.cooldownEndsOnDay)) {
+          payload.cooldownEndsOnDay = alert.cooldownEndsOnDay;
+        } else if (payload.cooldownDays !== null && Number.isFinite(currentDay)) {
+          payload.cooldownEndsOnDay = currentDay + payload.cooldownDays;
+        } else {
+          payload.cooldownEndsOnDay = null;
+        }
+      } else {
+        payload.cooldownEndsOnDay = Number.isFinite(alert.cooldownEndsOnDay)
+          ? alert.cooldownEndsOnDay
+          : null;
+      }
+
+      if (indexMap.has(payload.id)) {
+        const index = indexMap.get(payload.id);
+        const existing = { ...normalized[index], ...payload };
+        normalized[index] = existing;
+      } else {
+        normalized.push(payload);
+        indexMap.set(payload.id, normalized.length - 1);
+      }
+
+      mutated = true;
+    });
+
+    if (mutated) {
+      normalized.sort((a, b) => (b.triggeredAt ?? 0) - (a.triggeredAt ?? 0));
+      if (this.state) {
+        this.state.safehouseIncursions = normalized;
+        this.state.needsHudRefresh = true;
+      }
+    }
+
+    return normalized;
+  }
+
+  markSafehouseAlertResolved(alertId, { summary = null, resolvedAt = Date.now() } = {}) {
+    if (!alertId || !this.state) {
+      return null;
+    }
+
+    const alerts = Array.isArray(this.state.safehouseIncursions) ? this.state.safehouseIncursions : [];
+    const index = alerts.findIndex((entry) => entry?.id === alertId);
+    if (index === -1) {
+      return null;
+    }
+
+    const currentDay = Number.isFinite(this.state.day) ? this.state.day : null;
+    const entry = { ...alerts[index] };
+    entry.status = 'cooldown';
+    entry.resolvedAt = Number.isFinite(resolvedAt) ? resolvedAt : Date.now();
+    if (typeof summary === 'string' && summary.trim()) {
+      entry.lastResolutionSummary = summary.trim();
+    }
+    const cooldownDays = Number.isFinite(entry.cooldownDays) ? entry.cooldownDays : null;
+    if (cooldownDays !== null && Number.isFinite(currentDay)) {
+      entry.cooldownEndsOnDay = currentDay + cooldownDays;
+    } else if (!Number.isFinite(entry.cooldownEndsOnDay)) {
+      entry.cooldownEndsOnDay = null;
+    }
+
+    alerts[index] = entry;
+    this.state.safehouseIncursions = alerts;
+    this.state.needsHudRefresh = true;
+    return entry;
+  }
+
   initializeMissionEvents(mission, context = {}) {
     if (!mission) {
       return;
@@ -1568,8 +1714,59 @@ class MissionSystem {
 
     const safehouse =
       context.safehouse ?? (this.state ? getActiveSafehouseFromState(this.state) : null);
+    const heatTier =
+      typeof this.state?.heatTier === 'string'
+        ? this.state.heatTier
+        : this.heatSystem && typeof this.heatSystem.getCurrentTier === 'function'
+          ? this.heatSystem.getCurrentTier()
+          : null;
 
-    mission.eventDeck = buildMissionEventDeck({ ...mission, crackdownTier }, { assignedCrew, safehouse });
+    const missionContext = { ...mission, crackdownTier };
+    const baseDeck = buildMissionEventDeck(missionContext, { assignedCrew, safehouse });
+
+    this.normalizeSafehouseIncursions();
+    const safehouseEventPayload = buildSafehouseIncursionEvents(missionContext, {
+      assignedCrew,
+      safehouse,
+      heatTier,
+    });
+
+    if (Array.isArray(safehouseEventPayload?.alerts) && safehouseEventPayload.alerts.length) {
+      this.upsertSafehouseAlerts(safehouseEventPayload.alerts);
+    }
+
+    const combinedDeck = Array.isArray(baseDeck) ? baseDeck.slice() : [];
+    if (Array.isArray(safehouseEventPayload?.events)) {
+      safehouseEventPayload.events.forEach((event) => {
+        if (!event || typeof event !== 'object') {
+          return;
+        }
+
+        const cloned = {
+          ...event,
+          choices: Array.isArray(event.choices) ? event.choices.map((choice) => ({ ...choice })) : [],
+          badges: Array.isArray(event.badges) ? event.badges.map((badge) => ({ ...badge })) : [],
+          triggered: Boolean(event.triggered),
+          resolved: Boolean(event.resolved),
+          selectionWeight: Number.isFinite(event.selectionWeight)
+            ? event.selectionWeight
+            : Number.isFinite(event.baseWeight)
+              ? event.baseWeight
+              : 1,
+        };
+        combinedDeck.push(cloned);
+      });
+    }
+
+    combinedDeck.sort((a, b) => {
+      if (a.triggerProgress === b.triggerProgress) {
+        return (b.selectionWeight ?? 0) - (a.selectionWeight ?? 0);
+      }
+      return (Number.isFinite(a.triggerProgress) ? a.triggerProgress : 0.5) -
+        (Number.isFinite(b.triggerProgress) ? b.triggerProgress : 0.5);
+    });
+
+    mission.eventDeck = combinedDeck;
     mission.eventHistory = [];
     mission.pendingDecision = null;
   }
@@ -1857,6 +2054,13 @@ class MissionSystem {
 
     if (mission.eventHistory.length > 10) {
       mission.eventHistory = mission.eventHistory.slice(-10);
+    }
+
+    if (eventEntry.safehouseAlertId) {
+      this.markSafehouseAlertResolved(eventEntry.safehouseAlertId, {
+        summary: eventSummary,
+        resolvedAt: historyEntry.resolvedAt,
+      });
     }
 
     this.advanceMissionEvents(mission);
