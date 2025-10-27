@@ -1186,6 +1186,67 @@ class MissionSystem {
     };
   }
 
+  finalizeVehicleDisposition(vehicle, {
+    outcome,
+    fundsDelta = null,
+    salePrice = null,
+    scrapValue = null,
+    partsRecovered = null,
+  }) {
+    if (!vehicle) {
+      return null;
+    }
+
+    const normalizedSalePrice = Number.isFinite(salePrice) && salePrice >= 0
+      ? Math.round(salePrice)
+      : null;
+    const normalizedScrapValue = Number.isFinite(scrapValue) && scrapValue >= 0
+      ? Math.round(scrapValue)
+      : null;
+    const normalizedParts = Number.isFinite(partsRecovered) && partsRecovered >= 0
+      ? Math.round(partsRecovered)
+      : null;
+
+    let normalizedFunds = Number.isFinite(fundsDelta) ? Math.round(fundsDelta) : null;
+    if (!Number.isFinite(normalizedFunds)) {
+      normalizedFunds = normalizedSalePrice ?? normalizedScrapValue ?? 0;
+    }
+    const creditedFunds = Math.max(0, normalizedFunds ?? 0);
+
+    if (!Number.isFinite(this.state?.funds)) {
+      this.state.funds = 0;
+    }
+
+    if (creditedFunds) {
+      this.state.funds += creditedFunds;
+    }
+
+    const conditionBefore = Number.isFinite(vehicle.condition)
+      ? clamp(vehicle.condition, 0, 1)
+      : null;
+    const heatBefore = Number.isFinite(vehicle.heat) ? vehicle.heat : null;
+
+    const report = {
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      outcome,
+      salePrice: normalizedSalePrice,
+      scrapValue: normalizedScrapValue,
+      partsRecovered: normalizedParts,
+      fundsDelta: creditedFunds,
+      conditionBefore,
+      conditionAfter: null,
+      conditionDelta: null,
+      heatBefore,
+      heatAfter: null,
+      heatDelta: null,
+      timestamp: Date.now(),
+    };
+
+    this.state.lastVehicleReport = report;
+    return report;
+  }
+
   sellVehicle(vehicleId, overrides = {}) {
     const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
     const vehicleIndex = garage.findIndex((vehicle) => vehicle?.id === vehicleId);
@@ -1211,40 +1272,21 @@ class MissionSystem {
 
     garage.splice(vehicleIndex, 1);
 
-    if (!Number.isFinite(this.state?.funds)) {
-      this.state.funds = 0;
-    }
-
     const payout = Math.max(0, salePrice);
-    this.state.funds += payout;
-
-    const conditionBefore = Number.isFinite(vehicle.condition)
-      ? clamp(vehicle.condition, 0, 1)
-      : null;
-    const heatBefore = Number.isFinite(vehicle.heat) ? vehicle.heat : null;
-
-    this.state.lastVehicleReport = {
-      vehicleId: vehicle.id,
-      vehicleModel: vehicle.model,
+    const report = this.finalizeVehicleDisposition(vehicle, {
       outcome: 'sale',
-      salePrice: payout,
+      salePrice: salePrice,
       fundsDelta: payout,
-      conditionBefore,
-      conditionAfter: null,
-      conditionDelta: null,
-      heatBefore,
-      heatAfter: null,
-      heatDelta: null,
-      timestamp: Date.now(),
-    };
+    });
 
     return {
       success: true,
       vehicleId: vehicle.id,
       vehicleModel: vehicle.model,
       salePrice: payout,
-      fundsDelta: payout,
-      condition: conditionBefore,
+      fundsDelta: report?.fundsDelta ?? payout,
+      condition: Number.isFinite(vehicle.condition) ? clamp(vehicle.condition, 0, 1) : null,
+      report,
     };
   }
 
@@ -1279,33 +1321,13 @@ class MissionSystem {
 
     garage.splice(vehicleIndex, 1);
 
-    if (!Number.isFinite(this.state?.funds)) {
-      this.state.funds = 0;
-    }
-
     const payout = Math.max(0, scrapValue);
-    this.state.funds += payout;
-
-    const conditionBefore = Number.isFinite(vehicle.condition)
-      ? clamp(vehicle.condition, 0, 1)
-      : null;
-    const heatBefore = Number.isFinite(vehicle.heat) ? vehicle.heat : null;
-
-    this.state.lastVehicleReport = {
-      vehicleId: vehicle.id,
-      vehicleModel: vehicle.model,
+    const report = this.finalizeVehicleDisposition(vehicle, {
       outcome: 'scrap',
-      scrapValue: payout,
+      scrapValue: scrapValue,
       partsRecovered,
       fundsDelta: payout,
-      conditionBefore,
-      conditionAfter: null,
-      conditionDelta: null,
-      heatBefore,
-      heatAfter: null,
-      heatDelta: null,
-      timestamp: Date.now(),
-    };
+    });
 
     return {
       success: true,
@@ -1313,8 +1335,9 @@ class MissionSystem {
       vehicleModel: vehicle.model,
       scrapValue: payout,
       partsRecovered,
-      fundsDelta: payout,
-      condition: conditionBefore,
+      fundsDelta: report?.fundsDelta ?? payout,
+      condition: Number.isFinite(vehicle.condition) ? clamp(vehicle.condition, 0, 1) : null,
+      report,
     };
   }
 
