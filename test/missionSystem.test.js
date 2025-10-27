@@ -6,6 +6,7 @@ import { HeatSystem } from '../src/game/carThief/systems/heatSystem.js';
 import { EconomySystem } from '../src/game/carThief/systems/economySystem.js';
 import { Vehicle } from '../src/game/carThief/entities/vehicle.js';
 import { Safehouse, SafehouseCollection } from '../src/game/carThief/world/safehouse.js';
+import { CrewMember, CREW_FATIGUE_CONFIG } from '../src/game/carThief/entities/crewMember.js';
 
 const createState = () => ({
   funds: 1000,
@@ -295,6 +296,64 @@ test('mission event deck favors low-risk events for easier contracts', () => {
   if (weightedEntry) {
     assert.ok(weightedEntry.selectionWeight > 1, 'low-risk event gains weight for matching context');
   }
+});
+
+test('crew fatigue blocks overwork and recovers on daily ticks', (t) => {
+  const state = createState();
+  const crewMember = new CrewMember({ name: 'Riley Gauge', specialty: 'hacker' });
+  state.crew = [crewMember];
+
+  const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
+  missionSystem.generateInitialContracts();
+  const mission = missionSystem.availableMissions[0];
+  mission.duration = 12;
+  mission.baseDuration = 12;
+  mission.difficulty = 5;
+
+  const missionId = mission.id;
+  const started = missionSystem.startMission(missionId, [crewMember.id]);
+  assert.ok(started, 'mission can start with a rested crew member');
+
+  const originalDateNow = Date.now;
+  const originalRandom = Math.random;
+  t.after(() => {
+    Date.now = originalDateNow;
+    Math.random = originalRandom;
+  });
+
+  Date.now = () => 1_000_000;
+  Math.random = () => 0.1;
+
+  missionSystem.update(mission.duration);
+  resolvePendingDecisions(missionSystem, mission);
+  missionSystem.update(0);
+
+  assert.ok(crewMember.getFatigueLevel() > 0, 'mission completion applies fatigue to crew');
+
+  if (crewMember.getFatigueLevel() < CREW_FATIGUE_CONFIG.exhaustionThreshold) {
+    crewMember.applyMissionFatigue(
+      CREW_FATIGUE_CONFIG.exhaustionThreshold - crewMember.getFatigueLevel(),
+    );
+  }
+  crewMember.setStatus('needs-rest');
+
+  const alternateMission = missionSystem.availableMissions.find((entry) => entry.id !== missionId)
+    ?? missionSystem.availableMissions[0];
+  const blocked = missionSystem.startMission(alternateMission.id, [crewMember.id]);
+  assert.equal(blocked, null, 'exhausted crew cannot be assigned to a mission');
+  assert.equal(crewMember.status, 'needs-rest', 'crew status reflects required rest');
+
+  const economySystem = new EconomySystem(state);
+  crewMember.fatigue = CREW_FATIGUE_CONFIG.exhaustionThreshold;
+  crewMember.setStatus('needs-rest');
+  economySystem.update(economySystem.dayLengthSeconds);
+
+  assert.ok(
+    crewMember.getFatigueLevel() < CREW_FATIGUE_CONFIG.exhaustionThreshold,
+    'daily economy tick reduces fatigue levels',
+  );
+  assert.equal(crewMember.status, 'idle', 'restored crew become available after recovering');
 });
 
 test('Successful missions block reward vehicles when garage capacity is full', (t) => {

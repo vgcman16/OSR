@@ -156,6 +156,15 @@ class EconomySystem {
     return passiveIncome;
   }
 
+  recoverCrewFatigue(days = 1) {
+    const crew = Array.isArray(this.state.crew) ? this.state.crew : [];
+    crew.forEach((member) => {
+      if (member && typeof member.recoverFatigue === 'function') {
+        member.recoverFatigue(days);
+      }
+    });
+  }
+
   adjustFunds(amount) {
     if (!Number.isFinite(this.state.funds)) {
       this.state.funds = 0;
@@ -184,6 +193,7 @@ class EconomySystem {
       this.applyDailyExpenses();
       this.payCrew(true);
       this.applySafehouseDailyEconomyEffects();
+      this.recoverCrewFatigue(1);
       this.state.day += 1;
       const total =
         this.pendingExpenseReport.base +

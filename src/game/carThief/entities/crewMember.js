@@ -53,6 +53,34 @@ const CREW_TRAIT_CONFIG = {
 
 const CREW_TRAIT_KEYS = Object.keys(CREW_TRAIT_CONFIG);
 
+const CREW_FATIGUE_CONFIG = {
+  maxFatigue: 100,
+  tiredThreshold: 45,
+  exhaustionThreshold: 80,
+  missionFatigueBase: 26,
+  missionDurationReference: 30,
+  missionDifficultyReference: 3,
+  recoveryPerDay: 35,
+};
+
+const clampFatigue = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(CREW_FATIGUE_CONFIG.maxFatigue, Math.round(numeric)));
+};
+
+const resolveRecoveryRate = (value) => {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric;
+  }
+
+  return CREW_FATIGUE_CONFIG.recoveryPerDay;
+};
+
 const clampTraitLevel = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -300,10 +328,123 @@ class CrewMember {
     this.background = template.background;
     this.perks = template.perks;
     this.status = 'idle';
+    const fatigueValue = Number(options.fatigue);
+    this.fatigue = clampFatigue(Number.isFinite(fatigueValue) ? fatigueValue : 0);
+    this.fatigueRecoveryPerDay = resolveRecoveryRate(options.fatigueRecoveryPerDay);
+    const lastRestedAt = Number(options.lastRestedAt);
+    this.lastRestedAt = Number.isFinite(lastRestedAt) ? lastRestedAt : Date.now();
+    const lastMissionCompletedAt = Number(options.lastMissionCompletedAt);
+    this.lastMissionCompletedAt = Number.isFinite(lastMissionCompletedAt)
+      ? lastMissionCompletedAt
+      : null;
+    if (this.isExhausted()) {
+      this.status = 'needs-rest';
+    }
   }
 
   setStatus(status) {
     this.status = status;
+  }
+
+  getFatigueLevel() {
+    this.fatigue = clampFatigue(this.fatigue);
+    return this.fatigue;
+  }
+
+  getFatigueRecoveryRate() {
+    this.fatigueRecoveryPerDay = resolveRecoveryRate(this.fatigueRecoveryPerDay);
+    return this.fatigueRecoveryPerDay;
+  }
+
+  getReadinessState() {
+    const fatigue = this.getFatigueLevel();
+    if (fatigue >= CREW_FATIGUE_CONFIG.exhaustionThreshold) {
+      return 'exhausted';
+    }
+
+    if (fatigue >= CREW_FATIGUE_CONFIG.tiredThreshold) {
+      return 'tired';
+    }
+
+    return 'ready';
+  }
+
+  getReadinessSummary() {
+    return {
+      fatigue: this.getFatigueLevel(),
+      state: this.getReadinessState(),
+      recoveryPerDay: this.getFatigueRecoveryRate(),
+      maxFatigue: CREW_FATIGUE_CONFIG.maxFatigue,
+    };
+  }
+
+  isExhausted() {
+    return this.getFatigueLevel() >= CREW_FATIGUE_CONFIG.exhaustionThreshold;
+  }
+
+  isMissionReady() {
+    const statusLabel = (this.status ?? 'idle').toLowerCase();
+    if (statusLabel !== 'idle') {
+      return false;
+    }
+
+    return !this.isExhausted();
+  }
+
+  beginMission() {
+    this.setStatus('on-mission');
+  }
+
+  applyMissionFatigue(impact = CREW_FATIGUE_CONFIG.missionFatigueBase) {
+    const normalizedImpact = Number(impact);
+    const fatigueDelta = Number.isFinite(normalizedImpact)
+      ? normalizedImpact
+      : CREW_FATIGUE_CONFIG.missionFatigueBase;
+    const nextFatigue = clampFatigue(this.getFatigueLevel() + fatigueDelta);
+    this.fatigue = nextFatigue;
+    this.lastMissionCompletedAt = Date.now();
+    return this.fatigue;
+  }
+
+  finishMission({ fatigueImpact = CREW_FATIGUE_CONFIG.missionFatigueBase } = {}) {
+    const resultingFatigue = this.applyMissionFatigue(fatigueImpact);
+    if (resultingFatigue >= CREW_FATIGUE_CONFIG.exhaustionThreshold) {
+      this.setStatus('needs-rest');
+    } else {
+      this.setStatus('idle');
+    }
+    return resultingFatigue;
+  }
+
+  recoverFatigue(days = 1) {
+    if ((this.status ?? '').toLowerCase() === 'on-mission') {
+      return this.getFatigueLevel();
+    }
+
+    const normalizedDays = Number(days);
+    const safeDays = Number.isFinite(normalizedDays) && normalizedDays > 0 ? normalizedDays : 0;
+    if (safeDays <= 0) {
+      return this.getFatigueLevel();
+    }
+
+    const recoveryPerDay = this.getFatigueRecoveryRate();
+    const totalRecovery = Math.max(0, recoveryPerDay * safeDays);
+    if (totalRecovery <= 0) {
+      return this.getFatigueLevel();
+    }
+
+    const nextFatigue = clampFatigue(this.getFatigueLevel() - totalRecovery);
+    this.fatigue = nextFatigue;
+
+    if (nextFatigue === 0) {
+      this.lastRestedAt = Date.now();
+    }
+
+    if (this.status === 'needs-rest' && nextFatigue < CREW_FATIGUE_CONFIG.exhaustionThreshold) {
+      this.setStatus('idle');
+    }
+
+    return this.fatigue;
   }
 
   adjustLoyalty(amount) {
@@ -345,4 +486,5 @@ export {
   CREW_BACKGROUNDS,
   createCrewTemplate,
   getBackgroundById,
+  CREW_FATIGUE_CONFIG,
 };
