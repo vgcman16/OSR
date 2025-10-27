@@ -25,6 +25,17 @@ const clamp = (value, min, max) => {
 
 const REQUIRED_TEMPLATE_FIELDS = ['id', 'name'];
 
+const GARAGE_MAINTENANCE_CONFIG = {
+  repair: {
+    cost: 4000,
+    conditionBoost: 0.4,
+  },
+  heat: {
+    cost: 2500,
+    heatReduction: 1.5,
+  },
+};
+
 const sanitizeDuration = (durationValue, difficultyValue) => {
   const numericDuration = coerceFiniteNumber(durationValue, NaN);
   const numericDifficulty = coerceFiniteNumber(difficultyValue, 1);
@@ -962,6 +973,131 @@ class MissionSystem {
     return mission;
   }
 
+  getVehicleFromGarage(vehicleId) {
+    if (!vehicleId) {
+      return null;
+    }
+
+    const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
+    return garage.find((vehicle) => vehicle?.id === vehicleId) ?? null;
+  }
+
+  performMaintenance(vehicleId, type, economySystem, overrides = {}) {
+    if (!type || (type !== 'repair' && type !== 'heat')) {
+      return {
+        success: false,
+        reason: 'unsupported-maintenance',
+        type,
+      };
+    }
+
+    const vehicle = this.getVehicleFromGarage(vehicleId);
+    if (!vehicle) {
+      return {
+        success: false,
+        reason: 'vehicle-not-found',
+        type,
+      };
+    }
+
+    if (!Number.isFinite(this.state?.funds)) {
+      this.state.funds = 0;
+    }
+
+    const profile = {
+      ...(GARAGE_MAINTENANCE_CONFIG[type] ?? {}),
+      ...(overrides ?? {}),
+    };
+    const rawCost = Number(profile.cost);
+    const cost = Number.isFinite(rawCost) && rawCost > 0 ? rawCost : 0;
+    const fundsAvailable = this.state.funds;
+
+    if (fundsAvailable < cost) {
+      return {
+        success: false,
+        reason: 'insufficient-funds',
+        type,
+        cost,
+        fundsAvailable,
+      };
+    }
+
+    if (cost > 0) {
+      if (economySystem && typeof economySystem.adjustFunds === 'function') {
+        economySystem.adjustFunds(-cost);
+      } else {
+        this.state.funds -= cost;
+      }
+    }
+
+    const originalCondition = Number.isFinite(vehicle.condition)
+      ? clamp(vehicle.condition, 0, 1)
+      : 1;
+    const originalHeat = Number.isFinite(vehicle.heat) ? Math.max(0, vehicle.heat) : 0;
+
+    let conditionAfter = originalCondition;
+    let heatAfter = originalHeat;
+
+    if (type === 'repair') {
+      const boost = Number(profile.conditionBoost);
+      const normalizedBoost = Number.isFinite(boost) && boost > 0 ? boost : 0;
+      const targetCondition = clamp(originalCondition + normalizedBoost, 0, 1);
+      vehicle.condition = targetCondition;
+      conditionAfter = targetCondition;
+    }
+
+    if (type === 'heat') {
+      const reduction = Number(profile.heatReduction);
+      const normalizedReduction = Number.isFinite(reduction) && reduction > 0 ? reduction : 0;
+      if (typeof vehicle.modifyHeat === 'function') {
+        vehicle.modifyHeat(-normalizedReduction);
+        heatAfter = Number.isFinite(vehicle.heat) ? Math.max(0, vehicle.heat) : 0;
+      } else {
+        const nextHeat = Math.max(0, originalHeat - normalizedReduction);
+        vehicle.heat = nextHeat;
+        heatAfter = nextHeat;
+      }
+    }
+
+    const conditionDelta = conditionAfter - originalCondition;
+    const heatDelta = heatAfter - originalHeat;
+
+    this.state.lastVehicleReport = {
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      outcome: 'maintenance',
+      maintenanceType: type,
+      maintenanceCost: cost,
+      conditionBefore: originalCondition,
+      conditionAfter,
+      conditionDelta,
+      heatBefore: originalHeat,
+      heatAfter,
+      heatDelta,
+      timestamp: Date.now(),
+    };
+
+    return {
+      success: true,
+      type,
+      cost,
+      conditionBefore: originalCondition,
+      conditionAfter,
+      conditionDelta,
+      heatBefore: originalHeat,
+      heatAfter,
+      heatDelta,
+    };
+  }
+
+  repairVehicleCondition(vehicleId, economySystem, overrides = {}) {
+    return this.performMaintenance(vehicleId, 'repair', economySystem, overrides);
+  }
+
+  reduceVehicleHeat(vehicleId, economySystem, overrides = {}) {
+    return this.performMaintenance(vehicleId, 'heat', economySystem, overrides);
+  }
+
   update(delta) {
     this.syncHeatTier();
 
@@ -1023,4 +1159,4 @@ MissionSystem.prototype.applyHeatRestrictions = function applyHeatRestrictions()
   });
 };
 
-export { MissionSystem };
+export { MissionSystem, GARAGE_MAINTENANCE_CONFIG };

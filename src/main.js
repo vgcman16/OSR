@@ -1,5 +1,6 @@
 import { createCarThiefGame } from './game/carThief/index.js';
 import { CrewMember } from './game/carThief/entities/crewMember.js';
+import { GARAGE_MAINTENANCE_CONFIG } from './game/carThief/systems/missionSystem.js';
 
 let gameInstance = null;
 
@@ -39,6 +40,10 @@ const missionControls = {
   trainingLoyaltyButton: null,
   trainingSpecialtyButton: null,
   trainingStatus: null,
+  maintenanceRepairButton: null,
+  maintenanceHeatButton: null,
+  maintenanceStatus: null,
+  maintenanceStatusDetail: '',
   selectedCrewIds: [],
   selectedVehicleId: null,
 };
@@ -226,6 +231,164 @@ const setTrainingStatus = (message) => {
 
   missionControls.trainingStatus.textContent = message ?? '';
 };
+
+const clearMaintenanceStatusDetail = () => {
+  missionControls.maintenanceStatusDetail = '';
+};
+
+const updateMaintenancePanel = () => {
+  const { maintenanceStatus, maintenanceRepairButton, maintenanceHeatButton } = missionControls;
+  if (!maintenanceStatus || !maintenanceRepairButton || !maintenanceHeatButton) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const garage = Array.isArray(state?.garage) ? state.garage : [];
+  const selectedVehicleId = missionControls.selectedVehicleId ?? null;
+  const selectedVehicle = selectedVehicleId
+    ? garage.find((vehicle) => vehicle?.id === selectedVehicleId) ?? null
+    : null;
+  const funds = Number.isFinite(state?.funds) ? state.funds : 0;
+
+  const rawRepairCost = Number(GARAGE_MAINTENANCE_CONFIG?.repair?.cost);
+  const repairCost = Number.isFinite(rawRepairCost) && rawRepairCost > 0 ? rawRepairCost : 0;
+  const rawRepairBoost = Number(GARAGE_MAINTENANCE_CONFIG?.repair?.conditionBoost);
+  const repairBoost = Number.isFinite(rawRepairBoost) && rawRepairBoost > 0 ? rawRepairBoost : 0;
+  const rawHeatCost = Number(GARAGE_MAINTENANCE_CONFIG?.heat?.cost);
+  const heatCost = Number.isFinite(rawHeatCost) && rawHeatCost > 0 ? rawHeatCost : 0;
+  const rawHeatReduction = Number(GARAGE_MAINTENANCE_CONFIG?.heat?.heatReduction);
+  const heatReduction = Number.isFinite(rawHeatReduction) && rawHeatReduction > 0 ? rawHeatReduction : 0;
+
+  const systemsReady = Boolean(missionSystem && economySystem);
+  const hasSelection = Boolean(selectedVehicle);
+
+  const canRepair = systemsReady && hasSelection && funds >= repairCost;
+  const canReduceHeat = systemsReady && hasSelection && funds >= heatCost;
+
+  maintenanceRepairButton.disabled = !canRepair;
+  maintenanceHeatButton.disabled = !canReduceHeat;
+
+  maintenanceRepairButton.title = canRepair ? '' : 'Select a vehicle and ensure sufficient funds.';
+  maintenanceHeatButton.title = canReduceHeat ? '' : 'Select a vehicle and ensure sufficient funds.';
+
+  let summaryMessage;
+  if (!systemsReady) {
+    summaryMessage = 'Maintenance channel syncing…';
+  } else if (!hasSelection) {
+    const repairPercent = Math.round(repairBoost * 100);
+    const heatLabel = heatReduction.toFixed(1);
+    summaryMessage = `Select a garage vehicle to schedule repairs (${formatCurrency(
+      repairCost,
+    )} for up to ${repairPercent}% condition) or heat purges (${formatCurrency(
+      heatCost,
+    )} to drop heat by ${heatLabel}).`;
+  } else {
+    const conditionPercent = Number.isFinite(selectedVehicle.condition)
+      ? Math.round(Math.max(0, Math.min(1, selectedVehicle.condition)) * 100)
+      : null;
+    const heatValue = Number.isFinite(selectedVehicle.heat)
+      ? selectedVehicle.heat.toFixed(1)
+      : 'N/A';
+    const affordabilityHints = [];
+    if (funds < repairCost) {
+      affordabilityHints.push(`repairs need ${formatCurrency(repairCost)}`);
+    }
+    if (funds < heatCost) {
+      affordabilityHints.push(`heat purge needs ${formatCurrency(heatCost)}`);
+    }
+    const affordabilityMessage = affordabilityHints.length
+      ? ` Insufficient funds — ${affordabilityHints.join(' and ')}.`
+      : '';
+    const repairPercent = Math.round(repairBoost * 100);
+    const heatLabel = heatReduction.toFixed(1);
+    summaryMessage = `${selectedVehicle.model ?? 'Vehicle'} — condition ${
+      conditionPercent !== null ? `${conditionPercent}%` : 'N/A'
+    }, heat ${heatValue}. Repairs cost ${formatCurrency(
+      repairCost,
+    )} for up to ${repairPercent}% restoration; heat purges cost ${formatCurrency(
+      heatCost,
+    )} to lower heat by ${heatLabel}.${affordabilityMessage}`;
+  }
+
+  const detail = missionControls.maintenanceStatusDetail?.trim();
+  maintenanceStatus.textContent = [detail, summaryMessage].filter(Boolean).join(' ');
+};
+
+const performMaintenanceAction = (type) => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+
+  if (!missionSystem || !economySystem) {
+    missionControls.maintenanceStatusDetail = 'Maintenance systems offline.';
+    updateMaintenancePanel();
+    return;
+  }
+
+  const vehicleId = missionControls.selectedVehicleId;
+  if (!vehicleId) {
+    missionControls.maintenanceStatusDetail = 'Select a garage vehicle before running maintenance.';
+    updateMaintenancePanel();
+    return;
+  }
+
+  const vehicle = missionSystem.getVehicleFromGarage?.(vehicleId) ?? null;
+  if (!vehicle) {
+    missionControls.maintenanceStatusDetail = 'Selected vehicle no longer in the garage.';
+    updateMissionControls();
+    return;
+  }
+
+  const result =
+    type === 'repair'
+      ? missionSystem.repairVehicleCondition(vehicleId, economySystem)
+      : missionSystem.reduceVehicleHeat(vehicleId, economySystem);
+
+  if (!result || !result.success) {
+    let failureMessage = 'Maintenance could not be completed.';
+    if (result?.reason === 'insufficient-funds') {
+      const required = formatCurrency(result.cost ?? 0);
+      const available = formatCurrency(result.fundsAvailable ?? missionSystem.state.funds ?? 0);
+      failureMessage = `Insufficient funds — requires ${required}, available ${available}.`;
+    } else if (result?.reason === 'vehicle-not-found') {
+      failureMessage = 'Selected vehicle no longer in the garage.';
+    }
+
+    missionControls.maintenanceStatusDetail = failureMessage;
+    updateMissionControls();
+    return;
+  }
+
+  let successMessage;
+  if (type === 'repair') {
+    const deltaPercent = Number.isFinite(result.conditionDelta)
+      ? Math.round(result.conditionDelta * 100)
+      : 0;
+    const afterPercent = Number.isFinite(result.conditionAfter)
+      ? Math.round(result.conditionAfter * 100)
+      : null;
+    const deltaLabel = deltaPercent > 0 ? `+${deltaPercent}% condition` : 'condition already optimal';
+    const trailing = afterPercent !== null ? ` (now ${afterPercent}%)` : '';
+    successMessage = `Repaired ${vehicle.model ?? 'vehicle'} — ${deltaLabel}${trailing}. Cost ${formatCurrency(
+      result.cost ?? 0,
+    )}.`;
+  } else {
+    const heatDrop = Number.isFinite(result.heatDelta) ? Math.max(0, -result.heatDelta) : 0;
+    const heatLabel = heatDrop > 0 ? heatDrop.toFixed(1) : '0.0';
+    const afterHeat = Number.isFinite(result.heatAfter) ? result.heatAfter.toFixed(1) : 'N/A';
+    successMessage = `Reduced heat on ${vehicle.model ?? 'vehicle'} by ${heatLabel} (now ${afterHeat}). Cost ${formatCurrency(
+      result.cost ?? 0,
+    )}.`;
+  }
+
+  missionControls.maintenanceStatusDetail = successMessage;
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleMaintenanceRepair = () => performMaintenanceAction('repair');
+const handleMaintenanceHeat = () => performMaintenanceAction('heat');
 
 const handleRecruitHire = (candidateId) => {
   const missionSystem = getMissionSystem();
@@ -608,6 +771,7 @@ const updateVehicleSelectionOptions = () => {
     return;
   }
 
+  const previousSelection = missionControls.selectedVehicleId;
   const missionSystem = getMissionSystem();
   const garage = Array.isArray(missionSystem?.state?.garage) ? missionSystem.state.garage : [];
   const activeMissionVehicleId = missionSystem?.state?.activeMission?.assignedVehicleId ?? null;
@@ -619,6 +783,7 @@ const updateVehicleSelectionOptions = () => {
     placeholder.textContent = 'Garage manifest syncing…';
     vehicleContainer.appendChild(placeholder);
     missionControls.selectedVehicleId = null;
+    clearMaintenanceStatusDetail();
     return;
   }
 
@@ -627,6 +792,7 @@ const updateVehicleSelectionOptions = () => {
     placeholder.textContent = 'No vehicles available. Complete missions to expand the garage.';
     vehicleContainer.appendChild(placeholder);
     missionControls.selectedVehicleId = null;
+    clearMaintenanceStatusDetail();
     return;
   }
 
@@ -683,6 +849,7 @@ const updateVehicleSelectionOptions = () => {
 
     radio.addEventListener('change', () => {
       missionControls.selectedVehicleId = radio.checked ? vehicle.id : null;
+      clearMaintenanceStatusDetail();
       updateMissionControls();
     });
 
@@ -712,6 +879,11 @@ const updateVehicleSelectionOptions = () => {
       'All vehicles are currently committed or inoperable. Wait for a mission to resolve.';
     vehicleContainer.appendChild(placeholder);
     missionControls.selectedVehicleId = null;
+    clearMaintenanceStatusDetail();
+  }
+
+  if (previousSelection !== missionControls.selectedVehicleId) {
+    clearMaintenanceStatusDetail();
   }
 };
 
@@ -835,6 +1007,9 @@ const updateMissionControls = () => {
     trainingSpecialtySelect,
     trainingLoyaltyButton,
     trainingSpecialtyButton,
+    maintenanceRepairButton,
+    maintenanceHeatButton,
+    maintenanceStatus,
   } = missionControls;
 
   const controls = [select, startButton];
@@ -855,6 +1030,9 @@ const updateMissionControls = () => {
     trainingSpecialtySelect,
     trainingLoyaltyButton,
     trainingSpecialtyButton,
+    maintenanceRepairButton,
+    maintenanceHeatButton,
+    maintenanceStatus,
   ];
   const controlsReady = [...controls, ...detailElements].every(Boolean);
 
@@ -866,6 +1044,7 @@ const updateMissionControls = () => {
   updateVehicleSelectionOptions();
   updateRecruitmentOptions();
   updateTrainingOptions();
+  updateMaintenancePanel();
 
   const isReady = Boolean(missionSystem && economySystem);
   controls.forEach((control) => {
@@ -882,6 +1061,7 @@ const updateMissionControls = () => {
     resetMissionDetails(descriptionText);
     updateMissionStatusText();
     updateCrackdownIndicator();
+    updateMaintenancePanel();
     return;
   }
 
@@ -984,6 +1164,7 @@ const updateMissionControls = () => {
   }
 
   updateMissionStatusText();
+  updateMaintenancePanel();
 };
 
 const updateMissionSelect = () => {
@@ -1068,6 +1249,7 @@ const handleMissionStart = () => {
 
   missionControls.selectedCrewIds = [];
   missionControls.selectedVehicleId = null;
+  clearMaintenanceStatusDetail();
   economySystem.payCrew();
   updateMissionSelect();
   updateMissionControls();
@@ -1097,6 +1279,9 @@ const setupMissionControls = () => {
   missionControls.trainingLoyaltyButton = document.getElementById('mission-training-loyalty-btn');
   missionControls.trainingSpecialtyButton = document.getElementById('mission-training-specialty-btn');
   missionControls.trainingStatus = document.getElementById('mission-training-status');
+  missionControls.maintenanceRepairButton = document.getElementById('mission-maintenance-repair-btn');
+  missionControls.maintenanceHeatButton = document.getElementById('mission-maintenance-heat-btn');
+  missionControls.maintenanceStatus = document.getElementById('mission-maintenance-status');
 
   const {
     select,
@@ -1119,6 +1304,9 @@ const setupMissionControls = () => {
     trainingLoyaltyButton,
     trainingSpecialtyButton,
     trainingStatus,
+    maintenanceRepairButton,
+    maintenanceHeatButton,
+    maintenanceStatus,
   } = missionControls;
 
   const controlsReady = [
@@ -1142,6 +1330,9 @@ const setupMissionControls = () => {
     trainingLoyaltyButton,
     trainingSpecialtyButton,
     trainingStatus,
+    maintenanceRepairButton,
+    maintenanceHeatButton,
+    maintenanceStatus,
   ].every(Boolean);
 
   if (!controlsReady) {
@@ -1152,17 +1343,22 @@ const setupMissionControls = () => {
   select.addEventListener('change', () => {
     missionControls.selectedCrewIds = [];
     missionControls.selectedVehicleId = null;
+    clearMaintenanceStatusDetail();
     updateMissionControls();
   });
   trainingCrewSelect.addEventListener('change', updateTrainingOptions);
   trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
   trainingLoyaltyButton.addEventListener('click', handleLoyaltyTraining);
   trainingSpecialtyButton.addEventListener('click', handleSpecialtyTraining);
+  maintenanceRepairButton.addEventListener('click', handleMaintenanceRepair);
+  maintenanceHeatButton.addEventListener('click', handleMaintenanceHeat);
 
   setRecruitStatus('');
   setTrainingStatus('');
+  clearMaintenanceStatusDetail();
   updateRecruitmentOptions();
   updateTrainingOptions();
+  updateMaintenancePanel();
 
   renderMissionLog();
 

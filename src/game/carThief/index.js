@@ -132,7 +132,24 @@ const createCarThiefGame = ({ canvas, context }) => {
       }
 
       if (isRecentlyUsed && lastVehicleReport?.outcome) {
-        const outcomeLabel = lastVehicleReport.outcome === 'success' ? 'Success' : 'Failure';
+        let outcomeLabel;
+        if (lastVehicleReport.outcome === 'success') {
+          outcomeLabel = 'Success';
+        } else if (lastVehicleReport.outcome === 'failure') {
+          outcomeLabel = 'Failure';
+        } else if (lastVehicleReport.outcome === 'maintenance') {
+          const serviceType = lastVehicleReport.maintenanceType;
+          if (serviceType === 'repair') {
+            outcomeLabel = 'Maintenance: Repair';
+          } else if (serviceType === 'heat') {
+            outcomeLabel = 'Maintenance: Heat purge';
+          } else {
+            outcomeLabel = 'Maintenance';
+          }
+        } else {
+          outcomeLabel = lastVehicleReport.outcome;
+        }
+
         statusSegments.push(`Last: ${outcomeLabel}`);
       }
 
