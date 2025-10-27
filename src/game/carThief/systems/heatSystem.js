@@ -52,6 +52,41 @@ class HeatSystem {
     this.updateHeatTier();
   }
 
+  applyMitigation(reduction, { label = 'Heat mitigation', fundsSpent = 0, metadata = {} } = {}) {
+    const numericHeat = Number.isFinite(this.state.heat) ? this.state.heat : 0;
+    const normalizedReduction = Number.isFinite(reduction) && reduction > 0 ? reduction : 0;
+    const targetHeat = Math.max(0, numericHeat - normalizedReduction);
+
+    if (!Array.isArray(this.state.heatMitigationLog)) {
+      this.state.heatMitigationLog = [];
+    }
+
+    const telemetry = {
+      type: 'heat-mitigation',
+      label,
+      fundsSpent: Number.isFinite(fundsSpent) ? fundsSpent : 0,
+      heatBefore: numericHeat,
+      heatAfter: targetHeat,
+      heatDelta: targetHeat - numericHeat,
+      reductionApplied: numericHeat - targetHeat,
+      timestamp: Date.now(),
+    };
+
+    if (metadata && typeof metadata === 'object' && Object.keys(metadata).length) {
+      telemetry.metadata = { ...metadata };
+    }
+
+    this.state.heatMitigationLog.unshift(telemetry);
+    if (this.state.heatMitigationLog.length > 20) {
+      this.state.heatMitigationLog.length = 20;
+    }
+
+    this.state.heat = targetHeat;
+    this.updateHeatTier();
+
+    return telemetry;
+  }
+
   update(delta) {
     if (this.state.heat <= 0) {
       this.state.heat = 0;

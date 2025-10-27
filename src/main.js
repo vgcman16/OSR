@@ -1,6 +1,7 @@
 import { createCarThiefGame } from './game/carThief/index.js';
 import { CrewMember } from './game/carThief/entities/crewMember.js';
 import { GARAGE_MAINTENANCE_CONFIG } from './game/carThief/systems/missionSystem.js';
+import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
 
 let gameInstance = null;
 
@@ -44,6 +45,10 @@ const missionControls = {
   maintenanceHeatButton: null,
   maintenanceStatus: null,
   maintenanceStatusDetail: '',
+  heatLayLowButton: null,
+  heatBribeButton: null,
+  heatStatus: null,
+  heatStatusDetail: '',
   selectedCrewIds: [],
   selectedVehicleId: null,
 };
@@ -64,6 +69,21 @@ const SPECIALTY_OPTIONS = [
 
 const LOYALTY_TRAINING_COST = 2000;
 const SPECIALTY_TRAINING_COST = 3500;
+
+const HEAT_MANAGEMENT_ACTIONS = {
+  layLow: {
+    key: 'layLow',
+    label: 'Lay Low',
+    cost: 4500,
+    heatReduction: 2.5,
+  },
+  bribeOfficials: {
+    key: 'bribeOfficials',
+    label: 'Bribe Officials',
+    cost: 9000,
+    heatReduction: 4.5,
+  },
+};
 
 const getMissionSystem = () => gameInstance?.systems?.mission ?? null;
 const getEconomySystem = () => gameInstance?.systems?.economy ?? null;
@@ -236,6 +256,72 @@ const clearMaintenanceStatusDetail = () => {
   missionControls.maintenanceStatusDetail = '';
 };
 
+const updateHeatManagementPanel = () => {
+  const { heatLayLowButton, heatBribeButton, heatStatus } = missionControls;
+  if (!heatLayLowButton || !heatBribeButton || !heatStatus) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const heatSystem = getHeatSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const funds = Number.isFinite(state?.funds) ? state.funds : 0;
+
+  const layLowConfig = HEAT_MANAGEMENT_ACTIONS.layLow;
+  const bribeConfig = HEAT_MANAGEMENT_ACTIONS.bribeOfficials;
+
+  const systemsReady = Boolean(missionSystem && heatSystem && economySystem);
+
+  const canLayLow = systemsReady && funds >= layLowConfig.cost;
+  const canBribe = systemsReady && funds >= bribeConfig.cost;
+
+  heatLayLowButton.disabled = !canLayLow;
+  heatBribeButton.disabled = !canBribe;
+
+  heatLayLowButton.title = canLayLow
+    ? ''
+    : `Requires ${formatCurrency(layLowConfig.cost)} and operational systems.`;
+  heatBribeButton.title = canBribe
+    ? ''
+    : `Requires ${formatCurrency(bribeConfig.cost)} and operational systems.`;
+
+  let summaryMessage;
+
+  if (!systemsReady) {
+    summaryMessage = 'Heat abatement network syncing…';
+  } else {
+    const layLowHeat = layLowConfig.heatReduction.toFixed(1);
+    const bribeHeat = bribeConfig.heatReduction.toFixed(1);
+    summaryMessage = `Lay Low costs ${formatCurrency(layLowConfig.cost)} to drop heat by ${layLowHeat}. ` +
+      `Bribe Officials costs ${formatCurrency(bribeConfig.cost)} to drop heat by ${bribeHeat}.`;
+
+    const shortages = [];
+    if (funds < layLowConfig.cost) {
+      shortages.push(`Lay Low needs ${formatCurrency(layLowConfig.cost)}`);
+    }
+    if (funds < bribeConfig.cost) {
+      shortages.push(`Bribe Officials needs ${formatCurrency(bribeConfig.cost)}`);
+    }
+
+    if (shortages.length) {
+      summaryMessage = `${summaryMessage} Funds short — ${shortages.join(' and ')}.`;
+    } else {
+      summaryMessage = `${summaryMessage} Available funds: ${formatCurrency(funds)}.`;
+    }
+  }
+
+  const crackdownInfo = describeCrackdownPolicy();
+  const crackdownMessage = crackdownInfo
+    ? `Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`
+    : 'Crackdown status unavailable.';
+
+  const detail = missionControls.heatStatusDetail?.trim();
+  const leadMessage = detail || summaryMessage;
+
+  heatStatus.textContent = [leadMessage, crackdownMessage].filter(Boolean).join(' ');
+};
+
 const updateMaintenancePanel = () => {
   const { maintenanceStatus, maintenanceRepairButton, maintenanceHeatButton } = missionControls;
   if (!maintenanceStatus || !maintenanceRepairButton || !maintenanceHeatButton) {
@@ -323,6 +409,7 @@ const performMaintenanceAction = (type) => {
   if (!missionSystem || !economySystem) {
     missionControls.maintenanceStatusDetail = 'Maintenance systems offline.';
     updateMaintenancePanel();
+    updateHeatManagementPanel();
     return;
   }
 
@@ -330,6 +417,7 @@ const performMaintenanceAction = (type) => {
   if (!vehicleId) {
     missionControls.maintenanceStatusDetail = 'Select a garage vehicle before running maintenance.';
     updateMaintenancePanel();
+    updateHeatManagementPanel();
     return;
   }
 
@@ -389,6 +477,80 @@ const performMaintenanceAction = (type) => {
 
 const handleMaintenanceRepair = () => performMaintenanceAction('repair');
 const handleMaintenanceHeat = () => performMaintenanceAction('heat');
+
+const performHeatMitigation = (actionKey) => {
+  const action = HEAT_MANAGEMENT_ACTIONS[actionKey];
+  const missionSystem = getMissionSystem();
+  const heatSystem = getHeatSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+
+  if (!action || !missionSystem || !heatSystem || !economySystem || !state) {
+    missionControls.heatStatusDetail = 'Heat mitigation systems offline.';
+    updateHeatManagementPanel();
+    return;
+  }
+
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  const cost = Number.isFinite(action.cost) && action.cost > 0 ? action.cost : 0;
+
+  if (funds < cost) {
+    const required = formatCurrency(cost);
+    const available = formatCurrency(funds);
+    missionControls.heatStatusDetail = `Insufficient funds — requires ${required}, available ${available}.`;
+    updateHeatManagementPanel();
+    return;
+  }
+
+  const mitigationResult = executeHeatMitigation({
+    heatSystem,
+    missionSystem,
+    economySystem,
+    reduction: action.heatReduction,
+    cost,
+    label: action.label,
+    metadata: { action: action.key },
+  });
+
+  if (!mitigationResult?.success) {
+    let failureMessage = 'Unable to mitigate heat.';
+    if (mitigationResult?.reason === 'insufficient-funds') {
+      const required = formatCurrency(mitigationResult.cost ?? cost);
+      const available = formatCurrency(mitigationResult.fundsAvailable ?? funds);
+      failureMessage = `Insufficient funds — requires ${required}, available ${available}.`;
+    } else if (mitigationResult?.reason === 'heat-system-unavailable') {
+      failureMessage = 'Heat mitigation offline.';
+    } else if (mitigationResult?.reason === 'economy-system-unavailable') {
+      failureMessage = 'Economy systems offline.';
+    }
+
+    missionControls.heatStatusDetail = failureMessage;
+    updateHeatManagementPanel();
+    return;
+  }
+
+  const heatBefore = Number.isFinite(mitigationResult.heatBefore)
+    ? mitigationResult.heatBefore
+    : Number.isFinite(heatSystem?.state?.heat)
+      ? heatSystem.state.heat + (mitigationResult.reductionApplied ?? 0)
+      : 0;
+  const heatAfter = Number.isFinite(mitigationResult.heatAfter)
+    ? mitigationResult.heatAfter
+    : Number.isFinite(heatSystem?.state?.heat)
+      ? heatSystem.state.heat
+      : 0;
+
+  missionControls.heatStatusDetail = `Spent ${formatCurrency(mitigationResult.cost ?? cost)} to ${
+    action.label.toLowerCase()
+  } — heat ${formatHeatValue(heatBefore)} → ${formatHeatValue(heatAfter)}.`;
+
+  updateMissionSelect();
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleHeatLayLow = () => performHeatMitigation('layLow');
+const handleHeatBribe = () => performHeatMitigation('bribeOfficials');
 
 const handleRecruitHire = (candidateId) => {
   const missionSystem = getMissionSystem();
@@ -1061,6 +1223,7 @@ const updateMissionControls = () => {
     resetMissionDetails(descriptionText);
     updateMissionStatusText();
     updateCrackdownIndicator();
+    updateHeatManagementPanel();
     updateMaintenancePanel();
     return;
   }
@@ -1164,6 +1327,7 @@ const updateMissionControls = () => {
   }
 
   updateMissionStatusText();
+  updateHeatManagementPanel();
   updateMaintenancePanel();
 };
 
@@ -1282,6 +1446,9 @@ const setupMissionControls = () => {
   missionControls.maintenanceRepairButton = document.getElementById('mission-maintenance-repair-btn');
   missionControls.maintenanceHeatButton = document.getElementById('mission-maintenance-heat-btn');
   missionControls.maintenanceStatus = document.getElementById('mission-maintenance-status');
+  missionControls.heatLayLowButton = document.getElementById('mission-heat-laylow-btn');
+  missionControls.heatBribeButton = document.getElementById('mission-heat-bribe-btn');
+  missionControls.heatStatus = document.getElementById('mission-heat-status');
 
   const {
     select,
@@ -1307,6 +1474,9 @@ const setupMissionControls = () => {
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
+    heatLayLowButton,
+    heatBribeButton,
+    heatStatus,
   } = missionControls;
 
   const controlsReady = [
@@ -1333,6 +1503,9 @@ const setupMissionControls = () => {
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
+    heatLayLowButton,
+    heatBribeButton,
+    heatStatus,
   ].every(Boolean);
 
   if (!controlsReady) {
@@ -1352,13 +1525,17 @@ const setupMissionControls = () => {
   trainingSpecialtyButton.addEventListener('click', handleSpecialtyTraining);
   maintenanceRepairButton.addEventListener('click', handleMaintenanceRepair);
   maintenanceHeatButton.addEventListener('click', handleMaintenanceHeat);
+  heatLayLowButton.addEventListener('click', handleHeatLayLow);
+  heatBribeButton.addEventListener('click', handleHeatBribe);
 
   setRecruitStatus('');
   setTrainingStatus('');
   clearMaintenanceStatusDetail();
   updateRecruitmentOptions();
   updateTrainingOptions();
+  missionControls.heatStatusDetail = '';
   updateMaintenancePanel();
+  updateHeatManagementPanel();
 
   renderMissionLog();
 

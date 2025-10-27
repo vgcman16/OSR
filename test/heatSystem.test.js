@@ -48,3 +48,30 @@ test('initial heat tier reflects current heat value', () => {
   assert.equal(system.getCurrentTier(), 'lockdown', 'tier helper returns expected tier');
   assert.equal(state.heatTier, 'lockdown', 'state tier initialized based on starting heat');
 });
+
+test('applyMitigation reduces heat, clamps at zero, and records telemetry', () => {
+  const state = { heat: 4.2 };
+  const system = new HeatSystem(state);
+
+  const first = system.applyMitigation(1.5, {
+    label: 'Lay Low',
+    fundsSpent: 3000,
+    metadata: { action: 'lay-low' },
+  });
+
+  assert.equal(state.heat.toFixed(1), '2.7', 'heat decreases by the mitigation amount');
+  assert.equal(state.heatTier, 'calm', 'tier refreshes after mitigation');
+  assert.equal(first.label, 'Lay Low', 'telemetry preserves label metadata');
+  assert.equal(first.fundsSpent, 3000, 'telemetry records funds spent');
+  assert.equal(first.reductionApplied.toFixed(1), '1.5', 'telemetry tracks the applied reduction');
+  assert.ok(Array.isArray(state.heatMitigationLog), 'state maintains a mitigation log array');
+  assert.equal(state.heatMitigationLog.length, 1, 'log stores the mitigation entry');
+
+  const second = system.applyMitigation(10, { label: 'Bribe Officials', fundsSpent: 9000 });
+
+  assert.equal(state.heat, 0, 'mitigation cannot reduce heat below zero');
+  assert.equal(state.heatTier, 'calm', 'tier remains calm at zero heat');
+  assert.equal(second.heatAfter, 0, 'telemetry captures the clamped value');
+  assert.equal(state.heatMitigationLog.length, 2, 'subsequent mitigations append to the log');
+  assert.equal(state.heatMitigationLog[0], second, 'latest mitigation is unshifted to the front of the log');
+});
