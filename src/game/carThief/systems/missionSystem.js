@@ -3,6 +3,8 @@ import { CREW_TRAIT_KEYS, CREW_FATIGUE_CONFIG } from '../entities/crewMember.js'
 import { HeatSystem } from './heatSystem.js';
 import { generateContractsFromDistricts, generateFalloutContracts } from './contractFactory.js';
 import { buildMissionEventDeck } from './missionEvents.js';
+import { getAvailableCrewStorylineMissions, applyCrewStorylineOutcome } from './crewStorylines.js';
+import { getCrackdownOperationTemplates } from './crackdownOperations.js';
 import { getActiveStorageCapacityFromState } from '../world/safehouse.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
@@ -665,7 +667,6 @@ class MissionSystem {
     this.falloutContractFactory = falloutContractFactory;
 
     this.currentCrackdownTier = this.heatSystem.getCurrentTier();
-
     if (!Number.isFinite(this.state.followUpSequence)) {
       this.state.followUpSequence = 0;
     }
@@ -675,6 +676,8 @@ class MissionSystem {
     }
 
     this.refreshContractPoolFromCity();
+    this.ensureCrewStorylineContracts();
+    this.ensureCrackdownOperations(this.currentCrackdownTier);
     this.applyHeatRestrictions();
   }
 
@@ -697,6 +700,21 @@ class MissionSystem {
               }
             : null,
       };
+      if (template.storyline) {
+        storedTemplate.storyline = { ...template.storyline };
+      }
+      if (template.crackdownEffects) {
+        storedTemplate.crackdownEffects = { ...template.crackdownEffects };
+      }
+      if (template.category) {
+        storedTemplate.category = template.category;
+      }
+      if (template.ignoreCrackdownRestrictions) {
+        storedTemplate.ignoreCrackdownRestrictions = Boolean(template.ignoreCrackdownRestrictions);
+      }
+      if (template.crackdownTier) {
+        storedTemplate.crackdownTier = template.crackdownTier;
+      }
       this.templateMap.set(template.id, storedTemplate);
       this.missionTemplates.push(storedTemplate);
     }
@@ -738,6 +756,14 @@ class MissionSystem {
       typeof template.falloutRecovery === 'object' && template.falloutRecovery !== null
         ? { ...template.falloutRecovery }
         : null;
+    const storyline =
+      typeof template.storyline === 'object' && template.storyline !== null
+        ? { ...template.storyline }
+        : null;
+    const crackdownEffects =
+      typeof template.crackdownEffects === 'object' && template.crackdownEffects !== null
+        ? { ...template.crackdownEffects }
+        : null;
     const vehicleConfig =
       typeof template.vehicle === 'object' && template.vehicle !== null
         ? template.vehicle
@@ -747,6 +773,8 @@ class MissionSystem {
       ...template,
       pointOfInterest,
       falloutRecovery,
+      storyline,
+      crackdownEffects,
       payout,
       basePayout: payout,
       heat,
@@ -762,6 +790,8 @@ class MissionSystem {
       baseDuration: duration,
       successChance: baseSuccessChance,
       baseSuccessChance,
+      category: template.category ?? null,
+      ignoreCrackdownRestrictions: Boolean(template.ignoreCrackdownRestrictions),
       startedAt: null,
       completedAt: null,
       outcome: null,
@@ -899,6 +929,132 @@ class MissionSystem {
     }
 
     return queued;
+  }
+
+  ensureCrewStorylineContracts() {
+    const crew = Array.isArray(this.state?.crew) ? this.state.crew : [];
+    const templates = getAvailableCrewStorylineMissions(crew);
+    const desiredIds = new Set();
+
+    templates.forEach((template) => {
+      if (template?.id) {
+        desiredIds.add(template.id);
+      }
+    });
+
+    const activeMissionId = this.state?.activeMission?.id ?? null;
+
+    this.availableMissions = this.availableMissions.filter((mission) => {
+      if (!mission || mission.category !== 'crew-loyalty') {
+        return true;
+      }
+
+      if (desiredIds.has(mission.id)) {
+        return true;
+      }
+
+      if (mission.status !== 'available' || mission.id === activeMissionId) {
+        return true;
+      }
+
+      return false;
+    });
+
+    this.contractPool = this.contractPool.filter((template) => template?.category !== 'crew-loyalty');
+
+    templates.forEach((template) => {
+      if (!template || !template.id) {
+        return;
+      }
+
+      this.registerTemplate(template);
+
+      const existing = this.availableMissions.find((mission) => mission.id === template.id);
+      if (existing) {
+        existing.category = 'crew-loyalty';
+        existing.ignoreCrackdownRestrictions = true;
+        existing.restricted = false;
+        existing.restrictionReason = null;
+        existing.storyline = template.storyline ? { ...template.storyline } : existing.storyline;
+        return;
+      }
+
+      const mission = this.createMissionFromTemplate(template);
+      if (!mission) {
+        return;
+      }
+
+      mission.category = 'crew-loyalty';
+      mission.ignoreCrackdownRestrictions = true;
+      mission.restricted = false;
+      mission.restrictionReason = null;
+      this.availableMissions.unshift(mission);
+    });
+  }
+
+  ensureCrackdownOperations(tier = this.currentCrackdownTier) {
+    const templates = getCrackdownOperationTemplates(tier);
+    const desiredIds = new Set();
+
+    templates.forEach((template) => {
+      if (template?.id) {
+        desiredIds.add(template.id);
+      }
+    });
+
+    const activeMissionId = this.state?.activeMission?.id ?? null;
+
+    this.availableMissions = this.availableMissions.filter((mission) => {
+      if (!mission || mission.category !== 'crackdown-operation') {
+        return true;
+      }
+
+      if (desiredIds.has(mission.id)) {
+        return true;
+      }
+
+      if (mission.status !== 'available' || mission.id === activeMissionId) {
+        return true;
+      }
+
+      return false;
+    });
+
+    this.contractPool = this.contractPool.filter((template) => template?.category !== 'crackdown-operation');
+
+    templates.forEach((template) => {
+      if (!template || !template.id) {
+        return;
+      }
+
+      this.registerTemplate(template);
+
+      const existing = this.availableMissions.find((mission) => mission.id === template.id);
+      if (existing) {
+        existing.category = 'crackdown-operation';
+        existing.ignoreCrackdownRestrictions = true;
+        existing.crackdownTier = template.crackdownTier ?? tier;
+        existing.crackdownEffects = template.crackdownEffects
+          ? { ...template.crackdownEffects }
+          : existing.crackdownEffects;
+        existing.restricted = false;
+        existing.restrictionReason = null;
+        return;
+      }
+
+      const mission = this.createMissionFromTemplate(template);
+      if (!mission) {
+        return;
+      }
+
+      mission.category = 'crackdown-operation';
+      mission.ignoreCrackdownRestrictions = true;
+      mission.crackdownTier = template.crackdownTier ?? tier;
+      mission.crackdownEffects = template.crackdownEffects ? { ...template.crackdownEffects } : null;
+      mission.restricted = false;
+      mission.restrictionReason = null;
+      this.availableMissions.unshift(mission);
+    });
   }
 
   normalizeSuccessChance(mission) {
@@ -1278,6 +1434,14 @@ class MissionSystem {
       summary = `${summary} — Follow-up queued: ${followUpSummary}`;
     }
 
+    if (extras?.storylineSummary) {
+      summary = `${summary} — ${extras.storylineSummary}`;
+    }
+
+    if (extras?.crackdownSummary) {
+      summary = `${summary} — ${extras.crackdownSummary}`;
+    }
+
     const clonedFallout = falloutEntries.map((entry) => ({ ...entry }));
     const clonedFollowUps = followUpEntries.map((entry) => ({ ...entry }));
 
@@ -1322,6 +1486,8 @@ class MissionSystem {
       followUps: clonedFollowUps,
       falloutSummary,
       followUpSummary,
+      storylineSummary: extras?.storylineSummary ?? null,
+      crackdownSummary: extras?.crackdownSummary ?? null,
     };
 
     this.state.missionLog.unshift(entry);
@@ -1824,10 +1990,29 @@ class MissionSystem {
     const crewFalloutRecords = [];
     const falloutByCrewId = new Map();
     let queuedFollowUps = [];
+    let storylineOutcome = null;
+    let crackdownOutcome = null;
 
     if (outcome === 'success') {
       this.state.funds += mission.payout;
       this.heatSystem.increase(mission.heat);
+      if (mission.category === 'crackdown-operation') {
+        const effects = mission.crackdownEffects ?? {};
+        const heatReduction = Number(effects?.heatReduction);
+        if (Number.isFinite(heatReduction) && heatReduction > 0) {
+          const mitigation = this.heatSystem.applyMitigation(heatReduction, {
+            label: mission.name ?? 'Crackdown operation',
+            metadata: {
+              category: 'crackdown-operation',
+              missionId: mission.id ?? null,
+            },
+          });
+          const appliedReduction = Number.isFinite(mitigation?.reductionApplied)
+            ? Math.abs(mitigation.reductionApplied)
+            : heatReduction;
+          crackdownOutcome = `Crackdown eased — heat -${appliedReduction.toFixed(2)}.`;
+        }
+      }
       let rewardVehicleAdded = false;
       const storageCapacity = getActiveStorageCapacityFromState(this.state);
       const hasFiniteCapacity = Number.isFinite(storageCapacity) && storageCapacity >= 0;
@@ -1906,6 +2091,13 @@ class MissionSystem {
     } else if (outcome === 'failure') {
       const multiplier = crackdownPolicy.failureHeatMultiplier ?? 2;
       this.heatSystem.increase(mission.heat * multiplier);
+      if (mission.category === 'crackdown-operation') {
+        const penalty = Number(mission.crackdownEffects?.heatPenaltyOnFailure);
+        if (Number.isFinite(penalty) && penalty > 0) {
+          this.heatSystem.increase(penalty);
+          crackdownOutcome = `Crackdown retaliation — heat +${penalty.toFixed(2)}.`;
+        }
+      }
 
       const pending = mission.pendingResolution ?? {};
       const failureSeverity = (() => {
@@ -2044,6 +2236,39 @@ class MissionSystem {
       queuedFollowUps = this.queueFalloutContracts(falloutTemplates);
     }
 
+    if (mission.storyline?.type === 'crew-loyalty') {
+      const targetCrew = crewPool.find((member) => member?.id === mission.storyline.crewId) ?? null;
+      if (targetCrew) {
+        const storylineResult = applyCrewStorylineOutcome(targetCrew, mission.storyline.stepId, outcome);
+        if (storylineResult) {
+          const parts = [];
+          if (mission.storyline.crewName) {
+            parts.push(mission.storyline.crewName);
+          }
+          if (storylineResult.summary) {
+            parts.push(storylineResult.summary);
+          }
+          if (Number.isFinite(storylineResult.loyaltyDelta) && storylineResult.loyaltyDelta !== 0) {
+            parts.push(`Loyalty ${storylineResult.loyaltyDelta > 0 ? '+' : ''}${storylineResult.loyaltyDelta}`);
+          }
+          const traitAdjustments = Object.entries(storylineResult.traitBoosts ?? {})
+            .filter(([, delta]) => Number.isFinite(delta) && delta !== 0)
+            .map(([trait, delta]) => `${trait}+${delta}`);
+          if (traitAdjustments.length) {
+            parts.push(`Traits ${traitAdjustments.join(', ')}`);
+          }
+          if (storylineResult.perkAwarded) {
+            parts.push(`Perk unlocked: ${storylineResult.perkAwarded}`);
+          }
+          storylineOutcome = parts.join(' — ');
+        }
+      }
+    }
+
+    if (mission.category === 'crackdown-operation') {
+      this.syncHeatTier();
+    }
+
     let vehicleReport = null;
     if (assignedVehicle) {
       const wearAmount = (() => {
@@ -2157,10 +2382,19 @@ class MissionSystem {
       crewName: entry?.falloutRecovery?.crewName ?? null,
     }));
 
-    this.recordMissionTelemetry(mission, outcome, {
+    const telemetryExtras = {
       fallout: crewFalloutRecords,
       followUps: followUpSummaries,
-    });
+    };
+
+    if (storylineOutcome) {
+      telemetryExtras.storylineSummary = storylineOutcome;
+    }
+    if (crackdownOutcome) {
+      telemetryExtras.crackdownSummary = crackdownOutcome;
+    }
+
+    this.recordMissionTelemetry(mission, outcome, telemetryExtras);
 
     mission.pendingDecision = null;
     mission.eventDeck = [];
@@ -2184,6 +2418,8 @@ class MissionSystem {
     }
 
     this.respawnMissionTemplate(mission.id);
+    this.ensureCrewStorylineContracts();
+    this.ensureCrackdownOperations(this.currentCrackdownTier);
     this.drawContractFromPool();
     this.applyHeatRestrictions();
 
@@ -2695,7 +2931,10 @@ MissionSystem.prototype.syncHeatTier = function syncHeatTier() {
   const latestTier = this.heatSystem.getCurrentTier();
   if (this.currentCrackdownTier !== latestTier) {
     this.currentCrackdownTier = latestTier;
+    this.ensureCrackdownOperations(latestTier);
     this.applyHeatRestrictions();
+  } else {
+    this.ensureCrackdownOperations(latestTier);
   }
 };
 
@@ -2713,6 +2952,12 @@ MissionSystem.prototype.applyHeatRestrictions = function applyHeatRestrictions()
     if (mission.falloutRecovery) {
       mission.restricted = false;
       mission.restrictionReason = 'Priority crew fallout response.';
+      return;
+    }
+
+    if (mission.ignoreCrackdownRestrictions) {
+      mission.restricted = false;
+      mission.restrictionReason = null;
       return;
     }
 

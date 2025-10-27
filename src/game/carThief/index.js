@@ -171,6 +171,11 @@ const createCarThiefGame = ({ canvas, context }) => {
       : Number.isFinite(safehouseTier?.heatReduction)
         ? safehouseTier.heatReduction
         : 0;
+    const safehouseAmenities = typeof safehouse?.getUnlockedAmenities === 'function'
+      ? safehouse.getUnlockedAmenities()
+      : Array.isArray(safehouseTier?.amenities)
+        ? safehouseTier.amenities
+        : [];
     const safehouseOverhead = Number.isFinite(lastExpenseReport?.safehouseOverhead)
       ? lastExpenseReport.safehouseOverhead
       : 0;
@@ -216,6 +221,9 @@ const createCarThiefGame = ({ canvas, context }) => {
     }
     if (Number.isFinite(safehouseHeatReduction) && safehouseHeatReduction > 0) {
       safehousePerks.push(`-${safehouseHeatReduction.toFixed(2)} heat/day`);
+    }
+    if (Array.isArray(safehouseAmenities) && safehouseAmenities.length) {
+      safehousePerks.push(`${safehouseAmenities.length} amenities online`);
     }
     const safehousePerksLabel = safehousePerks.length ? ` (${safehousePerks.join(', ')})` : '';
     context.fillText(`Safehouse: ${safehouseLabel}${safehousePerksLabel}`, 32, 288);
@@ -389,6 +397,7 @@ const createCarThiefGame = ({ canvas, context }) => {
       const activeMetadata = [
         activeMission.districtName ? `District: ${activeMission.districtName}` : null,
         activeMission.riskTier ? `Risk: ${activeMission.riskTier}` : null,
+        activeMission.category ? activeMission.category.toUpperCase() : null,
       ].filter(Boolean);
 
       context.fillText(activeMission.name, missionInfoX, missionInfoY);
@@ -493,6 +502,7 @@ const createCarThiefGame = ({ canvas, context }) => {
       const metadataSegments = [
         mission.districtName ? `@ ${mission.districtName}` : null,
         mission.riskTier ? `risk: ${mission.riskTier}` : null,
+        mission.category ? mission.category.toUpperCase() : null,
         mission.restricted ? 'LOCKED' : null,
       ].filter(Boolean);
       const metadataLabel = metadataSegments.length ? ` — ${metadataSegments.join(' • ')}` : '';
