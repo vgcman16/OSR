@@ -8,6 +8,18 @@ const coerceFiniteNumber = (value, fallback = 0) => {
 
 const REQUIRED_TEMPLATE_FIELDS = ['id', 'name'];
 
+const sanitizeDuration = (durationValue, difficultyValue) => {
+  const numericDuration = coerceFiniteNumber(durationValue, NaN);
+  const numericDifficulty = coerceFiniteNumber(difficultyValue, 1);
+  const fallback = Math.max(numericDifficulty * 20, 20);
+
+  if (Number.isFinite(numericDuration) && numericDuration > 0) {
+    return numericDuration;
+  }
+
+  return fallback;
+};
+
 const defaultMissionTemplates = [
   {
     id: 'showroom-heist',
@@ -90,7 +102,7 @@ class MissionSystem {
     const payout = coerceFiniteNumber(template.payout, 0);
     const heat = coerceFiniteNumber(template.heat, 0);
     const difficulty = coerceFiniteNumber(template.difficulty, 1);
-    const duration = template.duration ?? Math.max(difficulty * 20, 20);
+    const duration = sanitizeDuration(template.duration, difficulty);
     const vehicleConfig =
       typeof template.vehicle === 'object' && template.vehicle !== null
         ? template.vehicle
@@ -223,7 +235,7 @@ class MissionSystem {
     }
 
     mission.elapsedTime = (mission.elapsedTime ?? 0) + delta;
-    const duration = mission.duration ?? Math.max(mission.difficulty * 20, 20);
+    const duration = sanitizeDuration(mission.duration, mission.difficulty);
     mission.duration = duration;
     mission.progress = Math.min(mission.elapsedTime / duration, 1);
 
