@@ -57,6 +57,14 @@
               <dd id="mission-detail-restriction">All contracts are currently open.</dd>
             </div>
             <div class="mission-details__row">
+              <dt>Player Expertise</dt>
+              <dd>
+                <ul id="mission-detail-player-impact" class="mission-details__list">
+                  <li>Player influence steady — train to unlock bonuses.</li>
+                </ul>
+              </dd>
+            </div>
+            <div class="mission-details__row">
               <dt>Crew Impact</dt>
               <dd>
                 <ul id="mission-detail-crew-impact" class="mission-details__list">
@@ -114,6 +122,31 @@
           <p
             id="mission-training-status"
             class="control-panel__status mission-training__status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </section>
+        <section class="mission-player" aria-labelledby="mission-player-title">
+          <h3 id="mission-player-title" class="mission-details__title">Player Development</h3>
+          <p class="mission-details__hint">
+            Tune your own skills and gear to stack with crew bonuses on each contract.
+          </p>
+          <ul id="mission-player-stats" class="mission-details__list mission-player__stats">
+            <li>Player profile unavailable.</li>
+          </ul>
+          <label class="mission-training__label" for="mission-player-skill">Skill focus</label>
+          <select id="mission-player-skill" name="mission-player-skill"></select>
+          <div class="mission-training__actions">
+            <button id="mission-player-train-btn" type="button">Train Skill</button>
+          </div>
+          <label class="mission-training__label" for="mission-player-gear">Gear upgrade</label>
+          <select id="mission-player-gear" name="mission-player-gear"></select>
+          <div class="mission-training__actions">
+            <button id="mission-player-gear-btn" type="button">Acquire Gear</button>
+          </div>
+          <p
+            id="mission-player-status"
+            class="control-panel__status mission-player__status"
             role="status"
             aria-live="polite"
           ></p>

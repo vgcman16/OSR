@@ -240,6 +240,22 @@ const createCarThiefGame = ({ canvas, context }) => {
         missionInfoY += 26;
       }
 
+      const playerSummary = Array.isArray(activeMission.playerEffectSummary)
+        ? activeMission.playerEffectSummary
+        : [];
+      if (playerSummary.length) {
+        context.fillText('Player influence:', missionInfoX, missionInfoY);
+        missionInfoY += 24;
+        playerSummary.slice(0, 2).forEach((line) => {
+          context.fillText(` • ${line}`, missionInfoX + 12, missionInfoY);
+          missionInfoY += 22;
+        });
+        if (playerSummary.length > 2) {
+          context.fillText(` • +${playerSummary.length - 2} more adjustments`, missionInfoX + 12, missionInfoY);
+          missionInfoY += 22;
+        }
+      }
+
       if (Array.isArray(activeMission.assignedCrewIds) && activeMission.assignedCrewIds.length) {
         const crewMembers = activeMission.assignedCrewIds
           .map((crewId) => state.crew.find((member) => member.id === crewId))
