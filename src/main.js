@@ -19,8 +19,6 @@ const teardownGame = () => {
 const missionControls = {
   select: null,
   startButton: null,
-  successButton: null,
-  failureButton: null,
   statusText: null,
   detailDescription: null,
   detailPayout: null,
@@ -31,6 +29,7 @@ const missionControls = {
   detailCrewImpact: null,
   crewList: null,
   crackdownText: null,
+  logList: null,
   selectedCrewIds: [],
 };
 
@@ -111,6 +110,11 @@ const resetMissionDetails = (descriptionText) => {
 
 const formatMissionStatusMessage = (mission) => {
   if (!mission) {
+    const latestLogEntry = getMissionSystem()?.state?.missionLog?.[0];
+    if (latestLogEntry) {
+      return `No active mission. Last result: ${latestLogEntry.summary}`;
+    }
+
     return 'No active mission.';
   }
 
@@ -121,9 +125,9 @@ const formatMissionStatusMessage = (mission) => {
 
   switch (status) {
     case 'in-progress':
-      return `${mission.name} in progress — ${progressPercent}% complete (${roundedRemaining}s remaining)`;
+      return `${mission.name} in progress — ${progressPercent}% complete (${roundedRemaining}s remaining, auto-resolving on completion)`;
     case 'awaiting-resolution':
-      return `${mission.name} ready for outcome — ${progressPercent}% complete`;
+      return `${mission.name} resolving outcome…`;
     case 'completed':
       return `${mission.name} completed — outcome: ${mission.outcome ?? 'unknown'}`;
     default:
@@ -295,6 +299,7 @@ const updateMissionStatusText = () => {
   }
 
   missionControls.statusText.textContent = statusMessage;
+  renderMissionLog();
 };
 
 const updateCrackdownIndicator = () => {
@@ -312,14 +317,44 @@ const updateCrackdownIndicator = () => {
   crackdownText.textContent = `Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`;
 };
 
+const renderMissionLog = () => {
+  const { logList } = missionControls;
+  if (!logList) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const logEntries = Array.isArray(missionSystem?.state?.missionLog)
+    ? missionSystem.state.missionLog
+    : [];
+
+  logList.innerHTML = '';
+
+  if (!logEntries.length) {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'No missions resolved yet.';
+    logList.appendChild(placeholder);
+    return;
+  }
+
+  const options = { hour: '2-digit', minute: '2-digit' };
+
+  logEntries.slice(0, 5).forEach((entry) => {
+    const item = document.createElement('li');
+    const summary = entry?.summary ?? 'Mission resolved.';
+    const timestamp = Number.isFinite(entry?.timestamp) ? new Date(entry.timestamp) : null;
+    const timeLabel = timestamp ? ` @ ${timestamp.toLocaleTimeString([], options)}` : '';
+    item.textContent = `${summary}${timeLabel}`;
+    logList.appendChild(item);
+  });
+};
+
 const updateMissionControls = () => {
   const missionSystem = getMissionSystem();
   const economySystem = getEconomySystem();
   const {
     select,
     startButton,
-    successButton,
-    failureButton,
     detailDescription,
     detailPayout,
     detailHeat,
@@ -329,9 +364,10 @@ const updateMissionControls = () => {
     detailCrewImpact,
     crewList,
     crackdownText,
+    logList,
   } = missionControls;
 
-  const controls = [select, startButton, successButton, failureButton];
+  const controls = [select, startButton];
   const detailElements = [
     detailDescription,
     detailPayout,
@@ -342,6 +378,7 @@ const updateMissionControls = () => {
     detailCrewImpact,
     crewList,
     crackdownText,
+    logList,
   ];
   const controlsReady = [...controls, ...detailElements].every(Boolean);
 
@@ -377,12 +414,6 @@ const updateMissionControls = () => {
   );
   const activeMission = missionSystem.state.activeMission;
 
-  const missionReadyForOutcome =
-    Boolean(activeMission && activeMission.status === 'awaiting-resolution');
-  const missionCanFail = Boolean(
-    activeMission && (activeMission.status === 'in-progress' || activeMission.status === 'awaiting-resolution'),
-  );
-
   const isMissionAvailable = Boolean(selectedMission && selectedMission.status === 'available');
   const isMissionRestricted = Boolean(selectedMission && selectedMission.restricted);
   const isAnotherMissionRunning = Boolean(
@@ -391,8 +422,6 @@ const updateMissionControls = () => {
 
   startButton.disabled =
     !isReady || !isMissionAvailable || isAnotherMissionRunning || isMissionRestricted;
-  successButton.disabled = !missionReadyForOutcome;
-  failureButton.disabled = !missionCanFail;
 
   if (!selectedMission) {
     resetMissionDetails('Select a mission to view its briefing.');
@@ -511,6 +540,8 @@ const updateMissionSelect = () => {
   if (selectionStillValid) {
     select.value = previousSelection;
   }
+
+  renderMissionLog();
 };
 
 const handleMissionStart = () => {
@@ -544,35 +575,9 @@ const handleMissionStart = () => {
   triggerHudRender();
 };
 
-const handleMissionResolution = (outcome) => {
-  const missionSystem = getMissionSystem();
-  if (!missionSystem) {
-    return;
-  }
-
-  const activeMission = missionSystem.state.activeMission;
-  if (!activeMission) {
-    updateMissionStatusText();
-    return;
-  }
-
-  const mission = missionSystem.resolveMission(activeMission.id, outcome);
-  if (!mission) {
-    updateMissionStatusText();
-    return;
-  }
-
-  missionControls.selectedCrewIds = [];
-  updateMissionSelect();
-  updateMissionControls();
-  triggerHudRender();
-};
-
 const setupMissionControls = () => {
   missionControls.select = document.getElementById('mission-select');
   missionControls.startButton = document.getElementById('start-mission-btn');
-  missionControls.successButton = document.getElementById('mission-success-btn');
-  missionControls.failureButton = document.getElementById('mission-failure-btn');
   missionControls.statusText = document.getElementById('mission-status-text');
   missionControls.detailDescription = document.getElementById('mission-detail-description');
   missionControls.detailPayout = document.getElementById('mission-detail-payout');
@@ -583,12 +588,11 @@ const setupMissionControls = () => {
   missionControls.detailCrewImpact = document.getElementById('mission-detail-crew-impact');
   missionControls.crewList = document.getElementById('mission-crew-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
+  missionControls.logList = document.getElementById('mission-log-list');
 
   const {
     select,
     startButton,
-    successButton,
-    failureButton,
     detailDescription,
     detailPayout,
     detailHeat,
@@ -598,13 +602,12 @@ const setupMissionControls = () => {
     detailCrewImpact,
     crewList,
     crackdownText,
+    logList,
   } = missionControls;
 
   const controlsReady = [
     select,
     startButton,
-    successButton,
-    failureButton,
     detailDescription,
     detailPayout,
     detailHeat,
@@ -614,6 +617,7 @@ const setupMissionControls = () => {
     detailCrewImpact,
     crewList,
     crackdownText,
+    logList,
   ].every(Boolean);
 
   if (!controlsReady) {
@@ -621,12 +625,12 @@ const setupMissionControls = () => {
   }
 
   startButton.addEventListener('click', handleMissionStart);
-  successButton.addEventListener('click', () => handleMissionResolution('success'));
-  failureButton.addEventListener('click', () => handleMissionResolution('failure'));
   select.addEventListener('change', () => {
     missionControls.selectedCrewIds = [];
     updateMissionControls();
   });
+
+  renderMissionLog();
 
   if (!missionControlSyncHandle) {
     missionControlSyncHandle = window.setInterval(() => {

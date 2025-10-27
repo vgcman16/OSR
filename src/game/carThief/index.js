@@ -90,9 +90,9 @@ const createCarThiefGame = ({ canvas, context }) => {
       const timeLabel = `${Math.ceil(remainingSeconds)}s remaining`;
       const statusLabel =
         activeMission.status === 'awaiting-resolution'
-          ? 'Awaiting outcome'
+          ? 'Resolving outcome'
           : activeMission.status === 'in-progress'
-            ? 'In progress'
+            ? 'In progress (auto resolves)'
             : activeMission.status === 'completed'
               ? `Completed (${activeMission.outcome ?? 'unknown'})`
               : activeMission.status ?? 'Unknown';
@@ -119,7 +119,7 @@ const createCarThiefGame = ({ canvas, context }) => {
         );
         missionInfoY += 26;
       } else if (activeMission.status === 'awaiting-resolution') {
-        context.fillText(`Progress: ${progressPercent}% — Ready to resolve`, missionInfoX, missionInfoY);
+        context.fillText(`Progress: ${progressPercent}% — Resolving outcome`, missionInfoX, missionInfoY);
         missionInfoY += 26;
       } else if (activeMission.status === 'completed') {
         context.fillText(`Payout: $${activeMission.payout.toLocaleString()}`, missionInfoX, missionInfoY);
@@ -157,6 +157,13 @@ const createCarThiefGame = ({ canvas, context }) => {
       }
     } else {
       context.fillText('No active mission', missionInfoX, missionInfoY);
+      missionInfoY += 26;
+    }
+
+    const latestLogEntry =
+      Array.isArray(state.missionLog) && state.missionLog.length ? state.missionLog[0] : null;
+    if (latestLogEntry) {
+      context.fillText(`Last result: ${latestLogEntry.summary}`, missionInfoX, missionInfoY);
       missionInfoY += 26;
     }
 

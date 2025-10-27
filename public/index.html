@@ -88,12 +88,16 @@
         </p>
         <div class="control-panel__actions">
           <button id="start-mission-btn" type="button">Start Mission</button>
-          <button id="mission-success-btn" type="button">Mark Success</button>
-          <button id="mission-failure-btn" type="button">Mark Failure</button>
         </div>
         <p id="mission-status-text" class="control-panel__status" role="status" aria-live="polite">
           Awaiting mission selection.
         </p>
+        <section class="mission-log" aria-live="polite" aria-label="Mission outcome log">
+          <h3 class="mission-details__title">Mission Log</h3>
+          <ul id="mission-log-list" class="mission-details__list mission-log__list">
+            <li>No missions resolved yet.</li>
+          </ul>
+        </section>
       </section>
     </main>
     <footer class="site-footer">
