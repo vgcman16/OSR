@@ -88,11 +88,20 @@ const createCarThiefGame = ({ canvas, context }) => {
             : activeMission.status === 'completed'
               ? `Completed (${activeMission.outcome ?? 'unknown'})`
               : activeMission.status ?? 'Unknown';
+      const activeMetadata = [
+        activeMission.districtName ? `District: ${activeMission.districtName}` : null,
+        activeMission.riskTier ? `Risk: ${activeMission.riskTier}` : null,
+      ].filter(Boolean);
 
       context.fillText(activeMission.name, missionInfoX, missionInfoY);
       missionInfoY += 26;
       context.fillText(`Status: ${statusLabel}`, missionInfoX, missionInfoY);
       missionInfoY += 26;
+
+      if (activeMetadata.length) {
+        context.fillText(activeMetadata.join(' • '), missionInfoX, missionInfoY);
+        missionInfoY += 26;
+      }
 
       if (activeMission.status === 'in-progress') {
         context.fillText(
@@ -125,8 +134,14 @@ const createCarThiefGame = ({ canvas, context }) => {
         statusLabel = 'awaiting outcome';
       }
 
+      const metadataSegments = [
+        mission.districtName ? `@ ${mission.districtName}` : null,
+        mission.riskTier ? `risk: ${mission.riskTier}` : null,
+      ].filter(Boolean);
+      const metadataLabel = metadataSegments.length ? ` — ${metadataSegments.join(' • ')}` : '';
+
       context.fillText(
-        `${mission.name} — $${mission.payout.toLocaleString()} (${statusLabel})`,
+        `${mission.name} — $${mission.payout.toLocaleString()} (${statusLabel})${metadataLabel}`,
         missionInfoX,
         baseY,
       );

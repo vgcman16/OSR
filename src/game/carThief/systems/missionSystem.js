@@ -1,5 +1,6 @@
 import { Vehicle } from '../entities/vehicle.js';
 import { HeatSystem } from './heatSystem.js';
+import { generateContractsFromDistricts } from './contractFactory.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
   const numeric = Number(value);
@@ -57,6 +58,7 @@ class MissionSystem {
       heatSystem = new HeatSystem(state),
       missionTemplates = defaultMissionTemplates,
       contractPool = [],
+      contractFactory = generateContractsFromDistricts,
     } = {},
   ) {
     this.state = state;
@@ -67,6 +69,9 @@ class MissionSystem {
       this.missionTemplates.map((template) => [template.id, template]),
     );
     this.contractPool = contractPool.map((template) => ({ ...template }));
+    this.contractFactory = contractFactory;
+
+    this.refreshContractPoolFromCity();
   }
 
   registerTemplate(template) {
@@ -124,6 +129,34 @@ class MissionSystem {
     };
   }
 
+  refreshContractPoolFromCity() {
+    if (typeof this.contractFactory !== 'function') {
+      return;
+    }
+
+    const districts = this.state?.city?.districts ?? [];
+    if (!Array.isArray(districts) || !districts.length) {
+      return;
+    }
+
+    const generatedContracts = this.contractFactory(districts);
+    generatedContracts.forEach((template) => {
+      if (!template || !template.id) {
+        return;
+      }
+
+      if (!this.templateMap.has(template.id)) {
+        this.registerTemplate(template);
+      }
+
+      const alreadyAvailable = this.availableMissions.some((mission) => mission.id === template.id);
+      const alreadyQueued = this.contractPool.some((mission) => mission.id === template.id);
+      if (!alreadyAvailable && !alreadyQueued) {
+        this.contractPool.push({ ...template });
+      }
+    });
+  }
+
   respawnMissionTemplate(missionId) {
     const missionIndex = this.availableMissions.findIndex((entry) => entry.id === missionId);
     if (missionIndex === -1) {
@@ -143,6 +176,10 @@ class MissionSystem {
   }
 
   drawContractFromPool() {
+    if (!this.contractPool.length) {
+      this.refreshContractPoolFromCity();
+    }
+
     if (!this.contractPool.length) {
       return null;
     }
@@ -172,6 +209,17 @@ class MissionSystem {
     this.availableMissions = this.missionTemplates
       .map((template) => this.createMissionFromTemplate(template))
       .filter(Boolean);
+
+    if (!this.availableMissions.length) {
+      this.refreshContractPoolFromCity();
+    }
+
+    while (this.availableMissions.length < 3) {
+      const mission = this.drawContractFromPool();
+      if (!mission) {
+        break;
+      }
+    }
   }
 
   startMission(missionId) {
