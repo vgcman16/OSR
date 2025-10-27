@@ -21,6 +21,33 @@ const sanitizeDuration = (durationValue, difficultyValue) => {
   return fallback;
 };
 
+const deriveBaseSuccessChance = (difficultyValue) => {
+  const difficulty = coerceFiniteNumber(difficultyValue, 1);
+  const baseline = 0.75 - difficulty * 0.08;
+  return Math.max(0.3, Math.min(0.85, baseline));
+};
+
+const summarizeCrewEffect = (member, { durationDelta = 0, payoutDelta = 0, successDelta = 0 }) => {
+  const adjustments = [];
+  if (durationDelta) {
+    const label = durationDelta < 0 ? 'faster' : 'slower';
+    adjustments.push(`${Math.abs(Math.round(durationDelta * 100))}% ${label}`);
+  }
+  if (payoutDelta) {
+    const label = payoutDelta > 0 ? 'more' : 'less';
+    adjustments.push(`${Math.abs(Math.round(payoutDelta * 100))}% ${label} payout`);
+  }
+  if (successDelta) {
+    adjustments.push(`${successDelta > 0 ? '+' : '-'}${Math.abs(Math.round(successDelta * 100))}% success`);
+  }
+
+  if (!adjustments.length) {
+    return `${member.name}: steady support.`;
+  }
+
+  return `${member.name}: ${adjustments.join(', ')}`;
+};
+
 const crackdownPolicies = {
   calm: {
     label: 'Calm',
@@ -128,6 +155,7 @@ class MissionSystem {
     const heat = coerceFiniteNumber(template.heat, 0);
     const difficulty = coerceFiniteNumber(template.difficulty, 1);
     const duration = sanitizeDuration(template.duration, difficulty);
+    const baseSuccessChance = deriveBaseSuccessChance(difficulty);
     const vehicleConfig =
       typeof template.vehicle === 'object' && template.vehicle !== null
         ? template.vehicle
@@ -136,6 +164,7 @@ class MissionSystem {
     return {
       ...template,
       payout,
+      basePayout: payout,
       heat,
       difficulty,
       vehicle: new Vehicle(vehicleConfig),
@@ -145,9 +174,15 @@ class MissionSystem {
       elapsedTime: 0,
       progress: 0,
       duration,
+      baseDuration: duration,
+      successChance: baseSuccessChance,
+      baseSuccessChance,
       startedAt: null,
       completedAt: null,
       outcome: null,
+      assignedCrewIds: [],
+      assignedCrewImpact: null,
+      crewEffectSummary: [],
     };
   }
 
@@ -229,6 +264,108 @@ class MissionSystem {
     return mission;
   }
 
+  computeCrewImpact(mission, crewMembers = []) {
+    if (!mission) {
+      return null;
+    }
+
+    const baseDuration = sanitizeDuration(mission.baseDuration ?? mission.duration, mission.difficulty);
+    const basePayout = coerceFiniteNumber(mission.basePayout ?? mission.payout, 0);
+    const baseSuccessChance = Number.isFinite(mission.baseSuccessChance)
+      ? mission.baseSuccessChance
+      : deriveBaseSuccessChance(mission.difficulty);
+
+    let durationMultiplier = 1;
+    let payoutMultiplier = 1;
+    let successBonus = 0;
+    const summary = [];
+
+    crewMembers.forEach((member) => {
+      if (!member) {
+        return;
+      }
+
+      const loyalty = Number(member.loyalty) >= 0 ? Number(member.loyalty) : 0;
+      const safeLoyalty = Number.isFinite(loyalty) ? loyalty : 0;
+      const contribution = { durationDelta: 0, payoutDelta: 0, successDelta: 0 };
+
+      switch ((member.specialty ?? '').toLowerCase()) {
+        case 'wheelman': {
+          const reduction = Math.min(0.3, 0.04 * safeLoyalty);
+          durationMultiplier -= reduction;
+          contribution.durationDelta = -reduction;
+          successBonus += 0.01 * safeLoyalty;
+          contribution.successDelta += 0.01 * safeLoyalty;
+          break;
+        }
+        case 'hacker': {
+          const bonus = 0.05 + 0.02 * safeLoyalty;
+          successBonus += bonus;
+          contribution.successDelta += bonus;
+          durationMultiplier -= Math.min(0.1, 0.01 * safeLoyalty);
+          contribution.durationDelta -= Math.min(0.1, 0.01 * safeLoyalty);
+          break;
+        }
+        case 'mechanic': {
+          const payoutBoost = 0.03 * (1 + safeLoyalty / 2);
+          payoutMultiplier += payoutBoost;
+          contribution.payoutDelta = payoutBoost;
+          successBonus += 0.005 * safeLoyalty;
+          contribution.successDelta += 0.005 * safeLoyalty;
+          break;
+        }
+        case 'face': {
+          const payoutBoost = 0.02 * safeLoyalty;
+          payoutMultiplier += payoutBoost;
+          contribution.payoutDelta = payoutBoost;
+          const success = 0.03 + 0.01 * safeLoyalty;
+          successBonus += success;
+          contribution.successDelta += success;
+          break;
+        }
+        default: {
+          const genericBonus = 0.02 * (1 + safeLoyalty / 2);
+          successBonus += genericBonus;
+          contribution.successDelta += genericBonus;
+          break;
+        }
+      }
+
+      summary.push(summarizeCrewEffect(member, contribution));
+    });
+
+    durationMultiplier = Math.max(0.5, durationMultiplier);
+    payoutMultiplier = Math.max(0.5, payoutMultiplier);
+
+    const adjustedDuration = Math.max(5, Math.round(baseDuration * durationMultiplier));
+    const adjustedPayout = Math.round(basePayout * payoutMultiplier);
+    const adjustedSuccessChance = Math.max(0.05, Math.min(0.98, baseSuccessChance + successBonus));
+
+    return {
+      baseDuration,
+      adjustedDuration,
+      basePayout,
+      adjustedPayout,
+      baseSuccessChance,
+      adjustedSuccessChance,
+      summary,
+      durationMultiplier,
+      payoutMultiplier,
+      successBonus,
+    };
+  }
+
+  previewCrewAssignment(missionId, crewIds = []) {
+    const mission = this.availableMissions.find((entry) => entry.id === missionId);
+    if (!mission) {
+      return null;
+    }
+
+    const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
+    const crewMembers = crewPool.filter((member) => crewIds.includes(member.id));
+    return this.computeCrewImpact(mission, crewMembers) ?? null;
+  }
+
   generateInitialContracts() {
     this.availableMissions = this.missionTemplates
       .map((template) => this.createMissionFromTemplate(template))
@@ -248,7 +385,7 @@ class MissionSystem {
     this.applyHeatRestrictions();
   }
 
-  startMission(missionId) {
+  startMission(missionId, crewIds = []) {
     if (this.state.activeMission && this.state.activeMission.status !== 'completed') {
       return null;
     }
@@ -259,6 +396,41 @@ class MissionSystem {
     if (!mission || mission.status !== 'available' || mission.restricted) {
       return null;
     }
+
+    const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
+    const requestedCrewIds = Array.isArray(crewIds) ? crewIds : [];
+    const assignedCrew = crewPool.filter((member) => requestedCrewIds.includes(member.id));
+
+    const crewUnavailable = assignedCrew.some((member) => member.status && member.status !== 'idle');
+    if (crewUnavailable) {
+      return null;
+    }
+
+    const crewImpact = this.computeCrewImpact(mission, assignedCrew);
+    if (crewImpact) {
+      mission.duration = crewImpact.adjustedDuration;
+      mission.payout = crewImpact.adjustedPayout;
+      mission.successChance = crewImpact.adjustedSuccessChance;
+      mission.assignedCrewImpact = crewImpact;
+    } else {
+      mission.duration = sanitizeDuration(mission.baseDuration ?? mission.duration, mission.difficulty);
+      mission.payout = coerceFiniteNumber(mission.basePayout ?? mission.payout, 0);
+      mission.successChance = Number.isFinite(mission.baseSuccessChance)
+        ? mission.baseSuccessChance
+        : deriveBaseSuccessChance(mission.difficulty);
+      mission.assignedCrewImpact = null;
+    }
+
+    mission.assignedCrewIds = assignedCrew.map((member) => member.id);
+    mission.crewEffectSummary = crewImpact?.summary ?? [];
+
+    assignedCrew.forEach((member) => {
+      if (typeof member.setStatus === 'function') {
+        member.setStatus('on-mission');
+      } else {
+        member.status = 'on-mission';
+      }
+    });
 
     mission.status = 'in-progress';
     mission.startedAt = Date.now();
@@ -294,14 +466,50 @@ class MissionSystem {
 
     const crackdownPolicy = this.getCurrentCrackdownPolicy();
 
+    const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
+    const assignedCrew = crewPool.filter((member) => mission.assignedCrewIds?.includes(member.id));
+
     if (outcome === 'success') {
       this.state.funds += mission.payout;
       this.heatSystem.increase(mission.heat);
       this.state.garage.push(mission.vehicle);
+
+      assignedCrew.forEach((member) => {
+        if (typeof member.adjustLoyalty === 'function') {
+          member.adjustLoyalty(1);
+        }
+      });
+
+      if (mission.vehicle && typeof mission.vehicle.applyWear === 'function') {
+        const mechanicScore = assignedCrew
+          .filter((member) => (member.specialty ?? '').toLowerCase() === 'mechanic')
+          .reduce((total, member) => total + (Number(member.loyalty) || 0), 0);
+        const wearReduction = Math.min(0.08, mechanicScore * 0.01);
+        const wearAmount = Math.max(0.05, 0.18 - wearReduction);
+        mission.vehicle.applyWear(wearAmount);
+      }
     } else if (outcome === 'failure') {
       const multiplier = crackdownPolicy.failureHeatMultiplier ?? 2;
       this.heatSystem.increase(mission.heat * multiplier);
+
+      assignedCrew.forEach((member) => {
+        if (typeof member.adjustLoyalty === 'function') {
+          member.adjustLoyalty(-1);
+        }
+      });
     }
+
+    assignedCrew.forEach((member) => {
+      if (typeof member.setStatus === 'function') {
+        member.setStatus('idle');
+      } else {
+        member.status = 'idle';
+      }
+    });
+
+    mission.assignedCrewIds = [];
+    mission.assignedCrewImpact = null;
+    mission.crewEffectSummary = [];
 
     this.respawnMissionTemplate(mission.id);
     this.drawContractFromPool();

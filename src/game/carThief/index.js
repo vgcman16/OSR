@@ -34,7 +34,10 @@ const createCarThiefGame = ({ canvas, context }) => {
     context.font = '16px "Segoe UI", sans-serif';
     context.fillText('Crew:', 32, 212);
     state.crew.forEach((member, index) => {
-      context.fillText(`- ${member.name} (${member.specialty})`, 48, 242 + index * 26);
+      const loyaltyLabel = Number.isFinite(member.loyalty) ? `L${member.loyalty}` : 'L?';
+      const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
+      const line = `- ${member.name} (${member.specialty}) — ${loyaltyLabel} • ${statusLabel}`;
+      context.fillText(line, 48, 242 + index * 26);
     });
 
     const crewSectionBottom = 242 + state.crew.length * 26;
@@ -121,6 +124,36 @@ const createCarThiefGame = ({ canvas, context }) => {
       } else if (activeMission.status === 'completed') {
         context.fillText(`Payout: $${activeMission.payout.toLocaleString()}`, missionInfoX, missionInfoY);
         missionInfoY += 26;
+      }
+
+      if (Array.isArray(activeMission.assignedCrewIds) && activeMission.assignedCrewIds.length) {
+        const crewMembers = activeMission.assignedCrewIds
+          .map((crewId) => state.crew.find((member) => member.id === crewId))
+          .filter(Boolean);
+        const crewNames = crewMembers.map((member) => member.name).join(', ');
+        context.fillText(`Crew: ${crewNames}`, missionInfoX, missionInfoY);
+        missionInfoY += 26;
+
+        if (Number.isFinite(activeMission.successChance)) {
+          context.fillText(
+            `Projected success: ${Math.round(activeMission.successChance * 100)}%`,
+            missionInfoX,
+            missionInfoY,
+          );
+          missionInfoY += 26;
+        }
+
+        const crewSummary = Array.isArray(activeMission.crewEffectSummary)
+          ? activeMission.crewEffectSummary
+          : [];
+        crewSummary.slice(0, 3).forEach((line) => {
+          context.fillText(` • ${line}`, missionInfoX + 12, missionInfoY);
+          missionInfoY += 22;
+        });
+        if (crewSummary.length > 3) {
+          context.fillText(` • +${crewSummary.length - 3} more adjustments`, missionInfoX + 12, missionInfoY);
+          missionInfoY += 22;
+        }
       }
     } else {
       context.fillText('No active mission', missionInfoX, missionInfoY);

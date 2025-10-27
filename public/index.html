@@ -49,10 +49,34 @@
               <dd id="mission-detail-duration">—</dd>
             </div>
             <div class="mission-details__row">
+              <dt>Success Odds</dt>
+              <dd id="mission-detail-success">—</dd>
+            </div>
+            <div class="mission-details__row">
               <dt>Crackdown Impact</dt>
               <dd id="mission-detail-restriction">All contracts are currently open.</dd>
             </div>
+            <div class="mission-details__row">
+              <dt>Crew Impact</dt>
+              <dd>
+                <ul id="mission-detail-crew-impact" class="mission-details__list">
+                  <li>No crew assigned.</li>
+                </ul>
+              </dd>
+            </div>
           </dl>
+        </section>
+        <section class="mission-crew" aria-labelledby="mission-crew-title">
+          <h3 id="mission-crew-title" class="mission-details__title">Assign Crew</h3>
+          <p id="mission-crew-hint" class="mission-details__hint">
+            Select available specialists to modify the plan.
+          </p>
+          <div
+            id="mission-crew-list"
+            class="mission-crew__list"
+            role="group"
+            aria-labelledby="mission-crew-hint"
+          ></div>
         </section>
         <p
           id="mission-crackdown-text"
