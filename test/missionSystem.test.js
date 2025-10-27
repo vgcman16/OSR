@@ -192,6 +192,46 @@ test('MissionSystem resolves failures from in-progress and awaiting-resolution s
   });
 });
 
+test('MissionSystem sanitizes invalid mission durations', () => {
+  const state = createState();
+  const missionSystem = new MissionSystem(state, {
+    heatSystem: new HeatSystem(state),
+    missionTemplates: [
+      {
+        id: 'bad-duration',
+        name: 'Bad Duration',
+        difficulty: 1,
+        payout: 5000,
+        heat: 1,
+        duration: 'fast',
+      },
+    ],
+  });
+
+  missionSystem.generateInitialContracts();
+  const mission = missionSystem.availableMissions[0];
+
+  assert.ok(mission, 'mission is generated from the template');
+  assert.ok(Number.isFinite(mission.duration), 'mission duration is coerced to a finite number');
+  assert.ok(mission.duration > 0, 'mission duration defaults to a positive fallback');
+  assert.equal(
+    mission.duration,
+    Math.max(mission.difficulty * 20, 20),
+    'mission duration falls back to difficulty-based default when invalid',
+  );
+
+  missionSystem.startMission(mission.id);
+  missionSystem.update(mission.duration * 2);
+
+  assert.equal(
+    mission.status,
+    'awaiting-resolution',
+    'mission reaches awaiting-resolution even when template duration is invalid',
+  );
+  assert.equal(mission.progress, 1, 'mission progress caps at completion');
+  assert.ok(Number.isFinite(mission.progress), 'mission progress remains finite after update');
+});
+
 test('MissionSystem draws from the contract pool when available', () => {
   const state = createState();
   const extraContract = {
