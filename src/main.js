@@ -49,6 +49,7 @@ const missionControls = {
   heatBribeButton: null,
   heatStatus: null,
   heatStatusDetail: '',
+  heatHistoryList: null,
   selectedCrewIds: [],
   selectedVehicleId: null,
 };
@@ -324,6 +325,73 @@ const clearMaintenanceStatusDetail = () => {
   missionControls.maintenanceStatusDetail = '';
 };
 
+const renderHeatMitigationHistory = (historyEntries) => {
+  const list = missionControls.heatHistoryList;
+  if (!list) {
+    return;
+  }
+
+  list.innerHTML = '';
+
+  const entries = Array.isArray(historyEntries) ? historyEntries.slice(0, 6) : [];
+
+  if (!entries.length) {
+    const emptyItem = document.createElement('li');
+    emptyItem.className = 'mission-heat-history__item mission-heat-history__item--empty';
+    emptyItem.textContent = 'No heat mitigation actions recorded yet.';
+    list.appendChild(emptyItem);
+    return;
+  }
+
+  entries.forEach((entry) => {
+    const item = document.createElement('li');
+    item.className = 'mission-heat-history__item';
+
+    const header = document.createElement('div');
+    header.className = 'mission-heat-history__row';
+
+    const label = document.createElement('span');
+    label.className = 'mission-heat-history__label';
+    label.textContent = entry?.label ?? 'Heat mitigation';
+
+    const normalizedDelta = Number.isFinite(entry?.reductionApplied)
+      ? entry.reductionApplied
+      : Number.isFinite(entry?.heatDelta)
+        ? Math.abs(entry.heatDelta)
+        : null;
+    const delta = document.createElement('span');
+    delta.className = 'mission-heat-history__delta';
+    delta.textContent = Number.isFinite(normalizedDelta)
+      ? `-${normalizedDelta.toFixed(1)} heat`
+      : '—';
+
+    header.append(label, delta);
+    item.appendChild(header);
+
+    const metaSegments = [];
+    const timestampValue = Number.isFinite(entry?.timestamp) ? entry.timestamp : null;
+    if (timestampValue) {
+      const time = new Date(timestampValue).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      metaSegments.push(time);
+    }
+
+    const fundsSpent = Number.isFinite(entry?.fundsSpent) ? entry.fundsSpent : 0;
+    metaSegments.push(`Spent ${formatCurrency(fundsSpent)}`);
+
+    const heatAfter = Number.isFinite(entry?.heatAfter) ? entry.heatAfter : null;
+    if (Number.isFinite(heatAfter)) {
+      metaSegments.push(`Now ${formatHeatValue(heatAfter)} heat`);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'mission-heat-history__meta';
+    meta.textContent = metaSegments.join(' • ');
+    item.appendChild(meta);
+
+    list.appendChild(item);
+  });
+};
+
 const updateHeatManagementPanel = () => {
   const { heatLayLowButton, heatBribeButton, heatStatus } = missionControls;
   if (!heatLayLowButton || !heatBribeButton || !heatStatus) {
@@ -335,6 +403,11 @@ const updateHeatManagementPanel = () => {
   const economySystem = getEconomySystem();
   const state = missionSystem?.state ?? getSharedState();
   const funds = Number.isFinite(state?.funds) ? state.funds : 0;
+  const mitigationLog = Array.isArray(state?.heatMitigationLog)
+    ? state.heatMitigationLog
+    : Array.isArray(heatSystem?.state?.heatMitigationLog)
+      ? heatSystem.state.heatMitigationLog
+      : [];
 
   const layLowConfig = HEAT_MANAGEMENT_ACTIONS.layLow;
   const bribeConfig = HEAT_MANAGEMENT_ACTIONS.bribeOfficials;
@@ -388,6 +461,7 @@ const updateHeatManagementPanel = () => {
   const leadMessage = detail || summaryMessage;
 
   heatStatus.textContent = [leadMessage, crackdownMessage].filter(Boolean).join(' ');
+  renderHeatMitigationHistory(mitigationLog);
 };
 
 const updateMaintenancePanel = () => {
@@ -582,51 +656,70 @@ const performHeatMitigation = (actionKey) => {
     return;
   }
 
-  const mitigationResult = executeHeatMitigation({
-    heatSystem,
-    missionSystem,
-    economySystem,
-    reduction: action.heatReduction,
-    cost,
-    label: action.label,
-    metadata: { action: action.key },
-  });
+  const finalizeMitigation = (mitigationResult) => {
+    if (!mitigationResult?.success) {
+      let failureMessage = 'Unable to mitigate heat.';
+      if (mitigationResult?.reason === 'insufficient-funds') {
+        const required = formatCurrency(mitigationResult.cost ?? cost);
+        const available = formatCurrency(mitigationResult.fundsAvailable ?? funds);
+        failureMessage = `Insufficient funds — requires ${required}, available ${available}.`;
+      } else if (mitigationResult?.reason === 'heat-system-unavailable') {
+        failureMessage = 'Heat mitigation offline.';
+      } else if (mitigationResult?.reason === 'economy-system-unavailable') {
+        failureMessage = 'Economy systems offline.';
+      }
 
-  if (!mitigationResult?.success) {
-    let failureMessage = 'Unable to mitigate heat.';
-    if (mitigationResult?.reason === 'insufficient-funds') {
-      const required = formatCurrency(mitigationResult.cost ?? cost);
-      const available = formatCurrency(mitigationResult.fundsAvailable ?? funds);
-      failureMessage = `Insufficient funds — requires ${required}, available ${available}.`;
-    } else if (mitigationResult?.reason === 'heat-system-unavailable') {
-      failureMessage = 'Heat mitigation offline.';
-    } else if (mitigationResult?.reason === 'economy-system-unavailable') {
-      failureMessage = 'Economy systems offline.';
+      missionControls.heatStatusDetail = failureMessage;
+      updateHeatManagementPanel();
+      return;
     }
 
-    missionControls.heatStatusDetail = failureMessage;
+    const heatBefore = Number.isFinite(mitigationResult.heatBefore)
+      ? mitigationResult.heatBefore
+      : Number.isFinite(heatSystem?.state?.heat)
+        ? heatSystem.state.heat + (mitigationResult.reductionApplied ?? 0)
+        : 0;
+    const heatAfter = Number.isFinite(mitigationResult.heatAfter)
+      ? mitigationResult.heatAfter
+      : Number.isFinite(heatSystem?.state?.heat)
+        ? heatSystem.state.heat
+        : 0;
+
+    missionControls.heatStatusDetail = `Spent ${formatCurrency(mitigationResult.cost ?? cost)} to ${
+      action.label.toLowerCase()
+    } — heat ${formatHeatValue(heatBefore)} → ${formatHeatValue(heatAfter)}.`;
+
+    updateMissionSelect();
+    updateMissionControls();
     updateHeatManagementPanel();
-    return;
+    triggerHudRender();
+  };
+
+  const handleMitigationError = (error) => {
+    console.error('Heat mitigation failed', error);
+    missionControls.heatStatusDetail = 'Heat mitigation failed unexpectedly.';
+    updateHeatManagementPanel();
+  };
+
+  try {
+    const mitigationOutcome = executeHeatMitigation({
+      heatSystem,
+      missionSystem,
+      economySystem,
+      reduction: action.heatReduction,
+      cost,
+      label: action.label,
+      metadata: { action: action.key },
+    });
+
+    if (mitigationOutcome && typeof mitigationOutcome.then === 'function') {
+      mitigationOutcome.then(finalizeMitigation).catch(handleMitigationError);
+    } else {
+      finalizeMitigation(mitigationOutcome);
+    }
+  } catch (error) {
+    handleMitigationError(error);
   }
-
-  const heatBefore = Number.isFinite(mitigationResult.heatBefore)
-    ? mitigationResult.heatBefore
-    : Number.isFinite(heatSystem?.state?.heat)
-      ? heatSystem.state.heat + (mitigationResult.reductionApplied ?? 0)
-      : 0;
-  const heatAfter = Number.isFinite(mitigationResult.heatAfter)
-    ? mitigationResult.heatAfter
-    : Number.isFinite(heatSystem?.state?.heat)
-      ? heatSystem.state.heat
-      : 0;
-
-  missionControls.heatStatusDetail = `Spent ${formatCurrency(mitigationResult.cost ?? cost)} to ${
-    action.label.toLowerCase()
-  } — heat ${formatHeatValue(heatBefore)} → ${formatHeatValue(heatAfter)}.`;
-
-  updateMissionSelect();
-  updateMissionControls();
-  triggerHudRender();
 };
 
 const handleHeatLayLow = () => performHeatMitigation('layLow');
@@ -1638,6 +1731,7 @@ const setupMissionControls = () => {
   missionControls.heatLayLowButton = document.getElementById('mission-heat-laylow-btn');
   missionControls.heatBribeButton = document.getElementById('mission-heat-bribe-btn');
   missionControls.heatStatus = document.getElementById('mission-heat-status');
+  missionControls.heatHistoryList = document.getElementById('mission-heat-history-list');
 
   const {
     select,
