@@ -928,6 +928,10 @@ class MissionSystem {
       this.state.missionLog = [];
     }
 
+    if (!Array.isArray(this.state.pendingDebts)) {
+      this.state.pendingDebts = [];
+    }
+
     this.refreshContractPoolFromCity();
     this.ensureCrewStorylineContracts();
     this.ensureCrackdownOperations(this.currentCrackdownTier);
@@ -1495,6 +1499,7 @@ class MissionSystem {
     };
 
     const effects = choice.effects ?? {};
+    const futureDebtNotices = [];
 
     if (Number.isFinite(effects.payoutMultiplier)) {
       mission.payout = Math.max(0, Math.round(mission.payout * effects.payoutMultiplier));
@@ -1524,6 +1529,42 @@ class MissionSystem {
     if (Number.isFinite(effects.durationDelta)) {
       const newDuration = before.duration + effects.durationDelta;
       mission.duration = sanitizeDuration(newDuration, mission.difficulty);
+    }
+
+    if (effects.futureDebt) {
+      const effect = effects.futureDebt;
+      const rawAmount =
+        typeof effect === 'object' && effect !== null
+          ? Number.isFinite(effect.amount)
+            ? effect.amount
+            : Number(effect.value)
+          : Number(effect);
+      const amount = Number.isFinite(rawAmount) ? Math.max(0, Math.round(rawAmount)) : 0;
+      if (amount > 0) {
+        const timestamp = Number.isFinite(effect?.createdAt) ? effect.createdAt : Date.now();
+        const debtEntry = {
+          id:
+            typeof effect?.id === 'string' && effect.id.trim()
+              ? effect.id.trim()
+              : `debt-${eventEntry.id ?? 'event'}-${timestamp}`,
+          amount,
+          remaining:
+            Number.isFinite(effect?.remaining) && effect.remaining > 0
+              ? Math.round(effect.remaining)
+              : amount,
+          sourceEventId: eventEntry.id ?? null,
+          sourceEventLabel: eventEntry.label ?? null,
+          sourceChoiceId: choice.id ?? null,
+          sourceChoiceLabel: choice.label ?? null,
+          notes: typeof effect?.notes === 'string' ? effect.notes : null,
+          createdAt: timestamp,
+        };
+        if (!Array.isArray(this.state.pendingDebts)) {
+          this.state.pendingDebts = [];
+        }
+        this.state.pendingDebts.push(debtEntry);
+        futureDebtNotices.push(`Future debt -$${amount.toLocaleString()}`);
+      }
     }
 
     let crewLoyaltyDelta = 0;
@@ -1582,6 +1623,11 @@ class MissionSystem {
     if (crewLoyaltyDelta !== 0) {
       deltaParts.push(`Crew loyalty ${crewLoyaltyDelta > 0 ? '+' : ''}${crewLoyaltyDelta} total`);
     }
+    futureDebtNotices.forEach((notice) => {
+      if (notice) {
+        deltaParts.push(notice);
+      }
+    });
 
     const summaryParts = [];
     if (choice.narrative) {
@@ -1673,6 +1719,9 @@ class MissionSystem {
 
     const falloutEntries = Array.isArray(extras?.fallout) ? extras.fallout : [];
     const followUpEntries = Array.isArray(extras?.followUps) ? extras.followUps : [];
+    const debtSettlementEntries = Array.isArray(extras?.debtSettlements)
+      ? extras.debtSettlements
+      : [];
 
     const formatFalloutLine = (entry) => {
       if (!entry) {
@@ -1709,6 +1758,36 @@ class MissionSystem {
       summary = `${summary} — Follow-up queued: ${followUpSummary}`;
     }
 
+    if (debtSettlementEntries.length) {
+      const totalSettled = debtSettlementEntries.reduce(
+        (total, entry) => total + (Number.isFinite(entry?.amount) ? entry.amount : 0),
+        0,
+      );
+      const detailLines = debtSettlementEntries
+        .map((entry) => {
+          const parts = [];
+          if (entry?.sourceEventLabel) {
+            parts.push(entry.sourceEventLabel);
+          }
+          if (entry?.sourceChoiceLabel && entry.sourceChoiceLabel !== entry.sourceEventLabel) {
+            parts.push(entry.sourceChoiceLabel);
+          }
+          if (entry?.notes) {
+            parts.push(entry.notes);
+          }
+          const label = parts.length ? parts.join(' — ') : 'Debt';
+          const amountLabel = Number.isFinite(entry?.amount)
+            ? `$${Math.round(Math.abs(entry.amount)).toLocaleString()}`
+            : '$0';
+          const suffix = entry?.fullySettled ? 'cleared' : `remaining $${Math.max(0, Math.round(entry?.remaining ?? 0)).toLocaleString()}`;
+          return `${label} (-${amountLabel}, ${suffix})`;
+        })
+        .filter(Boolean);
+      const totalLabel = `$${Math.round(Math.abs(totalSettled)).toLocaleString()}`;
+      const detailSummary = detailLines.length ? ` ${detailLines.join('; ')}` : '';
+      summary = `${summary} — Debts settled -${totalLabel}.${detailSummary}`;
+    }
+
     if (extras?.storylineSummary) {
       summary = `${summary} — ${extras.storylineSummary}`;
     }
@@ -1731,6 +1810,7 @@ class MissionSystem {
       timestamp,
       fallout: clonedFallout,
       followUps: clonedFollowUps,
+      debtSettlements: debtSettlementEntries.map((entry) => ({ ...entry })),
     };
     mission.pendingResolution = null;
     mission.resolutionRoll = roll;
@@ -1767,6 +1847,7 @@ class MissionSystem {
       storylineSummary: extras?.storylineSummary ?? null,
       crackdownSummary: extras?.crackdownSummary ?? null,
       notorietySummary: extras?.notorietySummary ?? null,
+      debtSettlements: debtSettlementEntries.map((entry) => ({ ...entry })),
     };
 
     this.state.missionLog.unshift(entry);
@@ -2290,8 +2371,53 @@ class MissionSystem {
     let storylineOutcome = null;
     let crackdownOutcome = null;
 
+    const debtSettlements = [];
+
     if (outcome === 'success') {
-      this.state.funds += mission.payout;
+      const grossPayout = Number.isFinite(mission.payout) ? Math.max(0, mission.payout) : 0;
+      let netPayout = grossPayout;
+      const pendingDebts = Array.isArray(this.state.pendingDebts) ? this.state.pendingDebts : [];
+      const updatedDebts = [];
+
+      pendingDebts.forEach((debt) => {
+        const outstanding = Number.isFinite(debt?.remaining)
+          ? Math.max(0, Math.round(debt.remaining))
+          : Number.isFinite(debt?.amount)
+            ? Math.max(0, Math.round(debt.amount))
+            : 0;
+        if (outstanding <= 0) {
+          return;
+        }
+        if (netPayout <= 0) {
+          updatedDebts.push({ ...debt, remaining: outstanding });
+          return;
+        }
+
+        const applied = Math.min(netPayout, outstanding);
+        netPayout -= applied;
+        const remaining = Math.max(0, outstanding - applied);
+        const settlementTimestamp = Date.now();
+        debtSettlements.push({
+          debtId: debt?.id ?? null,
+          amount: applied,
+          remaining,
+          sourceEventId: debt?.sourceEventId ?? null,
+          sourceEventLabel: debt?.sourceEventLabel ?? null,
+          sourceChoiceId: debt?.sourceChoiceId ?? null,
+          sourceChoiceLabel: debt?.sourceChoiceLabel ?? null,
+          notes: debt?.notes ?? null,
+          createdAt: debt?.createdAt ?? null,
+          settledAt: settlementTimestamp,
+          fullySettled: remaining === 0,
+        });
+
+        if (remaining > 0) {
+          updatedDebts.push({ ...debt, remaining });
+        }
+      });
+
+      this.state.pendingDebts = updatedDebts;
+      this.state.funds += netPayout;
       this.heatSystem.increase(mission.heat);
       if (mission.category === 'crackdown-operation') {
         const effects = mission.crackdownEffects ?? {};
@@ -2693,6 +2819,13 @@ class MissionSystem {
       fallout: crewFalloutRecords,
       followUps: followUpSummaries,
     };
+
+    if (debtSettlements.length) {
+      telemetryExtras.debtSettlements = debtSettlements.map((entry) => ({ ...entry }));
+      mission.debtSettlements = debtSettlements.map((entry) => ({ ...entry }));
+    } else {
+      mission.debtSettlements = [];
+    }
 
     if (storylineOutcome) {
       telemetryExtras.storylineSummary = storylineOutcome;

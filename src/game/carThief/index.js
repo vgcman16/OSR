@@ -198,6 +198,61 @@ const createCarThiefGame = ({ canvas, context }) => {
         )} + crew ${formatExpense(lastExpenseReport.payroll)}${adjustmentsLabel})`
       : '—';
 
+    const pendingDebts = Array.isArray(state.pendingDebts) ? state.pendingDebts : [];
+    const totalOutstandingDebt = pendingDebts.reduce((total, entry) => {
+      const remaining = Number.isFinite(entry?.remaining)
+        ? entry.remaining
+        : Number.isFinite(entry?.amount)
+          ? entry.amount
+          : 0;
+      return total + Math.max(0, remaining);
+    }, 0);
+    const nextDebt = pendingDebts.find((entry) => {
+      const remaining = Number.isFinite(entry?.remaining)
+        ? entry.remaining
+        : Number.isFinite(entry?.amount)
+          ? entry.amount
+          : 0;
+      return remaining > 0;
+    });
+
+    let debtStatusLabel = 'Outstanding debt: None';
+    if (totalOutstandingDebt > 0) {
+      const totalLabel = `$${Math.round(totalOutstandingDebt).toLocaleString()}`;
+      let nextLabel = '';
+      if (nextDebt) {
+        const nextAmountRaw = Number.isFinite(nextDebt?.remaining)
+          ? nextDebt.remaining
+          : Number.isFinite(nextDebt?.amount)
+            ? nextDebt.amount
+            : 0;
+        const nextAmount = Math.max(0, Math.round(nextAmountRaw));
+        const sourceParts = [];
+        if (nextDebt?.sourceEventLabel) {
+          sourceParts.push(nextDebt.sourceEventLabel);
+        }
+        if (nextDebt?.sourceChoiceLabel && nextDebt.sourceChoiceLabel !== nextDebt.sourceEventLabel) {
+          sourceParts.push(nextDebt.sourceChoiceLabel);
+        }
+        const baseLabel = sourceParts.length ? sourceParts.join(' — ') : 'Debt due';
+        let timestampLabel = '';
+        if (Number.isFinite(nextDebt?.createdAt) && nextDebt.createdAt > 0) {
+          try {
+            const createdDate = new Date(nextDebt.createdAt);
+            timestampLabel = createdDate.toLocaleTimeString('en-US', {
+              hour: '2-digit',
+              minute: '2-digit',
+            });
+          } catch (error) {
+            timestampLabel = '';
+          }
+        }
+        const timeSuffix = timestampLabel ? ` @ ${timestampLabel}` : '';
+        nextLabel = ` (Next: ${baseLabel}${timeSuffix} — $${nextAmount.toLocaleString()})`;
+      }
+      debtStatusLabel = `Outstanding debt: ${totalLabel}${nextLabel}`;
+    }
+
     context.fillStyle = '#121822';
     context.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -207,11 +262,12 @@ const createCarThiefGame = ({ canvas, context }) => {
     context.fillText(`City: ${state.city.name}`, 32, 48);
     context.fillText(`Day ${state.day}`, 32, 78);
     context.fillText(`Funds: $${state.funds.toLocaleString()}`, 32, 108);
-    context.fillText(`Payroll: ${formatExpense(payroll)}/day`, 32, 138);
-    context.fillText(`Projected burn: ${formatExpense(projectedDaily)}/day`, 32, 168);
-    context.fillText(`Last upkeep: ${lastExpenseLabel}`, 32, 198);
-    context.fillText(`Heat: ${state.heat.toFixed(2)}`, 32, 228);
-    context.fillText(`Crackdown: ${crackdownLabel}`, 32, 258);
+    context.fillText(debtStatusLabel, 32, 138);
+    context.fillText(`Payroll: ${formatExpense(payroll)}/day`, 32, 168);
+    context.fillText(`Projected burn: ${formatExpense(projectedDaily)}/day`, 32, 198);
+    context.fillText(`Last upkeep: ${lastExpenseLabel}`, 32, 228);
+    context.fillText(`Heat: ${state.heat.toFixed(2)}`, 32, 258);
+    context.fillText(`Crackdown: ${crackdownLabel}`, 32, 288);
     const safehouseLabel = safehouse
       ? `${safehouse.name} — ${safehouseTier?.label ?? 'Unranked'}`
       : 'None assigned';
@@ -226,19 +282,19 @@ const createCarThiefGame = ({ canvas, context }) => {
       safehousePerks.push(`${safehouseAmenities.length} amenities online`);
     }
     const safehousePerksLabel = safehousePerks.length ? ` (${safehousePerks.join(', ')})` : '';
-    context.fillText(`Safehouse: ${safehouseLabel}${safehousePerksLabel}`, 32, 288);
+    context.fillText(`Safehouse: ${safehouseLabel}${safehousePerksLabel}`, 32, 318);
 
     context.fillStyle = '#d1eaff';
     context.font = '16px "Segoe UI", sans-serif';
-    context.fillText('Crew:', 32, 302);
+    context.fillText('Crew:', 32, 332);
     state.crew.forEach((member, index) => {
       const loyaltyLabel = Number.isFinite(member.loyalty) ? `L${member.loyalty}` : 'L?';
       const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
       const line = `- ${member.name} (${member.specialty}) — ${loyaltyLabel} • ${statusLabel}`;
-      context.fillText(line, 48, 332 + index * 26);
+      context.fillText(line, 48, 362 + index * 26);
     });
 
-    const crewSectionBottom = 332 + state.crew.length * 26;
+    const crewSectionBottom = 362 + state.crew.length * 26;
     const garageLabelY = crewSectionBottom + 40;
     context.fillText('Garage:', 32, garageLabelY);
 
