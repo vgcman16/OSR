@@ -74,6 +74,49 @@
             </div>
           </dl>
         </section>
+        <section class="mission-city-intel" aria-labelledby="mission-city-intel-title">
+          <h3 id="mission-city-intel-title" class="mission-details__title">City Intel</h3>
+          <p class="mission-details__hint">
+            Assess district heat signatures and perks to synchronize tactics with the field team.
+          </p>
+          <article class="mission-city-intel__card" aria-live="polite">
+            <h4 id="mission-city-intel-district-name" class="mission-city-intel__district-title">
+              District intel unavailable.
+            </h4>
+            <p id="mission-city-intel-district-description" class="mission-city-intel__district-description">
+              Select a contract to load local surveillance notes.
+            </p>
+            <dl class="mission-details__grid mission-city-intel__grid">
+              <div class="mission-details__row">
+                <dt>Risk Tier</dt>
+                <dd id="mission-city-intel-risk">Risk profile pending.</dd>
+              </div>
+              <div class="mission-details__row">
+                <dt>Point of Interest</dt>
+                <dd>
+                  <strong id="mission-city-intel-poi-name">No special target flagged.</strong>
+                  <p id="mission-city-intel-poi-description" class="mission-city-intel__poi-description">
+                    District sweep awaiting recon.
+                  </p>
+                  <ul
+                    id="mission-city-intel-poi-perks"
+                    class="mission-details__list mission-city-intel__poi-perks"
+                  >
+                    <li>No unique perks detected.</li>
+                  </ul>
+                </dd>
+              </div>
+            </dl>
+          </article>
+          <canvas
+            id="mission-city-intel-map"
+            class="mission-city-intel__map"
+            width="240"
+            height="168"
+            role="img"
+            aria-label="City district overview"
+          ></canvas>
+        </section>
         <section class="mission-events" aria-labelledby="mission-events-title">
           <h3 id="mission-events-title" class="mission-details__title">Mission Events</h3>
           <p class="mission-details__hint">
