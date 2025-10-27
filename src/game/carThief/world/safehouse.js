@@ -214,6 +214,21 @@ class Safehouse {
       owned: this.owned,
     };
   }
+
+  static fromJSON(data) {
+    if (data instanceof Safehouse) {
+      return data.clone();
+    }
+
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+
+    return new Safehouse({
+      ...data,
+      tiers: Array.isArray(data.tiers) ? data.tiers.map((tier) => ({ ...tier })) : [],
+    });
+  }
 }
 
 class SafehouseCollection {
@@ -338,6 +353,22 @@ class SafehouseCollection {
       safehouses: this.toArray().map((safehouse) => safehouse.toJSON()),
       defaultSafehouseId: this.defaultSafehouseId,
     };
+  }
+
+  static fromJSON(data) {
+    if (data instanceof SafehouseCollection) {
+      return new SafehouseCollection(data);
+    }
+
+    if (!data || typeof data !== 'object') {
+      return new SafehouseCollection();
+    }
+
+    const entries = Array.isArray(data.safehouses) ? data.safehouses : data;
+    return new SafehouseCollection({
+      safehouses: Array.isArray(entries) ? entries : [],
+      defaultSafehouseId: data.defaultSafehouseId ?? null,
+    });
   }
 }
 

@@ -1,9 +1,194 @@
-import { createInitialGameState } from './state/gameState.js';
+import { GameState, createInitialGameState } from './state/gameState.js';
 import { MissionSystem } from './systems/missionSystem.js';
 import { HeatSystem } from './systems/heatSystem.js';
 import { EconomySystem } from './systems/economySystem.js';
 import { getActiveSafehouseFromState } from './world/safehouse.js';
 import { GameLoop } from './loop/gameLoop.js';
+
+const SAVE_STORAGE_KEY = 'osr.car-thief.save.v1';
+const SAVE_INTERVAL_SECONDS = 12;
+const memoryStorage = new Map();
+
+const createMemoryStorage = () => ({
+  getItem: (key) => (memoryStorage.has(key) ? memoryStorage.get(key) : null),
+  setItem: (key, value) => {
+    memoryStorage.set(key, typeof value === 'string' ? value : String(value));
+  },
+  removeItem: (key) => {
+    memoryStorage.delete(key);
+  },
+});
+
+const resolveStorage = (candidate) => {
+  if (
+    candidate
+    && typeof candidate.getItem === 'function'
+    && typeof candidate.setItem === 'function'
+    && typeof candidate.removeItem === 'function'
+  ) {
+    return candidate;
+  }
+
+  if (typeof window !== 'undefined' && window?.localStorage) {
+    return window.localStorage;
+  }
+
+  if (typeof globalThis !== 'undefined' && globalThis?.localStorage) {
+    return globalThis.localStorage;
+  }
+
+  return createMemoryStorage();
+};
+
+const createGameSerializer = ({ storage, key = SAVE_STORAGE_KEY } = {}) => {
+  const backing = resolveStorage(storage);
+  const load = () => {
+    try {
+      const raw = backing.getItem(key);
+      if (!raw || typeof raw !== 'string') {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (error) {
+      console.warn('Failed to load car thief save data.', error);
+      return null;
+    }
+  };
+
+  const save = (payload) => {
+    try {
+      const serialized = JSON.stringify(payload);
+      backing.setItem(key, serialized);
+      return true;
+    } catch (error) {
+      console.warn('Failed to persist car thief save data.', error);
+      return false;
+    }
+  };
+
+  const clear = () => {
+    try {
+      backing.removeItem(key);
+    } catch (error) {
+      console.warn('Failed to clear car thief save data.', error);
+    }
+  };
+
+  return { load, save, clear, key };
+};
+
+const cloneSerializable = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== 'object') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    if (Array.isArray(value)) {
+      return value.map((entry) => cloneSerializable(entry));
+    }
+
+    return { ...value };
+  }
+};
+
+const captureHeatSystemSnapshot = (heatSystem) => ({
+  timeAccumulator: Number.isFinite(heatSystem?.timeAccumulator) ? heatSystem.timeAccumulator : 0,
+  dayLengthSeconds: Number.isFinite(heatSystem?.dayLengthSeconds) ? heatSystem.dayLengthSeconds : null,
+  decayRate: Number.isFinite(heatSystem?.decayRate) ? heatSystem.decayRate : null,
+});
+
+const captureMissionSystemSnapshot = (missionSystem) => ({
+  availableMissions: Array.isArray(missionSystem?.availableMissions)
+    ? missionSystem.availableMissions.map((mission) => cloneSerializable(mission))
+    : [],
+  contractPool: Array.isArray(missionSystem?.contractPool)
+    ? missionSystem.contractPool.map((contract) => cloneSerializable(contract))
+    : [],
+  currentCrackdownTier: missionSystem?.currentCrackdownTier ?? null,
+});
+
+const captureEconomySystemSnapshot = (economySystem) => ({
+  timeAccumulator: Number.isFinite(economySystem?.timeAccumulator) ? economySystem.timeAccumulator : 0,
+  dayLengthSeconds: Number.isFinite(economySystem?.dayLengthSeconds) ? economySystem.dayLengthSeconds : null,
+  baseDailyOverhead: Number.isFinite(economySystem?.baseDailyOverhead)
+    ? economySystem.baseDailyOverhead
+    : null,
+  lastExpenseReport: cloneSerializable(economySystem?.getLastExpenseReport?.() ?? economySystem?.lastExpenseReport),
+  pendingExpenseReport: cloneSerializable(economySystem?.pendingExpenseReport ?? null),
+});
+
+const applyHeatSystemSnapshot = (heatSystem, snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return;
+  }
+
+  if (Number.isFinite(snapshot.timeAccumulator)) {
+    heatSystem.timeAccumulator = snapshot.timeAccumulator;
+  }
+
+  if (Number.isFinite(snapshot.dayLengthSeconds) && snapshot.dayLengthSeconds > 0) {
+    heatSystem.dayLengthSeconds = snapshot.dayLengthSeconds;
+  }
+
+  if (Number.isFinite(snapshot.decayRate) && snapshot.decayRate > 0) {
+    heatSystem.decayRate = snapshot.decayRate;
+  }
+
+  if (typeof heatSystem.updateHeatTier === 'function') {
+    heatSystem.updateHeatTier();
+  }
+};
+
+const applyMissionSystemSnapshot = (missionSystem, snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return;
+  }
+
+  if (Array.isArray(snapshot.availableMissions)) {
+    missionSystem.availableMissions = snapshot.availableMissions.map((mission) => cloneSerializable(mission));
+  }
+
+  if (Array.isArray(snapshot.contractPool)) {
+    missionSystem.contractPool = snapshot.contractPool.map((contract) => cloneSerializable(contract));
+  }
+
+  if (snapshot.currentCrackdownTier) {
+    missionSystem.currentCrackdownTier = snapshot.currentCrackdownTier;
+  }
+};
+
+const applyEconomySystemSnapshot = (economySystem, snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return;
+  }
+
+  if (Number.isFinite(snapshot.timeAccumulator)) {
+    economySystem.timeAccumulator = snapshot.timeAccumulator;
+  }
+
+  if (Number.isFinite(snapshot.dayLengthSeconds) && snapshot.dayLengthSeconds > 0) {
+    economySystem.dayLengthSeconds = snapshot.dayLengthSeconds;
+  }
+
+  if (Number.isFinite(snapshot.baseDailyOverhead)) {
+    economySystem.baseDailyOverhead = snapshot.baseDailyOverhead;
+  }
+
+  economySystem.lastExpenseReport = snapshot.lastExpenseReport
+    ? cloneSerializable(snapshot.lastExpenseReport)
+    : null;
+  economySystem.pendingExpenseReport = snapshot.pendingExpenseReport
+    ? cloneSerializable(snapshot.pendingExpenseReport)
+    : null;
+};
 
 const normalizeDistrictKey = (value) => {
   if (value === null || value === undefined) {
@@ -56,10 +241,78 @@ const determineDistrictRiskTier = (securityScore) => {
 };
 
 const createCarThiefGame = ({ canvas, context }) => {
-  const state = createInitialGameState();
+  const serializer = createGameSerializer();
+  const savedPayload = serializer.load();
+
+  let state;
+  let loadedFromSave = false;
+
+  if (savedPayload?.state && (!savedPayload.version || savedPayload.version === 1)) {
+    try {
+      state = GameState.fromJSON(savedPayload.state);
+      loadedFromSave = true;
+    } catch (error) {
+      console.warn('Failed to hydrate car thief save payload, using defaults.', error);
+      state = createInitialGameState();
+      serializer.clear();
+    }
+  } else {
+    state = createInitialGameState();
+    if (savedPayload?.version && savedPayload.version !== 1) {
+      serializer.clear();
+    }
+  }
+
   const heatSystem = new HeatSystem(state);
   const missionSystem = new MissionSystem(state, { heatSystem });
   const economySystem = new EconomySystem(state);
+
+  if (loadedFromSave && savedPayload?.systems) {
+    applyHeatSystemSnapshot(heatSystem, savedPayload.systems.heat);
+    applyMissionSystemSnapshot(missionSystem, savedPayload.systems.missions);
+    applyEconomySystemSnapshot(economySystem, savedPayload.systems.economy);
+  }
+
+  let saveAccumulator = 0;
+
+  const captureStateSnapshot = () => {
+    if (state && typeof state.toJSON === 'function') {
+      return state.toJSON();
+    }
+
+    try {
+      const hydrated = GameState.fromJSON(state);
+      return typeof hydrated?.toJSON === 'function' ? hydrated.toJSON() : cloneSerializable(hydrated);
+    } catch (error) {
+      console.warn('Unable to serialize game state for persistence.', error);
+      return null;
+    }
+  };
+
+  const persistSnapshot = () => {
+    const stateSnapshot = captureStateSnapshot();
+    if (!stateSnapshot) {
+      return false;
+    }
+
+    const payload = {
+      version: 1,
+      savedAt: Date.now(),
+      state: stateSnapshot,
+      systems: {
+        heat: captureHeatSystemSnapshot(heatSystem),
+        missions: captureMissionSystemSnapshot(missionSystem),
+        economy: captureEconomySystemSnapshot(economySystem),
+      },
+    };
+
+    return serializer.save(payload);
+  };
+
+  const clearSavedState = () => {
+    serializer.clear();
+    saveAccumulator = 0;
+  };
 
   const renderHud = () => {
     if (!context || !canvas) {
@@ -579,12 +832,47 @@ const createCarThiefGame = ({ canvas, context }) => {
       missionSystem.update(delta);
       heatSystem.update(delta);
       economySystem.update(delta);
+
+      saveAccumulator += delta;
+      if (saveAccumulator >= SAVE_INTERVAL_SECONDS) {
+        persistSnapshot();
+        saveAccumulator = 0;
+      }
     },
     render: renderHud,
   });
 
+  loop.persistState = () => persistSnapshot();
+  loop.clearSavedState = () => {
+    clearSavedState();
+    return true;
+  };
+  loop.saveIntervalSeconds = SAVE_INTERVAL_SECONDS;
+
+  const handleNewGameEvent = () => {
+    clearSavedState();
+  };
+
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('osr:new-game', handleNewGameEvent);
+  }
+
+  const originalStop = loop.stop.bind(loop);
+  loop.stop = () => {
+    persistSnapshot();
+    if (typeof window !== 'undefined' && window.removeEventListener) {
+      window.removeEventListener('osr:new-game', handleNewGameEvent);
+    }
+    originalStop();
+  };
+
   const boot = () => {
-    missionSystem.generateInitialContracts();
+    const hasMissionSnapshot = Array.isArray(savedPayload?.systems?.missions?.availableMissions)
+      && savedPayload.systems.missions.availableMissions.length > 0;
+
+    if (!loadedFromSave || !hasMissionSnapshot) {
+      missionSystem.generateInitialContracts();
+    }
     loop.attachCanvas(canvas);
     renderHud();
   };

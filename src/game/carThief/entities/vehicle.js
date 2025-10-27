@@ -272,6 +272,59 @@ class Vehicle {
         : null,
     };
   }
+
+  toJSON() {
+    return {
+      id: this.id,
+      model: this.model,
+      topSpeed: this.topSpeed,
+      acceleration: this.acceleration,
+      handling: this.handling,
+      heat: this.heat,
+      condition: this.condition,
+      isStolen: this.isStolen,
+      status: this.status,
+      inUse: this.inUse,
+      installedMods: [...this.installedMods],
+    };
+  }
+
+  static fromJSON(data) {
+    if (data instanceof Vehicle) {
+      return data;
+    }
+
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+
+    const vehicle = new Vehicle({
+      id: data.id,
+      model: data.model,
+      topSpeed: data.topSpeed,
+      acceleration: data.acceleration,
+      handling: data.handling,
+      heat: data.heat,
+      installedMods: data.installedMods,
+    });
+
+    if (Number.isFinite(data.condition)) {
+      vehicle.condition = Math.max(0, Math.min(1, data.condition));
+    }
+
+    if (typeof data.isStolen === 'boolean') {
+      vehicle.isStolen = data.isStolen;
+    }
+
+    if (typeof data.status === 'string') {
+      vehicle.status = data.status;
+      vehicle.inUse = data.status === 'in-mission';
+    } else if (typeof data.inUse === 'boolean') {
+      vehicle.inUse = data.inUse;
+    }
+
+    return vehicle;
+  }
 }
 
 export { Vehicle, VEHICLE_MOD_CATALOG, aggregateVehicleModBonuses };

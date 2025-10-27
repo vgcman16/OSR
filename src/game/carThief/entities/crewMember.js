@@ -792,6 +792,29 @@ class CrewMember {
       storyProgress: this.getStoryProgressSnapshot(),
     };
   }
+
+  static fromJSON(data) {
+    if (data instanceof CrewMember) {
+      return data;
+    }
+
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+
+    return new CrewMember({
+      ...data,
+      perks: Array.isArray(data.perks) ? [...data.perks] : data.perks,
+      restPlan:
+        data.restPlan && typeof data.restPlan === 'object'
+          ? { ...data.restPlan }
+          : null,
+      storyProgress:
+        data.storyProgress && typeof data.storyProgress === 'object'
+          ? { ...data.storyProgress }
+          : undefined,
+    });
+  }
 }
 
 export {
