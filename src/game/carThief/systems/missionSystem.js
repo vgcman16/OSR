@@ -1,4 +1,4 @@
-import { Vehicle } from '../entities/vehicle.js';
+import { Vehicle, VEHICLE_MOD_CATALOG, aggregateVehicleModBonuses } from '../entities/vehicle.js';
 import { CREW_TRAIT_KEYS, CREW_FATIGUE_CONFIG } from '../entities/crewMember.js';
 import { HeatSystem } from './heatSystem.js';
 import { generateContractsFromDistricts, generateFalloutContracts } from './contractFactory.js';
@@ -91,6 +91,8 @@ const GARAGE_MAINTENANCE_CONFIG = {
     heatReduction: 1.5,
   },
 };
+
+const VEHICLE_UPGRADE_CATALOG = VEHICLE_MOD_CATALOG;
 
 const PLAYER_SKILL_CONFIG = {
   driving: {
@@ -1377,11 +1379,10 @@ class MissionSystem {
     durationMultiplier = Math.max(0.5, durationMultiplier);
     payoutMultiplier = Math.max(0.5, payoutMultiplier);
 
-    heatMultiplier = Math.max(0.2, Math.min(2.5, heatMultiplier));
-
-    const crewAdjustedHeat = Math.max(0, baseHeat * heatMultiplier);
-    let heatAdjustment = crewAdjustedHeat - baseHeat;
-    let adjustedHeat = crewAdjustedHeat;
+    let combinedHeatMultiplier = heatMultiplier;
+    let crewAdjustedHeat = 0;
+    let heatAdjustment = 0;
+    let adjustedHeat = 0;
     let vehicleImpact = null;
 
     if (vehicle) {
@@ -1393,43 +1394,101 @@ class MissionSystem {
       const rawHeat = Number(vehicle.heat);
       const safeHeatRating = Number.isFinite(rawHeat) ? Math.max(0, rawHeat) : 0;
 
-      const speedRatio = clamp(safeSpeed / 120, 0.5, 1.8);
-      const accelerationRatio = clamp(safeAcceleration / 5, 0.5, 1.6);
-      const handlingRatio = clamp(safeHandling / 5, 0.5, 1.6);
+      const modBonuses = typeof vehicle.getModBonuses === 'function'
+        ? vehicle.getModBonuses(VEHICLE_UPGRADE_CATALOG)
+        : aggregateVehicleModBonuses(vehicle.installedMods, VEHICLE_UPGRADE_CATALOG);
+
+      const effectiveSpeed = Math.max(
+        60,
+        safeSpeed + (Number.isFinite(modBonuses.topSpeedBonus) ? modBonuses.topSpeedBonus : 0),
+      );
+      const effectiveAcceleration = Math.max(
+        1,
+        safeAcceleration
+          + (Number.isFinite(modBonuses.accelerationBonus) ? modBonuses.accelerationBonus : 0),
+      );
+      const effectiveHandling = Math.max(
+        1,
+        safeHandling + (Number.isFinite(modBonuses.handlingBonus) ? modBonuses.handlingBonus : 0),
+      );
+
+      const speedRatio = clamp(effectiveSpeed / 120, 0.5, 1.8);
+      const accelerationRatio = clamp(effectiveAcceleration / 5, 0.5, 1.6);
+      const handlingRatio = clamp(effectiveHandling / 5, 0.5, 1.6);
       const agilityScore = clamp(speedRatio * 0.6 + accelerationRatio * 0.4, 0.4, 2);
       const conditionPenalty = clamp(1 + (1 - safeCondition) * 0.6, 0.7, 1.6);
-      const vehicleDurationMultiplier = clamp((1 / agilityScore) * conditionPenalty, 0.6, 1.4);
 
+      const modDurationMultiplier = Number.isFinite(modBonuses.durationMultiplier)
+        && modBonuses.durationMultiplier > 0
+        ? clamp(modBonuses.durationMultiplier, 0.25, 1.6)
+        : 1;
+      durationMultiplier *= modDurationMultiplier;
+
+      const vehicleDurationMultiplier = clamp((1 / agilityScore) * conditionPenalty, 0.6, 1.4);
       durationMultiplier *= vehicleDurationMultiplier;
       durationMultiplier = Math.max(0.35, durationMultiplier);
 
       const handlingBonus = (handlingRatio - 1) * 0.12;
       const conditionBonus = (safeCondition - 0.6) * 0.08;
-      successBonus += handlingBonus + conditionBonus;
+      const modSuccessContribution = Number.isFinite(modBonuses.successBonus)
+        ? modBonuses.successBonus
+        : 0;
+      successBonus += handlingBonus + conditionBonus + modSuccessContribution;
 
       const difficulty = coerceFiniteNumber(mission.difficulty, 1);
       const conditionHeat = Math.max(0, (1 - safeCondition) * (0.8 + 0.2 * difficulty));
       const maneuverMitigation = Math.max(0, handlingRatio - 1) * 0.15;
-      const vehicleHeatDelta = safeHeatRating * 0.3 + conditionHeat - maneuverMitigation;
+
+      const modHeatMultiplier = Number.isFinite(modBonuses.heatMultiplier) && modBonuses.heatMultiplier > 0
+        ? clamp(modBonuses.heatMultiplier, 0.2, 2)
+        : 1;
+      combinedHeatMultiplier *= modHeatMultiplier;
+      combinedHeatMultiplier = Math.max(0.2, Math.min(2.5, combinedHeatMultiplier));
+      crewAdjustedHeat = Math.max(0, baseHeat * combinedHeatMultiplier);
+
+      const heatFlatAdjustment = Number.isFinite(modBonuses.heatFlatAdjustment)
+        ? modBonuses.heatFlatAdjustment
+        : 0;
+      const vehicleHeatDelta = safeHeatRating * 0.3 + conditionHeat - maneuverMitigation + heatFlatAdjustment;
       heatAdjustment = crewAdjustedHeat - baseHeat + vehicleHeatDelta;
       adjustedHeat = Math.max(0, crewAdjustedHeat + vehicleHeatDelta);
 
       const wearBaseline = 0.07 + 0.025 * difficulty;
-      const wearModifier = clamp(
+      const wearMitigation = Number.isFinite(modBonuses.wearMitigation)
+        ? clamp(modBonuses.wearMitigation, -0.5, 0.75)
+        : 0;
+      const wearModifierBase = clamp(
         1.1 - (handlingRatio - 1) * 0.35 - (safeCondition - 0.7) * 0.45,
         0.5,
         1.6,
       );
-      const wearOnSuccess = clamp(wearBaseline * wearModifier, 0.02, 0.5);
+      const wearMitigationFactor = clamp(1 - wearMitigation, 0.3, 1.5);
+      const wearOnSuccess = clamp(wearBaseline * wearModifierBase * wearMitigationFactor, 0.02, 0.5);
       const wearOnFailure = clamp(wearOnSuccess * 1.35 + 0.05, 0.04, 0.7);
 
       const heatGainBase = Math.max(0, 0.12 * difficulty + safeHeatRating * 0.1);
       const heatGainMitigation = Math.max(0, (handlingRatio - 1) * 0.08);
-      const heatGainOnSuccess = Math.max(0, heatGainBase + conditionHeat * 0.15 - heatGainMitigation);
-      const heatGainOnFailure = heatGainOnSuccess + 0.15;
+      const modHeatGainMultiplier = Number.isFinite(modBonuses.heatGainMultiplier)
+        && modBonuses.heatGainMultiplier > 0
+        ? clamp(modBonuses.heatGainMultiplier, 0.2, 2.2)
+        : 1;
+      const modHeatGainFlat = Number.isFinite(modBonuses.heatGainFlat) ? modBonuses.heatGainFlat : 0;
+      const baseHeatGainSuccess = Math.max(0, heatGainBase + conditionHeat * 0.15 - heatGainMitigation);
+      const baseHeatGainFailure = baseHeatGainSuccess + 0.15;
+      const heatGainOnSuccess = Math.max(
+        0,
+        baseHeatGainSuccess * modHeatGainMultiplier + modHeatGainFlat,
+      );
+      const heatGainOnFailure = Math.max(
+        0,
+        baseHeatGainFailure * modHeatGainMultiplier + modHeatGainFlat,
+      );
 
-      const durationDeltaPercent = Math.round((1 - vehicleDurationMultiplier) * 100);
-      const successDeltaPercent = Math.round((handlingBonus + conditionBonus) * 100);
+      const combinedVehicleDurationMultiplier = vehicleDurationMultiplier * modDurationMultiplier;
+      const durationDeltaPercent = Math.round((1 - combinedVehicleDurationMultiplier) * 100);
+      const successDeltaPercent = Math.round(
+        (handlingBonus + conditionBonus + modSuccessContribution) * 100,
+      );
       const heatDeltaLabel = Math.abs(heatAdjustment) >= 0.05
         ? `${heatAdjustment > 0 ? '+' : '-'}${Math.abs(heatAdjustment).toFixed(1)} heat`
         : null;
@@ -1455,24 +1514,60 @@ class MissionSystem {
         `Vehicle (${vehicle.model ?? 'Crew wheels'}): ${vehicleSummaryParts.join(', ')}.`,
       );
 
+      const installedMods = typeof vehicle.getInstalledMods === 'function'
+        ? vehicle.getInstalledMods()
+        : Array.isArray(vehicle.installedMods)
+          ? vehicle.installedMods.slice()
+          : [];
+      if (installedMods.length) {
+        const upgradeLabels = installedMods
+          .map((modId) => VEHICLE_UPGRADE_CATALOG?.[modId]?.label ?? modId)
+          .join(', ');
+        summary.push(`Vehicle upgrades: ${upgradeLabels}.`);
+      }
+
+      const effectivePerformance = typeof vehicle.getEffectivePerformance === 'function'
+        ? vehicle.getEffectivePerformance(VEHICLE_UPGRADE_CATALOG)
+        : {
+            topSpeed: effectiveSpeed,
+            acceleration: effectiveAcceleration,
+            handling: effectiveHandling,
+          };
+
       vehicleImpact = {
         vehicleId: vehicle.id,
         model: vehicle.model,
-        durationMultiplier: vehicleDurationMultiplier,
-        successContribution: handlingBonus + conditionBonus,
+        durationMultiplier: combinedVehicleDurationMultiplier,
+        durationMultiplierFromVehicle: vehicleDurationMultiplier,
+        durationMultiplierFromMods: modDurationMultiplier,
+        successContribution: handlingBonus + conditionBonus + modSuccessContribution,
         heatAdjustment,
+        heatMultiplier: combinedHeatMultiplier,
+        heatMultiplierFromMods: modHeatMultiplier,
+        heatFlatFromMods: heatFlatAdjustment,
         wearOnSuccess,
         wearOnFailure,
         heatGainOnSuccess,
         heatGainOnFailure,
+        heatGainModifiers: {
+          multiplier: modHeatGainMultiplier,
+          flat: modHeatGainFlat,
+        },
         conditionBefore: safeCondition,
         heatBefore: safeHeatRating,
+        installedMods,
+        modBonuses,
+        effectivePerformance,
       };
     } else {
+      combinedHeatMultiplier = Math.max(0.2, Math.min(2.5, combinedHeatMultiplier));
+      crewAdjustedHeat = Math.max(0, baseHeat * combinedHeatMultiplier);
       summary.push('Vehicle: No assignment selected.');
       adjustedHeat = crewAdjustedHeat;
       heatAdjustment = crewAdjustedHeat - baseHeat;
     }
+
+    heatMultiplier = combinedHeatMultiplier;
 
     const adjustedDuration = Math.max(5, Math.round(baseDuration * durationMultiplier));
     const adjustedPayout = Math.round(basePayout * payoutMultiplier);
@@ -1632,6 +1727,11 @@ class MissionSystem {
       ? {
           condition: Number.isFinite(assignedVehicle.condition) ? assignedVehicle.condition : null,
           heat: Number.isFinite(assignedVehicle.heat) ? assignedVehicle.heat : null,
+          installedMods: typeof assignedVehicle.getInstalledMods === 'function'
+            ? assignedVehicle.getInstalledMods()
+            : Array.isArray(assignedVehicle.installedMods)
+              ? assignedVehicle.installedMods.slice()
+              : [],
         }
       : null;
     mission.assignedVehicleLabel = assignedVehicle ? assignedVehicle.model ?? 'Assigned vehicle' : null;
@@ -2215,6 +2315,126 @@ class MissionSystem {
     return this.performMaintenance(vehicleId, 'heat', economySystem, overrides);
   }
 
+  purchaseVehicleUpgrade(vehicleId, upgradeId, economySystem, overrides = {}) {
+    if (!upgradeId) {
+      return {
+        success: false,
+        reason: 'unknown-upgrade',
+        upgradeId,
+      };
+    }
+
+    const vehicle = this.getVehicleFromGarage(vehicleId);
+    if (!vehicle) {
+      return {
+        success: false,
+        reason: 'vehicle-not-found',
+        vehicleId,
+        upgradeId,
+      };
+    }
+
+    const profile = {
+      ...(VEHICLE_UPGRADE_CATALOG?.[upgradeId] ?? {}),
+      ...(overrides ?? {}),
+    };
+
+    if (!profile.id) {
+      return {
+        success: false,
+        reason: 'unknown-upgrade',
+        vehicleId,
+        upgradeId,
+      };
+    }
+
+    const installedMods = typeof vehicle.getInstalledMods === 'function'
+      ? vehicle.getInstalledMods()
+      : Array.isArray(vehicle.installedMods)
+        ? vehicle.installedMods.slice()
+        : [];
+
+    if (installedMods.includes(profile.id)) {
+      return {
+        success: false,
+        reason: 'already-installed',
+        vehicleId,
+        upgradeId: profile.id,
+      };
+    }
+
+    if (!Number.isFinite(this.state?.funds)) {
+      this.state.funds = 0;
+    }
+
+    const rawCost = Number(profile.cost);
+    const cost = Number.isFinite(rawCost) && rawCost > 0 ? Math.round(rawCost) : 0;
+    const fundsAvailable = this.state.funds;
+
+    if (fundsAvailable < cost) {
+      return {
+        success: false,
+        reason: 'insufficient-funds',
+        vehicleId,
+        upgradeId: profile.id,
+        cost,
+        fundsAvailable,
+      };
+    }
+
+    if (cost > 0) {
+      if (economySystem && typeof economySystem.adjustFunds === 'function') {
+        economySystem.adjustFunds(-cost);
+      } else {
+        this.state.funds -= cost;
+      }
+    }
+
+    if (typeof vehicle.installMod === 'function') {
+      vehicle.installMod(profile.id, VEHICLE_UPGRADE_CATALOG);
+    } else {
+      const nextMods = new Set(installedMods);
+      nextMods.add(profile.id);
+      vehicle.installedMods = Array.from(nextMods);
+      if (typeof vehicle.refreshModBonuses === 'function') {
+        vehicle.refreshModBonuses(VEHICLE_UPGRADE_CATALOG);
+      }
+    }
+
+    const refreshedMods = typeof vehicle.getInstalledMods === 'function'
+      ? vehicle.getInstalledMods()
+      : Array.isArray(vehicle.installedMods)
+        ? vehicle.installedMods.slice()
+        : [];
+
+    const modBonuses = typeof vehicle.getModBonuses === 'function'
+      ? vehicle.getModBonuses(VEHICLE_UPGRADE_CATALOG)
+      : aggregateVehicleModBonuses(refreshedMods, VEHICLE_UPGRADE_CATALOG);
+
+    this.state.lastVehicleReport = {
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      outcome: 'upgrade',
+      upgradeId: profile.id,
+      upgradeLabel: profile.label ?? profile.id,
+      cost,
+      installedMods: refreshedMods,
+      modBonuses,
+      timestamp: Date.now(),
+    };
+
+    return {
+      success: true,
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      upgradeId: profile.id,
+      upgradeLabel: profile.label ?? profile.id,
+      cost,
+      installedMods: refreshedMods,
+      modBonuses,
+    };
+  }
+
   estimateVehicleDisposition(vehicleOrId, overrides = {}) {
     const vehicle =
       typeof vehicleOrId === 'object' && vehicleOrId !== null
@@ -2506,4 +2726,10 @@ MissionSystem.prototype.applyHeatRestrictions = function applyHeatRestrictions()
   });
 };
 
-export { MissionSystem, GARAGE_MAINTENANCE_CONFIG, PLAYER_SKILL_CONFIG, PLAYER_GEAR_CATALOG };
+export {
+  MissionSystem,
+  GARAGE_MAINTENANCE_CONFIG,
+  PLAYER_SKILL_CONFIG,
+  PLAYER_GEAR_CATALOG,
+  VEHICLE_UPGRADE_CATALOG,
+};

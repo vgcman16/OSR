@@ -4,6 +4,7 @@ import {
   GARAGE_MAINTENANCE_CONFIG,
   PLAYER_SKILL_CONFIG,
   PLAYER_GEAR_CATALOG,
+  VEHICLE_UPGRADE_CATALOG,
 } from './game/carThief/systems/missionSystem.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
@@ -75,6 +76,9 @@ const missionControls = {
   playerStatus: null,
   maintenanceRepairButton: null,
   maintenanceHeatButton: null,
+  maintenanceUpgradeSelect: null,
+  maintenanceUpgradeButton: null,
+  maintenanceUpgradeList: null,
   maintenanceStatus: null,
   maintenanceStatusDetail: '',
   heatLayLowButton: null,
@@ -987,6 +991,17 @@ const describeVehicleReportOutcome = (report) => {
     return `${modelLabel} maintenance complete.`;
   }
 
+  if (report.outcome === 'upgrade') {
+    const upgradeProfile = report.upgradeId ? VEHICLE_UPGRADE_CATALOG?.[report.upgradeId] : null;
+    const upgradeLabel = report.upgradeLabel ?? upgradeProfile?.label ?? 'Upgrade';
+    const costLabel = Number.isFinite(report.cost) && report.cost > 0
+      ? ` (${formatCurrency(report.cost)})`
+      : '';
+    const detail = upgradeProfile?.summary ?? upgradeProfile?.description ?? '';
+    const detailLabel = detail ? ` ${detail}` : '';
+    return `${modelLabel} installed ${upgradeLabel}${costLabel}.${detailLabel}`.trim();
+  }
+
   if (report.outcome === 'storage-blocked') {
     const capacity = Number.isFinite(report.storageCapacity) ? report.storageCapacity : null;
     const garageSize = Number.isFinite(report.garageSize) ? report.garageSize : null;
@@ -1477,8 +1492,23 @@ const updateHeatManagementPanel = () => {
 };
 
 const updateMaintenancePanel = () => {
-  const { maintenanceStatus, maintenanceRepairButton, maintenanceHeatButton } = missionControls;
-  if (!maintenanceStatus || !maintenanceRepairButton || !maintenanceHeatButton) {
+  const {
+    maintenanceStatus,
+    maintenanceRepairButton,
+    maintenanceHeatButton,
+    maintenanceUpgradeSelect,
+    maintenanceUpgradeButton,
+    maintenanceUpgradeList,
+  } = missionControls;
+
+  if (
+    !maintenanceStatus
+    || !maintenanceRepairButton
+    || !maintenanceHeatButton
+    || !maintenanceUpgradeSelect
+    || !maintenanceUpgradeButton
+    || !maintenanceUpgradeList
+  ) {
     return;
   }
 
@@ -1565,6 +1595,122 @@ const updateMaintenancePanel = () => {
   maintenanceRepairButton.title = canRepair ? '' : 'Select a vehicle and ensure sufficient funds.';
   maintenanceHeatButton.title = canReduceHeat ? '' : 'Select a vehicle and ensure sufficient funds.';
 
+  const upgradeEntries = Object.values(VEHICLE_UPGRADE_CATALOG ?? {}).sort((a, b) => {
+    const aLabel = (a?.label ?? '').toLowerCase();
+    const bLabel = (b?.label ?? '').toLowerCase();
+    return aLabel.localeCompare(bLabel);
+  });
+
+  const installedMods = hasSelection
+    ? typeof selectedVehicle.getInstalledMods === 'function'
+      ? selectedVehicle.getInstalledMods()
+      : Array.isArray(selectedVehicle.installedMods)
+        ? selectedVehicle.installedMods.slice()
+        : []
+    : [];
+
+  maintenanceUpgradeList.innerHTML = '';
+  if (!hasSelection) {
+    const item = document.createElement('li');
+    item.textContent = 'Select a vehicle to review installed upgrades.';
+    item.className = 'mission-maintenance__upgrade-item mission-maintenance__upgrade-item--empty';
+    maintenanceUpgradeList.appendChild(item);
+  } else if (!installedMods.length) {
+    const item = document.createElement('li');
+    item.textContent = 'No upgrades installed yet.';
+    item.className = 'mission-maintenance__upgrade-item mission-maintenance__upgrade-item--empty';
+    maintenanceUpgradeList.appendChild(item);
+  } else {
+    installedMods.forEach((modId) => {
+      const profile = VEHICLE_UPGRADE_CATALOG?.[modId] ?? null;
+      const label = profile?.label ?? modId;
+      const summary = profile?.summary ?? profile?.description ?? 'Effect profile unavailable.';
+      const item = document.createElement('li');
+      item.className = 'mission-maintenance__upgrade-item';
+      item.textContent = `${label} — ${summary}`;
+      maintenanceUpgradeList.appendChild(item);
+    });
+  }
+
+  const previousUpgradeSelection = maintenanceUpgradeSelect.value;
+  maintenanceUpgradeSelect.innerHTML = '';
+  const placeholderOption = document.createElement('option');
+  placeholderOption.value = '';
+  placeholderOption.textContent = hasSelection
+    ? 'Select an upgrade'
+    : 'Select a vehicle to view upgrades';
+  placeholderOption.disabled = true;
+  placeholderOption.selected = true;
+  maintenanceUpgradeSelect.appendChild(placeholderOption);
+
+  upgradeEntries.forEach((upgrade) => {
+    if (!upgrade?.id) {
+      return;
+    }
+    const option = document.createElement('option');
+    option.value = upgrade.id;
+    const costLabel = Number.isFinite(upgrade.cost) && upgrade.cost > 0
+      ? ` — ${formatCurrency(upgrade.cost)}`
+      : '';
+    option.textContent = `${upgrade.label ?? upgrade.id}${costLabel}`;
+    if (installedMods.includes(upgrade.id)) {
+      option.disabled = true;
+      option.textContent = `${option.textContent} (Installed)`;
+    }
+    maintenanceUpgradeSelect.appendChild(option);
+  });
+
+  const hasUpgradeSelection = Boolean(
+    hasSelection
+      && previousUpgradeSelection
+      && maintenanceUpgradeSelect.querySelector(`option[value="${previousUpgradeSelection}"]`)
+      && !installedMods.includes(previousUpgradeSelection),
+  );
+  if (hasUpgradeSelection) {
+    maintenanceUpgradeSelect.value = previousUpgradeSelection;
+  } else {
+    maintenanceUpgradeSelect.selectedIndex = 0;
+  }
+
+  maintenanceUpgradeSelect.disabled = !systemsReady || !hasSelection || !upgradeEntries.length;
+  maintenanceUpgradeSelect.title = !hasSelection
+    ? 'Select a garage vehicle to review upgrades.'
+    : systemsReady
+      ? ''
+      : 'Maintenance systems offline.';
+
+  const selectedUpgradeId = maintenanceUpgradeSelect.value || '';
+  const selectedUpgrade = selectedUpgradeId ? VEHICLE_UPGRADE_CATALOG?.[selectedUpgradeId] ?? null : null;
+  const upgradeInstalled = selectedUpgradeId ? installedMods.includes(selectedUpgradeId) : false;
+  const upgradeCost = selectedUpgrade && Number.isFinite(selectedUpgrade.cost) && selectedUpgrade.cost > 0
+    ? selectedUpgrade.cost
+    : 0;
+
+  const canInstallUpgrade = systemsReady
+    && hasSelection
+    && selectedUpgrade
+    && !upgradeInstalled
+    && funds >= upgradeCost;
+
+  maintenanceUpgradeButton.disabled = !canInstallUpgrade;
+  maintenanceUpgradeButton.textContent = selectedUpgrade
+    ? `Install (${formatCurrency(upgradeCost)})`
+    : 'Install Upgrade';
+
+  if (!selectedUpgrade) {
+    maintenanceUpgradeButton.title = hasSelection
+      ? 'Select an upgrade to install.'
+      : 'Select a garage vehicle to install upgrades.';
+  } else if (upgradeInstalled) {
+    maintenanceUpgradeButton.title = 'Upgrade already installed on this vehicle.';
+  } else if (!systemsReady) {
+    maintenanceUpgradeButton.title = 'Maintenance systems offline.';
+  } else if (funds < upgradeCost) {
+    maintenanceUpgradeButton.title = `Insufficient funds — requires ${formatCurrency(upgradeCost)}.`;
+  } else {
+    maintenanceUpgradeButton.title = '';
+  }
+
   let summaryMessage;
   if (!systemsReady) {
     summaryMessage = 'Maintenance channel syncing…';
@@ -1620,8 +1766,57 @@ const updateMaintenancePanel = () => {
     }
   }
 
+  const upgradeSummarySegments = upgradeEntries.map((upgrade) => {
+    if (!upgrade?.id) {
+      return null;
+    }
+    if (installedMods.includes(upgrade.id)) {
+      return `${upgrade.label ?? upgrade.id} installed`;
+    }
+    const costLabel = Number.isFinite(upgrade.cost) && upgrade.cost > 0
+      ? formatCurrency(upgrade.cost)
+      : formatCurrency(0);
+    if (!systemsReady || !hasSelection) {
+      return `${upgrade.label ?? upgrade.id} (${costLabel})`;
+    }
+    if (funds >= (upgrade.cost ?? 0)) {
+      return `${upgrade.label ?? upgrade.id} ready (${costLabel})`;
+    }
+    return `${upgrade.label ?? upgrade.id} needs ${costLabel}`;
+  }).filter(Boolean);
+
+  const upgradeSummaryMessage = upgradeSummarySegments.length
+    ? `Upgrades: ${upgradeSummarySegments.join('; ')}.`
+    : upgradeEntries.length
+      ? ''
+      : 'No garage upgrades cataloged.';
+
+  let focusUpgradeMessage = '';
+  if (selectedUpgrade) {
+    const summary = selectedUpgrade.summary ?? selectedUpgrade.description ?? '';
+    const parts = [`${selectedUpgrade.label ?? selectedUpgrade.id}`];
+    if (summary) {
+      parts.push(summary);
+    }
+    if (upgradeInstalled) {
+      parts.push('Already installed.');
+    } else if (funds < upgradeCost) {
+      parts.push(`Requires ${formatCurrency(upgradeCost)}.`);
+    } else {
+      parts.push(`Cost ${formatCurrency(upgradeCost)}.`);
+    }
+    focusUpgradeMessage = `${parts.join(' ')}`;
+  }
+
   const detail = missionControls.maintenanceStatusDetail?.trim();
-  maintenanceStatus.textContent = [detail, summaryMessage].filter(Boolean).join(' ');
+  maintenanceStatus.textContent = [
+    detail,
+    summaryMessage,
+    upgradeSummaryMessage,
+    focusUpgradeMessage,
+  ]
+    .filter(Boolean)
+    .join(' ');
 };
 
 const performMaintenanceAction = (type) => {
@@ -1699,6 +1894,73 @@ const performMaintenanceAction = (type) => {
 
 const handleMaintenanceRepair = () => performMaintenanceAction('repair');
 const handleMaintenanceHeat = () => performMaintenanceAction('heat');
+
+const handleMaintenanceUpgrade = () => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+
+  if (!missionSystem || !economySystem) {
+    missionControls.maintenanceStatusDetail = 'Maintenance systems offline.';
+    updateMaintenancePanel();
+    return;
+  }
+
+  const vehicleId = missionControls.selectedVehicleId;
+  if (!vehicleId) {
+    missionControls.maintenanceStatusDetail = 'Select a garage vehicle before installing upgrades.';
+    updateMaintenancePanel();
+    return;
+  }
+
+  const upgradeSelect = missionControls.maintenanceUpgradeSelect;
+  const upgradeId = upgradeSelect?.value;
+  if (!upgradeId) {
+    missionControls.maintenanceStatusDetail = 'Select an upgrade to install.';
+    updateMaintenancePanel();
+    return;
+  }
+
+  const result = missionSystem.purchaseVehicleUpgrade(vehicleId, upgradeId, economySystem);
+  if (!result || !result.success) {
+    let failureMessage = 'Upgrade could not be installed.';
+    if (result?.reason === 'insufficient-funds') {
+      const required = formatCurrency(result.cost ?? 0);
+      const available = formatCurrency(result.fundsAvailable ?? missionSystem.state.funds ?? 0);
+      failureMessage = `Insufficient funds — requires ${required}, available ${available}.`;
+    } else if (result?.reason === 'vehicle-not-found') {
+      failureMessage = 'Selected vehicle no longer in the garage.';
+    } else if (result?.reason === 'already-installed') {
+      failureMessage = 'Upgrade already installed on this vehicle.';
+    } else if (result?.reason === 'unknown-upgrade') {
+      failureMessage = 'Upgrade unavailable — refresh the catalog and try again.';
+    }
+
+    missionControls.maintenanceStatusDetail = failureMessage;
+    updateMaintenancePanel();
+    return;
+  }
+
+  const profile = result.upgradeId ? VEHICLE_UPGRADE_CATALOG?.[result.upgradeId] ?? null : null;
+  const summary = profile?.summary ?? profile?.description ?? '';
+  const segments = [
+    `Installed ${result.upgradeLabel ?? 'upgrade'} on ${result.vehicleModel ?? 'vehicle'}`,
+  ];
+  if (Number.isFinite(result.cost) && result.cost > 0) {
+    segments.push(`Cost ${formatCurrency(result.cost)}.`);
+  }
+  if (summary) {
+    segments.push(summary);
+  }
+
+  missionControls.maintenanceStatusDetail = segments.join(' ');
+
+  if (upgradeSelect) {
+    upgradeSelect.selectedIndex = 0;
+  }
+
+  updateMissionControls();
+  triggerHudRender();
+};
 
 const performHeatMitigation = (actionKey) => {
   const action = HEAT_MANAGEMENT_ACTIONS[actionKey];
@@ -3116,6 +3378,21 @@ const updateVehicleSelectionOptions = () => {
     optionLabel.appendChild(descriptor);
     entry.appendChild(optionLabel);
 
+    const installedMods = typeof vehicle.getInstalledMods === 'function'
+      ? vehicle.getInstalledMods()
+      : Array.isArray(vehicle.installedMods)
+        ? vehicle.installedMods.slice()
+        : [];
+    if (installedMods.length) {
+      const upgradesLabel = installedMods
+        .map((modId) => VEHICLE_UPGRADE_CATALOG?.[modId]?.label ?? modId)
+        .join(', ');
+      const upgradeBadge = document.createElement('span');
+      upgradeBadge.className = 'mission-vehicle__upgrade-summary';
+      upgradeBadge.textContent = `Upgrades: ${upgradesLabel}`;
+      entry.appendChild(upgradeBadge);
+    }
+
     const disposition = missionSystem?.estimateVehicleDisposition?.(vehicle) ?? null;
     const actionBar = document.createElement('div');
     actionBar.className = 'mission-vehicle__actions';
@@ -3498,6 +3775,9 @@ const updateMissionControls = () => {
     trainingRestButton,
     maintenanceRepairButton,
     maintenanceHeatButton,
+    maintenanceUpgradeSelect,
+    maintenanceUpgradeButton,
+    maintenanceUpgradeList,
     maintenanceStatus,
     playerStatsList,
     playerSkillSelect,
@@ -3550,6 +3830,9 @@ const updateMissionControls = () => {
     trainingRestButton,
     maintenanceRepairButton,
     maintenanceHeatButton,
+    maintenanceUpgradeSelect,
+    maintenanceUpgradeButton,
+    maintenanceUpgradeList,
     maintenanceStatus,
     playerStatsList,
     playerSkillSelect,
@@ -4091,6 +4374,9 @@ const setupMissionControls = () => {
   missionControls.playerStatus = document.getElementById('mission-player-status');
   missionControls.maintenanceRepairButton = document.getElementById('mission-maintenance-repair-btn');
   missionControls.maintenanceHeatButton = document.getElementById('mission-maintenance-heat-btn');
+  missionControls.maintenanceUpgradeSelect = document.getElementById('mission-maintenance-upgrade-select');
+  missionControls.maintenanceUpgradeButton = document.getElementById('mission-maintenance-upgrade-btn');
+  missionControls.maintenanceUpgradeList = document.getElementById('mission-maintenance-upgrade-list');
   missionControls.maintenanceStatus = document.getElementById('mission-maintenance-status');
   missionControls.heatLayLowButton = document.getElementById('mission-heat-laylow-btn');
   missionControls.heatBribeButton = document.getElementById('mission-heat-bribe-btn');
@@ -4234,6 +4520,8 @@ const setupMissionControls = () => {
   playerGearButton.addEventListener('click', handlePlayerGearAcquisition);
   maintenanceRepairButton.addEventListener('click', handleMaintenanceRepair);
   maintenanceHeatButton.addEventListener('click', handleMaintenanceHeat);
+  maintenanceUpgradeButton?.addEventListener('click', handleMaintenanceUpgrade);
+  maintenanceUpgradeSelect?.addEventListener('change', updateMaintenancePanel);
   heatLayLowButton.addEventListener('click', handleHeatLayLow);
   heatBribeButton.addEventListener('click', handleHeatBribe);
   missionControls.safehouseUpgradeButton?.addEventListener('click', handleSafehouseUpgrade);

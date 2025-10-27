@@ -249,6 +249,30 @@
             <button id="mission-maintenance-repair-btn" type="button">Repair Condition</button>
             <button id="mission-maintenance-heat-btn" type="button">Reduce Heat</button>
           </div>
+          <div class="mission-maintenance__upgrades">
+            <h4 class="mission-maintenance__subtitle">Vehicle Upgrades</h4>
+            <label class="mission-maintenance__label" for="mission-maintenance-upgrade-select">
+              Upgrade catalog
+            </label>
+            <select
+              id="mission-maintenance-upgrade-select"
+              name="mission-maintenance-upgrade-select"
+              aria-describedby="mission-maintenance-status"
+            >
+              <option value="" disabled selected>Select a vehicle to view upgrades</option>
+            </select>
+            <div class="mission-maintenance__actions">
+              <button id="mission-maintenance-upgrade-btn" type="button">Install Upgrade</button>
+            </div>
+            <ul
+              id="mission-maintenance-upgrade-list"
+              class="mission-details__list mission-maintenance__upgrade-list"
+            >
+              <li class="mission-maintenance__upgrade-item mission-maintenance__upgrade-item--empty">
+                Select a vehicle to review installed upgrades.
+              </li>
+            </ul>
+          </div>
           <p
             id="mission-maintenance-status"
             class="control-panel__status mission-maintenance__status"
