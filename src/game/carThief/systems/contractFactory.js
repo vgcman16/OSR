@@ -154,4 +154,102 @@ const generateContractsFromDistricts = (districts = []) => {
   return templates;
 };
 
-export { generateContractsFromDistricts };
+const buildFalloutContractIdFactory = (createId) => {
+  if (typeof createId === 'function') {
+    return createId;
+  }
+
+  let counter = 0;
+  return () => {
+    counter += 1;
+    return `fallout-${counter}`;
+  };
+};
+
+const buildRescueContractTemplate = (fallout, mission, createId) => {
+  if (!fallout || !mission) {
+    return null;
+  }
+
+  const id = createId();
+  const crewName = fallout.crewName ?? 'Crew member';
+  const missionName = mission.name ?? 'the failed operation';
+  const difficulty = Math.max(1, Math.round((mission.difficulty ?? 1) + 1));
+  const heat = Math.max(1, Math.round((mission.heat ?? 1) * 0.75 + 1));
+  const duration = Math.max(24, Math.round((mission.duration ?? 30) * 0.8));
+
+  return {
+    id,
+    name: `Rescue ${crewName}`,
+    difficulty,
+    payout: 0,
+    heat,
+    duration,
+    description: `Mount an urgent extraction to free ${crewName}, captured during ${missionName}.`,
+    falloutRecovery: {
+      type: 'rescue',
+      crewId: fallout.crewId ?? null,
+      crewName,
+      status: fallout.status ?? 'captured',
+      sourceMissionId: mission.id ?? null,
+      sourceMissionName: mission.name ?? null,
+    },
+    vehicle: { model: 'Extraction Van' },
+  };
+};
+
+const buildMedicalContractTemplate = (fallout, mission, createId) => {
+  if (!fallout || !mission) {
+    return null;
+  }
+
+  const id = createId();
+  const crewName = fallout.crewName ?? 'Crew member';
+  const missionName = mission.name ?? 'the failed operation';
+  const difficulty = Math.max(1, Math.round(mission.difficulty ?? 1));
+  const heat = Math.max(0, Math.round((mission.heat ?? 1) * 0.4));
+  const duration = Math.max(18, Math.round((mission.duration ?? 30) * 0.6));
+
+  return {
+    id,
+    name: `Stabilize ${crewName}`,
+    difficulty,
+    payout: 0,
+    heat,
+    duration,
+    description: `Coordinate medical aid to stabilize ${crewName} after ${missionName}.`,
+    falloutRecovery: {
+      type: 'medical',
+      crewId: fallout.crewId ?? null,
+      crewName,
+      status: fallout.status ?? 'injured',
+      sourceMissionId: mission.id ?? null,
+      sourceMissionName: mission.name ?? null,
+    },
+    vehicle: { model: 'Support Ambulance' },
+  };
+};
+
+const generateFalloutContracts = ({ mission, falloutEntries = [], createId } = {}) => {
+  if (!mission || !Array.isArray(falloutEntries) || !falloutEntries.length) {
+    return [];
+  }
+
+  const idFactory = buildFalloutContractIdFactory(createId);
+  const templates = falloutEntries
+    .map((fallout) => {
+      const status = String(fallout?.status ?? '').toLowerCase();
+      if (status === 'captured') {
+        return buildRescueContractTemplate(fallout, mission, idFactory);
+      }
+      if (status === 'injured') {
+        return buildMedicalContractTemplate(fallout, mission, idFactory);
+      }
+      return null;
+    })
+    .filter(Boolean);
+
+  return templates;
+};
+
+export { generateContractsFromDistricts, generateFalloutContracts };

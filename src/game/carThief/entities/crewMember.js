@@ -328,6 +328,11 @@ class CrewMember {
     this.background = template.background;
     this.perks = template.perks;
     this.status = 'idle';
+    this.falloutStatus = options.falloutStatus ?? null;
+    this.falloutDetails =
+      typeof options.falloutDetails === 'object' && options.falloutDetails !== null
+        ? { ...options.falloutDetails }
+        : null;
     const fatigueValue = Number(options.fatigue);
     this.fatigue = clampFatigue(Number.isFinite(fatigueValue) ? fatigueValue : 0);
     this.fatigueRecoveryPerDay = resolveRecoveryRate(options.fatigueRecoveryPerDay);
@@ -406,8 +411,66 @@ class CrewMember {
     return this.fatigue;
   }
 
-  finishMission({ fatigueImpact = CREW_FATIGUE_CONFIG.missionFatigueBase } = {}) {
+  applyMissionFallout(fallout = {}) {
+    if (!fallout || typeof fallout !== 'object') {
+      return null;
+    }
+
+    const timestamp = Number.isFinite(fallout.timestamp) ? fallout.timestamp : Date.now();
+    const normalizedStatus = String(fallout.status ?? fallout.state ?? '')
+      .trim()
+      .toLowerCase();
+    if (!normalizedStatus) {
+      return null;
+    }
+
+    const details = {
+      ...fallout,
+      status: normalizedStatus,
+      timestamp,
+    };
+
+    this.falloutStatus = normalizedStatus;
+    this.falloutDetails = details;
+
+    if (normalizedStatus === 'captured') {
+      this.setStatus('captured');
+      this.capturedAt = timestamp;
+    } else if (normalizedStatus === 'injured') {
+      this.setStatus('injured');
+      this.injuredAt = timestamp;
+    } else {
+      this.setStatus(normalizedStatus);
+    }
+
+    return details;
+  }
+
+  clearMissionFallout({ fallbackStatus = null } = {}) {
+    this.falloutStatus = null;
+    this.falloutDetails = null;
+
+    if (fallbackStatus) {
+      this.setStatus(fallbackStatus);
+      return this.status;
+    }
+
+    if (this.isExhausted()) {
+      this.setStatus('needs-rest');
+    } else {
+      this.setStatus('idle');
+    }
+
+    return this.status;
+  }
+
+  finishMission({ fatigueImpact = CREW_FATIGUE_CONFIG.missionFatigueBase, fallout = null } = {}) {
     const resultingFatigue = this.applyMissionFatigue(fatigueImpact);
+    if (fallout && fallout.status) {
+      this.applyMissionFallout(fallout);
+      return resultingFatigue;
+    }
+
     if (resultingFatigue >= CREW_FATIGUE_CONFIG.exhaustionThreshold) {
       this.setStatus('needs-rest');
     } else {

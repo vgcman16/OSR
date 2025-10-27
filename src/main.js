@@ -195,6 +195,10 @@ const summarizeCrewReadiness = (member) => {
     readinessLabel = 'Tired';
   } else if (normalizedState === 'on-mission') {
     readinessLabel = 'In the field';
+  } else if (normalizedState === 'captured') {
+    readinessLabel = 'Captured';
+  } else if (normalizedState === 'injured') {
+    readinessLabel = 'Injured';
   }
 
   const fatigueLabel = fatiguePercent !== null ? `${fatiguePercent}% fatigue` : 'Fatigue unknown';
@@ -208,6 +212,10 @@ const summarizeCrewReadiness = (member) => {
     tooltipParts.push('Unavailable for missions until rested.');
   } else if (normalizedState === 'tired') {
     tooltipParts.push('Pushing further could sideline them.');
+  } else if (normalizedState === 'captured') {
+    tooltipParts.push('Captured during an op — schedule a rescue mission to recover them.');
+  } else if (normalizedState === 'injured') {
+    tooltipParts.push('Injured in the field — coordinate medical support to bring them back.');
   }
 
   return {
@@ -3136,9 +3144,18 @@ const renderMissionLog = () => {
   logEntries.slice(0, 5).forEach((entry) => {
     const item = document.createElement('li');
     const summary = entry?.summary ?? 'Mission resolved.';
+    const details = [summary];
+    const falloutSummary = entry?.falloutSummary ?? null;
+    if (falloutSummary && !summary.includes(falloutSummary)) {
+      details.push(`Fallout: ${falloutSummary}`);
+    }
+    const followUpSummary = entry?.followUpSummary ?? null;
+    if (followUpSummary && !summary.includes(followUpSummary)) {
+      details.push(`Follow-up: ${followUpSummary}`);
+    }
     const timestamp = Number.isFinite(entry?.timestamp) ? new Date(entry.timestamp) : null;
     const timeLabel = timestamp ? ` @ ${timestamp.toLocaleTimeString([], options)}` : '';
-    item.textContent = `${summary}${timeLabel}`;
+    item.textContent = `${details.join(' — ')}${timeLabel}`;
     logList.appendChild(item);
   });
 };
@@ -3418,7 +3435,7 @@ const updateMissionControls = () => {
   if (!selectedMission) {
     resetMissionDetails('Select a mission to view its briefing.');
   } else {
-    const missionDescription = selectedMission.description ?? 'No description available.';
+    let missionDescription = selectedMission.description ?? 'No description available.';
     const selectedCrewIds = missionControls.selectedCrewIds ?? [];
     const preview =
       selectedMission.status === 'available'
@@ -3447,26 +3464,26 @@ const updateMissionControls = () => {
     const successValue = preview?.adjustedSuccessChance ?? selectedMission.successChance ?? baseSuccess;
     const heatValue = preview?.adjustedHeat ?? selectedMission.heat ?? baseHeat;
 
-    const missionPayout = selectedMission.status === 'available'
+    let missionPayout = selectedMission.status === 'available'
       ? formatAdjustedValue(basePayout, payoutValue, formatCurrency, formatCurrency, 1)
       : formatCurrency(payoutValue);
-    const missionHeat = selectedMission.status === 'available'
+    let missionHeat = selectedMission.status === 'available'
       ? formatAdjustedValue(baseHeat, heatValue, formatHeatValue, formatHeatValue, 0.05)
       : formatHeatValue(heatValue);
-    const missionDuration = selectedMission.status === 'available'
+    let missionDuration = selectedMission.status === 'available'
       ? formatAdjustedValue(baseDuration, durationValue, formatSeconds, formatSeconds, 1)
       : formatSeconds(durationValue);
-    const missionSuccess = selectedMission.status === 'available'
+    let missionSuccess = selectedMission.status === 'available'
       ? formatAdjustedValue(baseSuccess, successValue, formatPercent, formatPercent, 0.005)
       : formatPercent(successValue);
     const crackdownInfo = describeCrackdownPolicy();
-    const restrictionMessage = selectedMission.restricted
+    let restrictionMessage = selectedMission.restricted
       ? selectedMission.restrictionReason ?? 'This contract is locked by the current crackdown.'
       : crackdownInfo
         ? `Eligible under the ${crackdownInfo.label.toLowerCase()} crackdown.`
         : 'All contracts are open.';
 
-    const crewImpact = (() => {
+    let crewImpact = (() => {
       if (selectedMission.status === 'available') {
         const summary = preview?.summary ?? [];
         return summary.length ? summary : ['No crew bonuses applied.'];
@@ -3480,7 +3497,7 @@ const updateMissionControls = () => {
         : ['Crew assignments locked in.', 'Vehicle assignment locked in.'];
     })();
 
-    const playerImpact = (() => {
+    let playerImpact = (() => {
       if (selectedMission.status === 'available') {
         const summary = Array.isArray(preview?.playerImpact?.summary)
           ? preview.playerImpact.summary
@@ -3497,6 +3514,32 @@ const updateMissionControls = () => {
         ? summary
         : ['Player expertise locked for this operation.'];
     })();
+
+    const recoveryDetails = selectedMission.falloutRecovery ?? null;
+    if (recoveryDetails) {
+      const recoveryLabel = recoveryDetails.type === 'medical' ? 'medical response' : 'rescue operation';
+      const targetName = recoveryDetails.crewName ?? 'a crew member';
+      const sourceName = recoveryDetails.sourceMissionName
+        ? ` following ${recoveryDetails.sourceMissionName}`
+        : '';
+      missionDescription = `${missionDescription} Priority ${recoveryLabel} to recover ${targetName}${sourceName}.`.trim();
+
+      const statusLabel = (recoveryDetails.status ?? 'pending').replace(/-/g, ' ');
+      const operationLabel = recoveryDetails.type === 'medical' ? 'Stabilize' : 'Rescue';
+      crewImpact = [
+        `${operationLabel} target: ${targetName} (${statusLabel}).`,
+        ...crewImpact,
+      ];
+      playerImpact = [
+        'No direct payout — restores crew availability.',
+        ...playerImpact,
+      ];
+      restrictionMessage = 'Priority fallout response — crackdown limits waived.';
+
+      if (Number.isFinite(payoutValue) && payoutValue === 0) {
+        missionPayout = 'Support operation';
+      }
+    }
 
     setMissionDetails({
       description: missionDescription,
@@ -3566,7 +3609,18 @@ const updateMissionSelect = () => {
     }
 
     const restrictionLabel = mission.restricted ? ' [LOCKED]' : '';
-    option.textContent = `${mission.name} — $${mission.payout.toLocaleString()} (${statusLabel})${restrictionLabel}`;
+    const payoutValue = Number.isFinite(mission.payout) ? mission.payout : 0;
+    const isSupportOperation = mission.falloutRecovery && payoutValue === 0;
+    const payoutLabel = isSupportOperation
+      ? 'Support'
+      : `$${Math.max(0, payoutValue).toLocaleString()}`;
+    const categoryLabel = mission.falloutRecovery
+      ? mission.falloutRecovery.type === 'medical'
+        ? 'MEDICAL'
+        : 'RESCUE'
+      : null;
+    const prefix = categoryLabel ? `[${categoryLabel}] ` : '';
+    option.textContent = `${prefix}${mission.name} — ${payoutLabel} (${statusLabel})${restrictionLabel}`;
     option.selected = selectionStillValid && mission.id === previousSelection;
     select.appendChild(option);
   });

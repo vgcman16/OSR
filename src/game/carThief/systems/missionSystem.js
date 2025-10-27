@@ -1,7 +1,7 @@
 import { Vehicle } from '../entities/vehicle.js';
 import { CREW_TRAIT_KEYS, CREW_FATIGUE_CONFIG } from '../entities/crewMember.js';
 import { HeatSystem } from './heatSystem.js';
-import { generateContractsFromDistricts } from './contractFactory.js';
+import { generateContractsFromDistricts, generateFalloutContracts } from './contractFactory.js';
 import { buildMissionEventDeck } from './missionEvents.js';
 import { getActiveStorageCapacityFromState } from '../world/safehouse.js';
 
@@ -648,6 +648,7 @@ class MissionSystem {
       missionTemplates = defaultMissionTemplates,
       contractPool = [],
       contractFactory = generateContractsFromDistricts,
+      falloutContractFactory = generateFalloutContracts,
     } = {},
   ) {
     this.state = state;
@@ -659,8 +660,13 @@ class MissionSystem {
     );
     this.contractPool = contractPool.map((template) => ({ ...template }));
     this.contractFactory = contractFactory;
+    this.falloutContractFactory = falloutContractFactory;
 
     this.currentCrackdownTier = this.heatSystem.getCurrentTier();
+
+    if (!Number.isFinite(this.state.followUpSequence)) {
+      this.state.followUpSequence = 0;
+    }
 
     if (!Array.isArray(this.state.missionLog)) {
       this.state.missionLog = [];
@@ -726,6 +732,10 @@ class MissionSystem {
                 : undefined,
           }
         : null;
+    const falloutRecovery =
+      typeof template.falloutRecovery === 'object' && template.falloutRecovery !== null
+        ? { ...template.falloutRecovery }
+        : null;
     const vehicleConfig =
       typeof template.vehicle === 'object' && template.vehicle !== null
         ? template.vehicle
@@ -734,6 +744,7 @@ class MissionSystem {
     return {
       ...template,
       pointOfInterest,
+      falloutRecovery,
       payout,
       basePayout: payout,
       heat,
@@ -846,6 +857,46 @@ class MissionSystem {
     }
 
     return mission;
+  }
+
+  queueFalloutContracts(templates = []) {
+    if (!Array.isArray(templates) || !templates.length) {
+      return [];
+    }
+
+    const queued = [];
+
+    templates.forEach((template) => {
+      if (!template || !template.id) {
+        return;
+      }
+
+      const mission = this.createMissionFromTemplate(template);
+      if (!mission) {
+        return;
+      }
+
+      mission.isFalloutRecovery = true;
+      if (mission.falloutRecovery) {
+        mission.falloutRecovery = { ...mission.falloutRecovery };
+      }
+      mission.restricted = false;
+      mission.restrictionReason = 'Priority crew fallout response.';
+
+      const existingIndex = this.availableMissions.findIndex((entry) => entry.id === mission.id);
+      if (existingIndex !== -1) {
+        this.availableMissions.splice(existingIndex, 1);
+      }
+
+      this.availableMissions.unshift(mission);
+      queued.push(mission);
+    });
+
+    if (queued.length) {
+      this.applyHeatRestrictions();
+    }
+
+    return queued;
   }
 
   normalizeSuccessChance(mission) {
@@ -1148,7 +1199,7 @@ class MissionSystem {
     return historyEntry;
   }
 
-  recordMissionTelemetry(mission, outcome) {
+  recordMissionTelemetry(mission, outcome, extras = {}) {
     if (!mission) {
       return null;
     }
@@ -1187,12 +1238,55 @@ class MissionSystem {
       summary = `${summary} — Events: ${highlights}`;
     }
 
+    const falloutEntries = Array.isArray(extras?.fallout) ? extras.fallout : [];
+    const followUpEntries = Array.isArray(extras?.followUps) ? extras.followUps : [];
+
+    const formatFalloutLine = (entry) => {
+      if (!entry) {
+        return null;
+      }
+
+      const name = entry.crewName ?? 'Crew member';
+      const status = (entry.status ?? '').toLowerCase();
+      if (status === 'captured') {
+        return `${name} captured`;
+      }
+      if (status === 'injured') {
+        return `${name} injured`;
+      }
+      if (status === 'recovered') {
+        return `${name} recovered`;
+      }
+      return null;
+    };
+
+    const falloutSummaryLines = falloutEntries
+      .map((entry) => formatFalloutLine(entry))
+      .filter(Boolean);
+    const falloutSummary = falloutSummaryLines.length ? falloutSummaryLines.join('; ') : null;
+    if (falloutSummary) {
+      summary = `${summary} — Fallout: ${falloutSummary}`;
+    }
+
+    const followUpSummaryLines = followUpEntries
+      .map((entry) => entry?.name ?? null)
+      .filter(Boolean);
+    const followUpSummary = followUpSummaryLines.length ? followUpSummaryLines.join('; ') : null;
+    if (followUpSummary) {
+      summary = `${summary} — Follow-up queued: ${followUpSummary}`;
+    }
+
+    const clonedFallout = falloutEntries.map((entry) => ({ ...entry }));
+    const clonedFollowUps = followUpEntries.map((entry) => ({ ...entry }));
+
     mission.resolutionDetails = {
       outcome,
       roll,
       successChance,
       automatic,
       timestamp,
+      fallout: clonedFallout,
+      followUps: clonedFollowUps,
     };
     mission.pendingResolution = null;
     mission.resolutionRoll = roll;
@@ -1222,6 +1316,10 @@ class MissionSystem {
         summary: entry?.summary ?? null,
         resolvedAt: entry?.resolvedAt ?? null,
       })),
+      fallout: clonedFallout,
+      followUps: clonedFollowUps,
+      falloutSummary,
+      followUpSummary,
     };
 
     this.state.missionLog.unshift(entry);
@@ -1623,6 +1721,9 @@ class MissionSystem {
         : null;
 
     let storageBlockedReport = null;
+    const crewFalloutRecords = [];
+    const falloutByCrewId = new Map();
+    let queuedFollowUps = [];
 
     if (outcome === 'success') {
       this.state.funds += mission.payout;
@@ -1676,15 +1777,171 @@ class MissionSystem {
       if (rewardVehicleAdded && typeof mission.vehicle?.markStolen === 'function') {
         mission.vehicle.markStolen();
       }
+
+      const recoveryTarget = mission.falloutRecovery ?? null;
+      if (recoveryTarget?.crewId) {
+        const targetCrew = crewPool.find((member) => member?.id === recoveryTarget.crewId) ?? null;
+        if (targetCrew) {
+          const fallbackStatus = recoveryTarget.type === 'medical' ? 'needs-rest' : 'idle';
+          if (typeof targetCrew.clearMissionFallout === 'function') {
+            targetCrew.clearMissionFallout({ fallbackStatus });
+          } else {
+            targetCrew.status = fallbackStatus;
+            targetCrew.falloutStatus = null;
+            targetCrew.falloutDetails = null;
+          }
+          if (typeof targetCrew.adjustLoyalty === 'function') {
+            targetCrew.adjustLoyalty(1);
+          }
+          crewFalloutRecords.push({
+            crewId: targetCrew.id ?? null,
+            crewName: targetCrew.name ?? 'Crew member',
+            status: 'recovered',
+            recoveryType: recoveryTarget.type ?? 'rescue',
+            missionId: mission.id ?? null,
+            timestamp: Date.now(),
+          });
+        }
+      }
     } else if (outcome === 'failure') {
       const multiplier = crackdownPolicy.failureHeatMultiplier ?? 2;
       this.heatSystem.increase(mission.heat * multiplier);
 
+      const pending = mission.pendingResolution ?? {};
+      const failureSeverity = (() => {
+        const roll = Number.isFinite(pending.roll)
+          ? pending.roll
+          : Number.isFinite(mission.resolutionRoll)
+            ? mission.resolutionRoll
+            : null;
+        const chance = Number.isFinite(pending.successChance)
+          ? pending.successChance
+          : Number.isFinite(mission.resolutionChance)
+            ? mission.resolutionChance
+            : Number.isFinite(mission.baseSuccessChance)
+              ? mission.baseSuccessChance
+              : null;
+        if (roll === null || chance === null) {
+          const fallback = 0.35 + Math.min(0.4, (mission.difficulty ?? 1) * 0.05);
+          return clamp(fallback, 0, 1);
+        }
+        return clamp(Math.max(0, roll - chance), 0, 1);
+      })();
+      const captureChance = Math.min(
+        0.75,
+        0.2 + failureSeverity * 0.6 + Math.max(0, (mission.difficulty ?? 1) - 1) * 0.08,
+      );
+      const injuryChance = Math.min(
+        0.9,
+        0.4 + failureSeverity * 0.5 + Math.max(0, (mission.difficulty ?? 1) - 1) * 0.1,
+      );
+      const severityLabel = failureSeverity > 0.6 ? 'severe' : failureSeverity > 0.3 ? 'moderate' : 'minor';
+      const timestamp = Date.now();
+      let flaggedCount = 0;
+
       assignedCrew.forEach((member) => {
+        if (!member) {
+          return;
+        }
+
         if (typeof member.adjustLoyalty === 'function') {
           member.adjustLoyalty(-1);
         }
+
+        let fallout = null;
+        const captureRoll = Math.random();
+        if (captureRoll <= captureChance) {
+          fallout = {
+            crewId: member.id ?? null,
+            crewName: member.name ?? 'Crew member',
+            status: 'captured',
+            severity: severityLabel,
+            missionId: mission.id ?? null,
+            timestamp,
+          };
+        } else if (Math.random() <= injuryChance) {
+          fallout = {
+            crewId: member.id ?? null,
+            crewName: member.name ?? 'Crew member',
+            status: 'injured',
+            severity: severityLabel,
+            missionId: mission.id ?? null,
+            timestamp,
+          };
+        }
+
+        if (fallout) {
+          flaggedCount += 1;
+          crewFalloutRecords.push(fallout);
+          if (member.id) {
+            falloutByCrewId.set(member.id, fallout);
+          }
+        }
       });
+
+      if (flaggedCount === 0 && assignedCrew.length) {
+        const fallbackMember = assignedCrew.find(Boolean);
+        if (fallbackMember) {
+          const fallbackEntry = {
+            crewId: fallbackMember.id ?? null,
+            crewName: fallbackMember.name ?? 'Crew member',
+            status: 'injured',
+            severity: 'moderate',
+            missionId: mission.id ?? null,
+            timestamp,
+          };
+          crewFalloutRecords.push(fallbackEntry);
+          if (fallbackMember.id) {
+            falloutByCrewId.set(fallbackMember.id, fallbackEntry);
+          }
+        }
+      }
+
+      const recoveryTarget = mission.falloutRecovery ?? null;
+      if (recoveryTarget?.crewId) {
+        const targetCrew = crewPool.find((member) => member?.id === recoveryTarget.crewId) ?? null;
+        if (targetCrew) {
+          const normalizedStatus = recoveryTarget.status === 'injured' ? 'injured' : 'captured';
+          const targetEntry = {
+            crewId: targetCrew.id ?? null,
+            crewName: targetCrew.name ?? 'Crew member',
+            status: normalizedStatus,
+            severity: 'severe',
+            missionId: mission.id ?? null,
+            timestamp,
+            notes: 'Follow-up objective remains unresolved.',
+          };
+          crewFalloutRecords.push(targetEntry);
+          if (typeof targetCrew.applyMissionFallout === 'function') {
+            targetCrew.applyMissionFallout(targetEntry);
+          } else {
+            targetCrew.status = normalizedStatus;
+            targetCrew.falloutStatus = normalizedStatus;
+            targetCrew.falloutDetails = targetEntry;
+          }
+        }
+      }
+
+      const dedupedFallout = new Map();
+      crewFalloutRecords.forEach((entry) => {
+        const key = entry?.crewId ?? `${entry?.crewName ?? 'crew'}-${dedupedFallout.size}`;
+        dedupedFallout.set(key, entry);
+      });
+      crewFalloutRecords.splice(0, crewFalloutRecords.length, ...dedupedFallout.values());
+
+      const idGenerator = () => {
+        this.state.followUpSequence += 1;
+        return `fallout-${this.state.followUpSequence}`;
+      };
+      const falloutTemplates =
+        typeof this.falloutContractFactory === 'function'
+          ? this.falloutContractFactory({
+              mission,
+              falloutEntries: crewFalloutRecords,
+              createId: idGenerator,
+            })
+          : [];
+      queuedFollowUps = this.queueFalloutContracts(falloutTemplates);
     }
 
     let vehicleReport = null;
@@ -1769,16 +2026,41 @@ class MissionSystem {
         return;
       }
 
+      const fallout = member?.id ? falloutByCrewId.get(member.id) ?? null : null;
+
       if (typeof member.finishMission === 'function') {
-        member.finishMission({ fatigueImpact: missionFatigue, mission, outcome });
+        member.finishMission({ fatigueImpact: missionFatigue, mission, outcome, fallout });
       } else if (typeof member.setStatus === 'function') {
-        member.setStatus('idle');
+        if (fallout?.status) {
+          member.setStatus(fallout.status);
+          member.falloutStatus = fallout.status;
+          member.falloutDetails = fallout;
+        } else {
+          member.setStatus('idle');
+        }
       } else {
-        member.status = 'idle';
+        if (fallout?.status) {
+          member.status = fallout.status;
+          member.falloutStatus = fallout.status;
+          member.falloutDetails = fallout;
+        } else {
+          member.status = 'idle';
+        }
       }
     });
 
-    this.recordMissionTelemetry(mission, outcome);
+    const followUpSummaries = queuedFollowUps.map((entry) => ({
+      id: entry?.id ?? null,
+      name: entry?.name ?? null,
+      type: entry?.falloutRecovery?.type ?? null,
+      crewId: entry?.falloutRecovery?.crewId ?? null,
+      crewName: entry?.falloutRecovery?.crewName ?? null,
+    }));
+
+    this.recordMissionTelemetry(mission, outcome, {
+      fallout: crewFalloutRecords,
+      followUps: followUpSummaries,
+    });
 
     mission.pendingDecision = null;
     mission.eventDeck = [];
@@ -2205,6 +2487,12 @@ MissionSystem.prototype.applyHeatRestrictions = function applyHeatRestrictions()
     if (!mission || mission.status !== 'available') {
       mission.restricted = false;
       mission.restrictionReason = null;
+      return;
+    }
+
+    if (mission.falloutRecovery) {
+      mission.restricted = false;
+      mission.restrictionReason = 'Priority crew fallout response.';
       return;
     }
 
