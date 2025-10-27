@@ -128,6 +128,43 @@ const shiftRiskTier = (baseTier, shift = 0) => {
   return RISK_TIER_ORDER[targetIndex];
 };
 
+const clampDistrictMetric = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  if (numeric < 0) {
+    return 0;
+  }
+  if (numeric > 100) {
+    return 100;
+  }
+  return Math.round(numeric);
+};
+
+const cloneDistrictIntel = (intel) => {
+  if (!intel || typeof intel !== 'object') {
+    return null;
+  }
+
+  const influence = clampDistrictMetric(intel.influence);
+  const intelLevel = clampDistrictMetric(intel.intelLevel);
+  const crackdownPressure = clampDistrictMetric(intel.crackdownPressure);
+
+  const snapshot = {};
+  if (influence !== null) {
+    snapshot.influence = influence;
+  }
+  if (intelLevel !== null) {
+    snapshot.intelLevel = intelLevel;
+  }
+  if (crackdownPressure !== null) {
+    snapshot.crackdownPressure = crackdownPressure;
+  }
+
+  return Object.keys(snapshot).length ? snapshot : null;
+};
+
 const applyNotorietyModifiersToMission = (missionValues, notorietyProfile, crackdownPolicy) => {
   if (!notorietyProfile) {
     return {
@@ -938,6 +975,134 @@ class MissionSystem {
     this.applyHeatRestrictions();
   }
 
+  getMissionDistrict(source) {
+    if (!source) {
+      return null;
+    }
+
+    const districts = this.state?.city?.districts;
+    if (!Array.isArray(districts)) {
+      return null;
+    }
+
+    const districtId = source.districtId ?? null;
+    if (districtId) {
+      const match = districts.find((district) => district?.id === districtId);
+      if (match) {
+        return match;
+      }
+    }
+
+    const districtName = typeof source.districtName === 'string' ? source.districtName.trim() : '';
+    if (districtName) {
+      const normalized = districtName.toLowerCase();
+      return (
+        districts.find((district) => (district?.name ?? '').trim().toLowerCase() === normalized) ?? null
+      );
+    }
+
+    return null;
+  }
+
+  getDistrictIntelSnapshot(source) {
+    const district = this.getMissionDistrict(source ?? {});
+    if (district && typeof district.getIntelSnapshot === 'function') {
+      return district.getIntelSnapshot();
+    }
+
+    return cloneDistrictIntel(source?.districtIntel ?? null);
+  }
+
+  cloneTemplateForQueue(template) {
+    if (!template) {
+      return null;
+    }
+
+    const stored = this.templateMap.get(template.id);
+    const reference = stored ?? template;
+
+    const pointOfInterest =
+      typeof reference.pointOfInterest === 'object' && reference.pointOfInterest !== null
+        ? {
+            ...reference.pointOfInterest,
+            modifiers:
+              typeof reference.pointOfInterest.modifiers === 'object' &&
+              reference.pointOfInterest.modifiers !== null
+                ? { ...reference.pointOfInterest.modifiers }
+                : undefined,
+          }
+        : null;
+
+    const storyline =
+      typeof reference.storyline === 'object' && reference.storyline !== null
+        ? { ...reference.storyline }
+        : undefined;
+
+    const crackdownEffects =
+      typeof reference.crackdownEffects === 'object' && reference.crackdownEffects !== null
+        ? { ...reference.crackdownEffects }
+        : undefined;
+
+    const falloutRecovery =
+      typeof reference.falloutRecovery === 'object' && reference.falloutRecovery !== null
+        ? { ...reference.falloutRecovery }
+        : undefined;
+
+    const districtIntel = this.getDistrictIntelSnapshot(reference);
+
+    return {
+      ...reference,
+      pointOfInterest,
+      storyline,
+      crackdownEffects,
+      falloutRecovery,
+      districtIntel,
+    };
+  }
+
+  updateCachedDistrictIntel(districtId, snapshot) {
+    if (!districtId) {
+      return;
+    }
+
+    const sanitized = cloneDistrictIntel(snapshot);
+    if (!sanitized) {
+      return;
+    }
+
+    this.availableMissions.forEach((mission) => {
+      if (mission?.districtId === districtId) {
+        mission.districtIntel = { ...sanitized };
+      }
+    });
+
+    this.contractPool = this.contractPool.map((template) => {
+      if (template?.districtId === districtId) {
+        return { ...template, districtIntel: { ...sanitized } };
+      }
+      return template;
+    });
+
+    const updatedTemplates = new Map();
+    for (const [key, template] of this.templateMap.entries()) {
+      if (template?.districtId === districtId) {
+        const updated = { ...template, districtIntel: { ...sanitized } };
+        this.templateMap.set(key, updated);
+        updatedTemplates.set(key, updated);
+      }
+    }
+
+    this.missionTemplates = this.missionTemplates.map((template) => {
+      if (template?.districtId !== districtId) {
+        return template;
+      }
+      if (template?.id && updatedTemplates.has(template.id)) {
+        return updatedTemplates.get(template.id);
+      }
+      return { ...template, districtIntel: { ...sanitized } };
+    });
+  }
+
   registerTemplate(template) {
     if (!template || !template.id) {
       return;
@@ -971,6 +1136,10 @@ class MissionSystem {
       }
       if (template.crackdownTier) {
         storedTemplate.crackdownTier = template.crackdownTier;
+      }
+      const districtIntel = this.getDistrictIntelSnapshot(template);
+      if (districtIntel) {
+        storedTemplate.districtIntel = districtIntel;
       }
       this.templateMap.set(template.id, storedTemplate);
       this.missionTemplates.push(storedTemplate);
@@ -1042,6 +1211,8 @@ class MissionSystem {
         ? template.vehicle
         : { model: 'Target Vehicle' };
 
+    const districtIntel = this.getDistrictIntelSnapshot(template);
+
     return {
       ...template,
       pointOfInterest,
@@ -1089,6 +1260,9 @@ class MissionSystem {
       eventDeck: [],
       eventHistory: [],
       pendingDecision: null,
+      districtIntel,
+      districtIntelBefore: null,
+      districtIntelAfter: null,
     };
   }
 
@@ -1115,7 +1289,8 @@ class MissionSystem {
       const alreadyAvailable = this.availableMissions.some((mission) => mission.id === template.id);
       const alreadyQueued = this.contractPool.some((mission) => mission.id === template.id);
       if (!alreadyAvailable && !alreadyQueued) {
-        this.contractPool.push({ ...template });
+        const sanitizedTemplate = this.cloneTemplateForQueue(template);
+        this.contractPool.push(sanitizedTemplate ?? { ...template });
       }
     });
   }
@@ -1813,6 +1988,9 @@ class MissionSystem {
     if (extras?.notorietySummary) {
       summary = `${summary} — ${extras.notorietySummary}`;
     }
+    if (extras?.districtSummary) {
+      summary = `${summary} — ${extras.districtSummary}`;
+    }
 
     const clonedFallout = falloutEntries.map((entry) => ({ ...entry }));
     const clonedFollowUps = followUpEntries.map((entry) => ({ ...entry }));
@@ -1826,6 +2004,8 @@ class MissionSystem {
       fallout: clonedFallout,
       followUps: clonedFollowUps,
       debtSettlements: debtSettlementEntries.map((entry) => ({ ...entry })),
+      districtIntelBefore: mission.districtIntelBefore ? { ...mission.districtIntelBefore } : null,
+      districtIntelAfter: mission.districtIntelAfter ? { ...mission.districtIntelAfter } : null,
     };
     mission.pendingResolution = null;
     mission.resolutionRoll = roll;
@@ -1862,6 +2042,7 @@ class MissionSystem {
       storylineSummary: extras?.storylineSummary ?? null,
       crackdownSummary: extras?.crackdownSummary ?? null,
       notorietySummary: extras?.notorietySummary ?? null,
+      districtSummary: extras?.districtSummary ?? null,
       debtSettlements: debtSettlementEntries.map((entry) => ({ ...entry })),
     };
 
@@ -2360,6 +2541,13 @@ class MissionSystem {
 
     const crackdownPolicy = this.getCurrentCrackdownPolicy();
 
+    const missionDistrict = this.getMissionDistrict(mission);
+    const liveDistrictIntel =
+      missionDistrict && typeof missionDistrict.getIntelSnapshot === 'function'
+        ? missionDistrict.getIntelSnapshot()
+        : null;
+    const districtIntelBefore = liveDistrictIntel ?? cloneDistrictIntel(mission.districtIntel);
+
     const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
     const assignedCrew = crewPool.filter((member) => mission.assignedCrewIds?.includes(member.id));
     const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
@@ -2386,6 +2574,7 @@ class MissionSystem {
     let queuedFollowUps = [];
     let storylineOutcome = null;
     let crackdownOutcome = null;
+    let districtSummary = null;
 
     const debtSettlements = [];
 
@@ -2718,6 +2907,58 @@ class MissionSystem {
       mission.notorietyAfter = notorietyAfter;
     }
 
+    if (missionDistrict && typeof missionDistrict.applyMissionOutcome === 'function') {
+      const shift = missionDistrict.applyMissionOutcome(outcome, {
+        difficulty: mission.baseDifficulty ?? mission.difficulty,
+        heat: mission.baseHeat ?? mission.heat,
+        payout: mission.basePayout ?? mission.payout,
+        notorietyDelta: notorietyChange ?? 0,
+      });
+      const afterSnapshot = shift?.after ?? missionDistrict.getIntelSnapshot?.() ?? null;
+      const beforeSnapshot = shift?.before ?? districtIntelBefore ?? null;
+
+      if (afterSnapshot) {
+        mission.districtIntelAfter = { ...afterSnapshot };
+        mission.districtIntel = { ...afterSnapshot };
+        const targetDistrictId = missionDistrict?.id ?? mission.districtId;
+        this.updateCachedDistrictIntel(targetDistrictId, afterSnapshot);
+      }
+
+      if (beforeSnapshot) {
+        mission.districtIntelBefore = { ...beforeSnapshot };
+      }
+
+      const summaryParts = [];
+      const recordDelta = (label, key, invert = false) => {
+        const beforeValue = beforeSnapshot?.[key];
+        const afterValue = afterSnapshot?.[key];
+        if (!Number.isFinite(beforeValue) || !Number.isFinite(afterValue)) {
+          return;
+        }
+        const difference = afterValue - beforeValue;
+        if (!difference) {
+          return;
+        }
+        const adjustedDifference = invert ? -difference : difference;
+        const formattedDelta =
+          adjustedDifference > 0
+            ? `+${Math.round(adjustedDifference)}`
+            : Math.round(adjustedDifference).toString();
+        summaryParts.push(`${label} ${formattedDelta}`);
+      };
+
+      recordDelta('Influence', 'influence');
+      recordDelta('Intel', 'intelLevel');
+      recordDelta('Crackdown', 'crackdownPressure', true);
+
+      if (summaryParts.length) {
+        const districtLabel = missionDistrict.name ?? mission.districtName ?? 'District';
+        districtSummary = `${districtLabel} — ${summaryParts.join(', ')}`;
+      }
+    } else if (districtIntelBefore) {
+      mission.districtIntelBefore = { ...districtIntelBefore };
+    }
+
     let vehicleReport = null;
     if (assignedVehicle) {
       const wearAmount = (() => {
@@ -2852,6 +3093,9 @@ class MissionSystem {
     if (notorietyChange !== 0) {
       const formattedChange = notorietyChange > 0 ? `+${notorietyChange.toFixed(1)}` : notorietyChange.toFixed(1);
       telemetryExtras.notorietySummary = `Notoriety ${formattedChange} (now ${notorietyAfter.toFixed(1)})`;
+    }
+    if (districtSummary) {
+      telemetryExtras.districtSummary = districtSummary;
     }
 
     this.recordMissionTelemetry(mission, outcome, telemetryExtras);
