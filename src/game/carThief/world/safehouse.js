@@ -408,10 +408,25 @@ const getActiveSafehouseFromState = (state) => {
   return safehouse;
 };
 
+const getActiveStorageCapacityFromState = (state) => {
+  const safehouse = getActiveSafehouseFromState(state);
+  if (!safehouse || typeof safehouse.getStorageCapacity !== 'function') {
+    return null;
+  }
+
+  const capacity = safehouse.getStorageCapacity();
+  if (!Number.isFinite(capacity) || capacity < 0) {
+    return null;
+  }
+
+  return capacity;
+};
+
 export {
   Safehouse,
   SafehouseCollection,
   DEFAULT_SAFEHOUSES,
   createDefaultSafehouseCollection,
   getActiveSafehouseFromState,
+  getActiveStorageCapacityFromState,
 };
