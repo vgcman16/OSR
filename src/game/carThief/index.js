@@ -137,6 +137,21 @@ const createCarThiefGame = ({ canvas, context }) => {
           outcomeLabel = 'Success';
         } else if (lastVehicleReport.outcome === 'failure') {
           outcomeLabel = 'Failure';
+        } else if (lastVehicleReport.outcome === 'sale') {
+          const fundsLabel = Number.isFinite(lastVehicleReport.fundsDelta)
+            ? formatExpense(lastVehicleReport.fundsDelta)
+            : formatExpense(lastVehicleReport.salePrice);
+          outcomeLabel = `Sold (${fundsLabel})`;
+        } else if (lastVehicleReport.outcome === 'scrap') {
+          const fundsLabel = Number.isFinite(lastVehicleReport.fundsDelta)
+            ? formatExpense(lastVehicleReport.fundsDelta)
+            : formatExpense(lastVehicleReport.scrapValue);
+          const partsLabel = Number.isFinite(lastVehicleReport.partsRecovered)
+            ? `${lastVehicleReport.partsRecovered} parts`
+            : null;
+          outcomeLabel = ['Scrapped', partsLabel, fundsLabel ? `+${fundsLabel}` : null]
+            .filter(Boolean)
+            .join(' ');
         } else if (lastVehicleReport.outcome === 'maintenance') {
           const serviceType = lastVehicleReport.maintenanceType;
           if (serviceType === 'repair') {

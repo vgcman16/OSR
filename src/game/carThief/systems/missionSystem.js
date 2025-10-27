@@ -36,6 +36,41 @@ const GARAGE_MAINTENANCE_CONFIG = {
   },
 };
 
+const DEFAULT_DISPOSITION_CONFIG = {
+  saleMultiplier: 0.68,
+  scrapMultiplier: 0.32,
+  partsPerTenThousandValue: 3,
+};
+
+const normalizeFunds = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 0;
+};
+
+const computeVehicleBaseValue = (vehicle) => {
+  if (!vehicle || typeof vehicle !== 'object') {
+    return 0;
+  }
+
+  const explicitValue = Number(vehicle.baseValue);
+  if (Number.isFinite(explicitValue) && explicitValue > 0) {
+    return explicitValue;
+  }
+
+  const topSpeed = Number(vehicle.topSpeed);
+  const acceleration = Number(vehicle.acceleration);
+  const handling = Number(vehicle.handling);
+
+  const normalizedSpeed = Number.isFinite(topSpeed) ? topSpeed : 110;
+  const normalizedAcceleration = Number.isFinite(acceleration) ? acceleration : 5.5;
+  const normalizedHandling = Number.isFinite(handling) ? handling : 6;
+
+  const performanceScore =
+    normalizedSpeed * 85 + normalizedAcceleration * 1150 + normalizedHandling * 850;
+
+  return Math.max(5500, Math.round(performanceScore));
+};
+
 const sanitizeDuration = (durationValue, difficultyValue) => {
   const numericDuration = coerceFiniteNumber(durationValue, NaN);
   const numericDifficulty = coerceFiniteNumber(difficultyValue, 1);
@@ -1096,6 +1131,191 @@ class MissionSystem {
 
   reduceVehicleHeat(vehicleId, economySystem, overrides = {}) {
     return this.performMaintenance(vehicleId, 'heat', economySystem, overrides);
+  }
+
+  estimateVehicleDisposition(vehicleOrId, overrides = {}) {
+    const vehicle =
+      typeof vehicleOrId === 'object' && vehicleOrId !== null
+        ? vehicleOrId
+        : this.getVehicleFromGarage(vehicleOrId);
+
+    if (!vehicle) {
+      return {
+        success: false,
+        reason: 'vehicle-not-found',
+        vehicleId: typeof vehicleOrId === 'object' ? vehicleOrId?.id ?? null : vehicleOrId,
+      };
+    }
+
+    const config = {
+      ...DEFAULT_DISPOSITION_CONFIG,
+      ...(overrides ?? {}),
+    };
+
+    const baseValueOverride = Number(config.baseValue);
+    const baseValue = Number.isFinite(baseValueOverride) && baseValueOverride > 0
+      ? Math.round(baseValueOverride)
+      : computeVehicleBaseValue(vehicle);
+
+    const condition = Number.isFinite(vehicle.condition) ? clamp(vehicle.condition, 0, 1) : 1;
+
+    const saleMultiplier = Number.isFinite(config.saleMultiplier) ? config.saleMultiplier : 0.68;
+    const scrapMultiplier = Number.isFinite(config.scrapMultiplier) ? config.scrapMultiplier : 0.32;
+
+    const saleValue = normalizeFunds(baseValue * condition * Math.max(0, saleMultiplier));
+    const scrapValue = normalizeFunds(baseValue * condition * Math.max(0, scrapMultiplier));
+
+    const partsFactor = Number.isFinite(config.partsPerTenThousandValue)
+      ? Math.max(0, config.partsPerTenThousandValue)
+      : DEFAULT_DISPOSITION_CONFIG.partsPerTenThousandValue;
+
+    const partsRecovered = Math.max(
+      0,
+      Math.round(((baseValue / 10000) * condition * partsFactor) || 0),
+    );
+
+    return {
+      success: true,
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      baseValue,
+      condition,
+      saleValue,
+      scrapValue,
+      partsRecovered,
+    };
+  }
+
+  sellVehicle(vehicleId, overrides = {}) {
+    const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
+    const vehicleIndex = garage.findIndex((vehicle) => vehicle?.id === vehicleId);
+
+    if (vehicleIndex === -1) {
+      return { success: false, reason: 'vehicle-not-found', vehicleId };
+    }
+
+    const vehicle = garage[vehicleIndex];
+    const statusLabel = (vehicle.status ?? '').toLowerCase();
+    const vehicleInUse = Boolean(vehicle.inUse) || statusLabel === 'in-mission';
+    const activeMissionVehicleId = this.state?.activeMission?.assignedVehicleId ?? null;
+
+    if (vehicleInUse || activeMissionVehicleId === vehicleId) {
+      return { success: false, reason: 'vehicle-in-use', vehicleId };
+    }
+
+    const disposition = this.estimateVehicleDisposition(vehicle, overrides);
+    const saleOverride = Number(overrides?.salePrice);
+    const salePrice = Number.isFinite(saleOverride) && saleOverride >= 0
+      ? Math.round(saleOverride)
+      : disposition.saleValue;
+
+    garage.splice(vehicleIndex, 1);
+
+    if (!Number.isFinite(this.state?.funds)) {
+      this.state.funds = 0;
+    }
+
+    const payout = Math.max(0, salePrice);
+    this.state.funds += payout;
+
+    const conditionBefore = Number.isFinite(vehicle.condition)
+      ? clamp(vehicle.condition, 0, 1)
+      : null;
+    const heatBefore = Number.isFinite(vehicle.heat) ? vehicle.heat : null;
+
+    this.state.lastVehicleReport = {
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      outcome: 'sale',
+      salePrice: payout,
+      fundsDelta: payout,
+      conditionBefore,
+      conditionAfter: null,
+      conditionDelta: null,
+      heatBefore,
+      heatAfter: null,
+      heatDelta: null,
+      timestamp: Date.now(),
+    };
+
+    return {
+      success: true,
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      salePrice: payout,
+      fundsDelta: payout,
+      condition: conditionBefore,
+    };
+  }
+
+  dismantleVehicle(vehicleId, overrides = {}) {
+    const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
+    const vehicleIndex = garage.findIndex((vehicle) => vehicle?.id === vehicleId);
+
+    if (vehicleIndex === -1) {
+      return { success: false, reason: 'vehicle-not-found', vehicleId };
+    }
+
+    const vehicle = garage[vehicleIndex];
+    const statusLabel = (vehicle.status ?? '').toLowerCase();
+    const vehicleInUse = Boolean(vehicle.inUse) || statusLabel === 'in-mission';
+    const activeMissionVehicleId = this.state?.activeMission?.assignedVehicleId ?? null;
+
+    if (vehicleInUse || activeMissionVehicleId === vehicleId) {
+      return { success: false, reason: 'vehicle-in-use', vehicleId };
+    }
+
+    const disposition = this.estimateVehicleDisposition(vehicle, overrides);
+
+    const scrapOverride = Number(overrides?.scrapValue);
+    const scrapValue = Number.isFinite(scrapOverride) && scrapOverride >= 0
+      ? Math.round(scrapOverride)
+      : disposition.scrapValue;
+
+    const partsOverride = Number(overrides?.partsRecovered);
+    const partsRecovered = Number.isFinite(partsOverride) && partsOverride >= 0
+      ? Math.round(partsOverride)
+      : disposition.partsRecovered;
+
+    garage.splice(vehicleIndex, 1);
+
+    if (!Number.isFinite(this.state?.funds)) {
+      this.state.funds = 0;
+    }
+
+    const payout = Math.max(0, scrapValue);
+    this.state.funds += payout;
+
+    const conditionBefore = Number.isFinite(vehicle.condition)
+      ? clamp(vehicle.condition, 0, 1)
+      : null;
+    const heatBefore = Number.isFinite(vehicle.heat) ? vehicle.heat : null;
+
+    this.state.lastVehicleReport = {
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      outcome: 'scrap',
+      scrapValue: payout,
+      partsRecovered,
+      fundsDelta: payout,
+      conditionBefore,
+      conditionAfter: null,
+      conditionDelta: null,
+      heatBefore,
+      heatAfter: null,
+      heatDelta: null,
+      timestamp: Date.now(),
+    };
+
+    return {
+      success: true,
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      scrapValue: payout,
+      partsRecovered,
+      fundsDelta: payout,
+      condition: conditionBefore,
+    };
   }
 
   update(delta) {
