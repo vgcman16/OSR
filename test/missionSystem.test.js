@@ -15,6 +15,8 @@ const createState = () => ({
   activeMission: null,
   heatTier: 'calm',
   missionLog: [],
+  crew: [],
+  pendingDebts: [],
 });
 
 const resolvePendingDecisions = (missionSystem, mission) => {
@@ -163,10 +165,16 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
   assert.equal(firstMission.outcome, 'success', 'mission outcome is determined by the success roll');
   assert.equal(state.activeMission, null, 'active mission clears from the game state after auto resolution');
   assert.equal(firstMission.progress, 1, 'mission progress reaches 100% when duration elapses');
+  const settledDebtTotal = Array.isArray(firstMission.debtSettlements)
+    ? firstMission.debtSettlements.reduce(
+        (total, entry) => total + (Number.isFinite(entry?.amount) ? entry.amount : 0),
+        0,
+      )
+    : 0;
   assert.equal(
     state.funds,
-    fundsBeforeResolution + firstMission.payout,
-    'successful missions pay out funds',
+    fundsBeforeResolution + firstMission.payout - settledDebtTotal,
+    'successful missions pay out funds after clearing pending debts',
   );
   assert.equal(
     state.heat,
@@ -296,6 +304,105 @@ test('mission event deck favors low-risk events for easier contracts', () => {
   if (weightedEntry) {
     assert.ok(weightedEntry.selectionWeight > 1, 'low-risk event gains weight for matching context');
   }
+});
+
+test('future debt event effects deduct from next successful mission payout', (t) => {
+  const state = createState();
+  const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
+
+  const template = {
+    id: 'future-debt-check',
+    name: 'Future Debt Check',
+    difficulty: 1,
+    payout: 5000,
+    heat: 1,
+    duration: 20,
+  };
+
+  const mission = missionSystem.createMissionFromTemplate(template);
+  missionSystem.availableMissions = [mission];
+  mission.status = 'decision-required';
+  mission.progress = 0.25;
+  mission.eventDeck = [
+    {
+      id: 'favor-marker',
+      label: 'Favor Marker',
+      triggerProgress: 0,
+      resolved: false,
+      choices: [
+        {
+          id: 'take-debt',
+          label: 'Take on the marker',
+          description: 'Promise a favor to pull in backup later.',
+          effects: {
+            futureDebt: {
+              amount: 2000,
+            },
+          },
+        },
+      ],
+    },
+  ];
+
+  mission.pendingDecision = {
+    eventId: 'favor-marker',
+    label: 'Favor Marker',
+    description: 'A fixer offers emergency support — with strings attached.',
+    triggerProgress: 0,
+    triggeredAt: 111_111,
+    poiContext: null,
+    choices: mission.eventDeck[0].choices.map((choice) => ({
+      id: choice.id,
+      label: choice.label,
+      description: choice.description,
+      narrative: choice.narrative ?? null,
+      effects: { ...choice.effects },
+    })),
+  };
+
+  state.activeMission = mission;
+
+  const originalNow = Date.now;
+  Date.now = () => 222_222;
+  t.after(() => {
+    Date.now = originalNow;
+  });
+
+  const resolution = missionSystem.chooseMissionEventOption('favor-marker', 'take-debt');
+  assert.ok(resolution, 'future debt choice resolves successfully');
+
+  assert.equal(state.pendingDebts.length, 1, 'future debt queues a pending debt');
+  const pendingDebt = state.pendingDebts[0];
+  assert.equal(pendingDebt.amount, 2000, 'debt stores the original amount');
+  assert.equal(pendingDebt.remaining, 2000, 'debt tracks the remaining balance');
+  assert.equal(pendingDebt.sourceEventId, 'favor-marker', 'debt records the source event id');
+  assert.equal(pendingDebt.sourceChoiceId, 'take-debt', 'debt records the source choice id');
+
+  mission.status = 'awaiting-resolution';
+  mission.progress = 1;
+  mission.elapsedTime = mission.duration;
+
+  const fundsBefore = state.funds;
+  const resolvedMission = missionSystem.resolveMission(mission.id, 'success');
+  assert.ok(resolvedMission, 'mission resolves successfully after debt is applied');
+
+  assert.equal(state.pendingDebts.length, 0, 'paid debts are removed from the queue');
+  assert.equal(
+    state.funds,
+    fundsBefore + (template.payout - 2000),
+    'mission payout applies after deducting the pending debt',
+  );
+
+  const lastLog = state.missionLog[state.missionLog.length - 1];
+  assert.ok(lastLog, 'mission log entry is recorded');
+  assert.ok(
+    lastLog.summary.includes('Debts settled'),
+    'mission summary references the debt settlement for player feedback',
+  );
+  assert.ok(Array.isArray(lastLog.debtSettlements), 'mission log captures debt settlement details');
+  assert.equal(lastLog.debtSettlements[0].amount, 2000, 'log reflects settled debt amount');
+  assert.ok(lastLog.debtSettlements[0].fullySettled, 'log marks the debt as cleared');
 });
 
 test('crew fatigue blocks overwork and recovers on daily ticks', (t) => {

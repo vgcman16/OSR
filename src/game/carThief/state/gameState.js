@@ -20,6 +20,7 @@ class GameState {
     lastVehicleReport = null,
     recruitPool = [],
     lastExpenseReport = null,
+    pendingDebts = [],
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -45,6 +46,7 @@ class GameState {
     this.lastVehicleReport = lastVehicleReport;
     this.recruitPool = Array.isArray(recruitPool) ? recruitPool : [];
     this.lastExpenseReport = lastExpenseReport;
+    this.pendingDebts = Array.isArray(pendingDebts) ? pendingDebts : [];
   }
 }
 
@@ -126,6 +128,7 @@ const createInitialGameState = () => {
       }),
     ],
     lastExpenseReport: null,
+    pendingDebts: [],
   });
 };
 
