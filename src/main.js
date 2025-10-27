@@ -1,6 +1,10 @@
 import { createCarThiefGame } from './game/carThief/index.js';
 import { CrewMember } from './game/carThief/entities/crewMember.js';
-import { GARAGE_MAINTENANCE_CONFIG } from './game/carThief/systems/missionSystem.js';
+import {
+  GARAGE_MAINTENANCE_CONFIG,
+  PLAYER_SKILL_CONFIG,
+  PLAYER_GEAR_CATALOG,
+} from './game/carThief/systems/missionSystem.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
 
 let gameInstance = null;
@@ -30,6 +34,7 @@ const missionControls = {
   detailSuccess: null,
   detailRestriction: null,
   detailCrewImpact: null,
+  detailPlayerImpact: null,
   crewList: null,
   vehicleList: null,
   crackdownText: null,
@@ -41,6 +46,12 @@ const missionControls = {
   trainingLoyaltyButton: null,
   trainingSpecialtyButton: null,
   trainingStatus: null,
+  playerStatsList: null,
+  playerSkillSelect: null,
+  playerSkillButton: null,
+  playerGearSelect: null,
+  playerGearButton: null,
+  playerStatus: null,
   maintenanceRepairButton: null,
   maintenanceHeatButton: null,
   maintenanceStatus: null,
@@ -67,6 +78,20 @@ const SPECIALTY_OPTIONS = [
   { value: 'tactician', label: 'Tactician — choreograph operations' },
   { value: 'spotter', label: 'Spotter — relay recon intel' },
 ];
+
+const PLAYER_SKILL_OPTIONS = Object.values(PLAYER_SKILL_CONFIG).map((entry) => ({
+  value: entry.key,
+  label: `${entry.label} — ${entry.description}`,
+  cost: entry.trainingCost,
+  maxLevel: entry.maxLevel ?? 6,
+  baseLevel: entry.baseLevel ?? 1,
+})).sort((a, b) => a.label.localeCompare(b.label));
+
+const PLAYER_GEAR_OPTIONS = Object.values(PLAYER_GEAR_CATALOG).map((entry) => ({
+  value: entry.id,
+  label: `${entry.label} — ${entry.description}`,
+  cost: entry.cost,
+})).sort((a, b) => a.label.localeCompare(b.label));
 
 const LOYALTY_TRAINING_COST = 2000;
 const SPECIALTY_TRAINING_COST = 3500;
@@ -105,6 +130,7 @@ const setMissionDetails = ({
   success,
   restriction,
   crewImpact,
+  playerImpact,
 }) => {
   const {
     detailDescription,
@@ -114,6 +140,7 @@ const setMissionDetails = ({
     detailSuccess,
     detailRestriction,
     detailCrewImpact,
+    detailPlayerImpact,
   } = missionControls;
 
   if (
@@ -124,7 +151,8 @@ const setMissionDetails = ({
       detailDuration &&
       detailSuccess &&
       detailRestriction &&
-      detailCrewImpact
+      detailCrewImpact &&
+      detailPlayerImpact
     )
   ) {
     return;
@@ -144,6 +172,16 @@ const setMissionDetails = ({
     item.textContent = line;
     detailCrewImpact.appendChild(item);
   });
+
+  detailPlayerImpact.innerHTML = '';
+  const playerItems = Array.isArray(playerImpact)
+    ? playerImpact
+    : [playerImpact ?? 'Player influence steady.'];
+  playerItems.forEach((line) => {
+    const item = document.createElement('li');
+    item.textContent = line;
+    detailPlayerImpact.appendChild(item);
+  });
 };
 
 const resetMissionDetails = (descriptionText) => {
@@ -155,6 +193,7 @@ const resetMissionDetails = (descriptionText) => {
     success: '—',
     restriction: 'All contracts are currently open.',
     crewImpact: ['No crew assigned.', 'No vehicle selected.'],
+    playerImpact: ['Player expertise steady — train to unlock bonuses.'],
   });
 };
 
@@ -319,6 +358,14 @@ const setTrainingStatus = (message) => {
   }
 
   missionControls.trainingStatus.textContent = message ?? '';
+};
+
+const setPlayerStatus = (message) => {
+  if (!missionControls.playerStatus) {
+    return;
+  }
+
+  missionControls.playerStatus.textContent = message ?? '';
 };
 
 const clearMaintenanceStatusDetail = () => {
@@ -1028,6 +1075,349 @@ const handleSpecialtyTraining = () => {
   triggerHudRender();
 };
 
+const describePlayerSkillLevel = (skillKey, levelValue) => {
+  const config = PLAYER_SKILL_CONFIG[skillKey];
+  if (!config) {
+    return null;
+  }
+
+  const safeLevel = Number.isFinite(levelValue) ? levelValue : config.baseLevel ?? 1;
+  const baseLevel = Number.isFinite(config.baseLevel) ? config.baseLevel : 1;
+  const aboveBase = Math.max(0, safeLevel - baseLevel);
+  const effects = config.effects ?? {};
+  const adjustments = [];
+
+  if (effects.durationReductionPerLevel) {
+    const cap = Math.max(0, effects.durationReductionCap ?? effects.durationReductionPerLevel * 4);
+    const total = Math.min(cap, aboveBase * effects.durationReductionPerLevel);
+    if (total > 0) {
+      adjustments.push(`${Math.round(total * 100)}% faster`);
+    }
+  }
+
+  if (effects.payoutBonusPerLevel) {
+    const cap = Math.max(0, effects.payoutBonusCap ?? effects.payoutBonusPerLevel * 4);
+    const total = Math.min(cap, aboveBase * effects.payoutBonusPerLevel);
+    if (total > 0) {
+      adjustments.push(`${Math.round(total * 100)}% more payout`);
+    }
+  }
+
+  if (effects.successBonusPerLevel) {
+    const cap = Math.max(0, effects.successBonusCap ?? effects.successBonusPerLevel * 6);
+    const total = Math.min(cap, aboveBase * effects.successBonusPerLevel);
+    if (total > 0) {
+      adjustments.push(`+${Math.round(total * 100)}% success`);
+    }
+  }
+
+  if (effects.heatReductionPerLevel) {
+    const cap = Math.max(0, effects.heatReductionCap ?? effects.heatReductionPerLevel * 4);
+    const total = Math.min(cap, aboveBase * effects.heatReductionPerLevel);
+    if (total > 0) {
+      adjustments.push(`${Math.round(total * 100)}% less heat`);
+    }
+  }
+
+  const label = `${config.label} L${safeLevel}`;
+  return adjustments.length ? `${label} — ${adjustments.join(', ')}` : `${label} — steady influence`;
+};
+
+const updatePlayerDevelopmentPanel = () => {
+  const {
+    playerStatsList,
+    playerSkillSelect,
+    playerSkillButton,
+    playerGearSelect,
+    playerGearButton,
+  } = missionControls;
+
+  if (!playerStatsList || !playerSkillSelect || !playerSkillButton || !playerGearSelect || !playerGearButton) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const player = state?.player ?? null;
+  const funds = Number.isFinite(state?.funds) ? state.funds : 0;
+
+  playerStatsList.innerHTML = '';
+
+  if (!player) {
+    const item = document.createElement('li');
+    item.textContent = 'Player profile unavailable.';
+    playerStatsList.appendChild(item);
+  } else {
+    const aliasItem = document.createElement('li');
+    aliasItem.textContent = `Alias: ${player.name ?? 'Unknown Driver'}`;
+    playerStatsList.appendChild(aliasItem);
+
+    const notorietyValue = Number.isFinite(player.notoriety) ? player.notoriety : 0;
+    const notorietyItem = document.createElement('li');
+    notorietyItem.textContent = `Notoriety: ${notorietyValue}`;
+    playerStatsList.appendChild(notorietyItem);
+
+    PLAYER_SKILL_OPTIONS.forEach((option) => {
+      const levelRaw = player?.skills?.[option.value];
+      const level = Number.isFinite(levelRaw) ? levelRaw : option.baseLevel;
+      const description = describePlayerSkillLevel(option.value, level);
+      const item = document.createElement('li');
+      item.textContent = description ?? `${option.label.split(' — ')[0]} — steady influence`;
+      playerStatsList.appendChild(item);
+    });
+
+    const gearItem = document.createElement('li');
+    const inventory = Array.isArray(player.inventory) ? [...new Set(player.inventory)] : [];
+    if (!inventory.length) {
+      gearItem.textContent = 'Gear: None equipped';
+    } else {
+      const gearLabels = inventory
+        .map((gearId) => PLAYER_GEAR_CATALOG[gearId]?.label ?? gearId)
+        .join(', ');
+      gearItem.textContent = `Gear: ${gearLabels}`;
+    }
+    playerStatsList.appendChild(gearItem);
+  }
+
+  const previousSkill = playerSkillSelect.value;
+  playerSkillSelect.innerHTML = '';
+  const skillPlaceholder = document.createElement('option');
+  skillPlaceholder.value = '';
+  skillPlaceholder.textContent = PLAYER_SKILL_OPTIONS.length
+    ? 'Select skill focus'
+    : 'No skills available';
+  skillPlaceholder.disabled = true;
+  skillPlaceholder.selected = true;
+  playerSkillSelect.appendChild(skillPlaceholder);
+
+  PLAYER_SKILL_OPTIONS.forEach((option) => {
+    const optionElement = document.createElement('option');
+    optionElement.value = option.value;
+    optionElement.textContent = option.label;
+    playerSkillSelect.appendChild(optionElement);
+  });
+
+  if (PLAYER_SKILL_OPTIONS.some((entry) => entry.value === previousSkill)) {
+    playerSkillSelect.value = previousSkill;
+    skillPlaceholder.selected = false;
+  } else if (PLAYER_SKILL_OPTIONS.length) {
+    playerSkillSelect.value = PLAYER_SKILL_OPTIONS[0].value;
+    skillPlaceholder.selected = false;
+  }
+
+  const selectedSkillOption = PLAYER_SKILL_OPTIONS.find((entry) => entry.value === playerSkillSelect.value) ?? null;
+  const selectedSkillConfig = selectedSkillOption ? PLAYER_SKILL_CONFIG[selectedSkillOption.value] : null;
+  const skillCost = Number.isFinite(selectedSkillOption?.cost) ? selectedSkillOption.cost : 0;
+  const maxLevel = Number.isFinite(selectedSkillOption?.maxLevel)
+    ? selectedSkillOption.maxLevel
+    : selectedSkillConfig?.maxLevel ?? 6;
+  const baseLevel = Number.isFinite(selectedSkillOption?.baseLevel)
+    ? selectedSkillOption.baseLevel
+    : selectedSkillConfig?.baseLevel ?? 1;
+  const currentSkillLevel = selectedSkillOption
+    ? Number.isFinite(player?.skills?.[selectedSkillOption.value])
+      ? player.skills[selectedSkillOption.value]
+      : baseLevel
+    : null;
+
+  const canTrainSkill = Boolean(missionSystem && economySystem && player && selectedSkillOption);
+  const skillAtCap = Number.isFinite(currentSkillLevel) && Number.isFinite(maxLevel)
+    ? currentSkillLevel >= maxLevel
+    : false;
+  playerSkillButton.disabled =
+    !canTrainSkill ||
+    skillAtCap ||
+    funds < skillCost;
+  if (!canTrainSkill || skillAtCap || funds < skillCost) {
+    playerSkillButton.title = !canTrainSkill
+      ? 'Player training unavailable.'
+      : skillAtCap
+        ? 'Skill already mastered.'
+        : 'Insufficient funds.';
+  } else {
+    playerSkillButton.removeAttribute('title');
+  }
+
+  if (selectedSkillOption && selectedSkillConfig) {
+    playerSkillButton.textContent = `Train ${selectedSkillConfig.label} (${formatCurrency(skillCost)})`;
+  } else {
+    playerSkillButton.textContent = 'Train Skill';
+  }
+
+  const previousGear = playerGearSelect.value;
+  playerGearSelect.innerHTML = '';
+  const gearPlaceholder = document.createElement('option');
+  gearPlaceholder.value = '';
+  gearPlaceholder.textContent = PLAYER_GEAR_OPTIONS.length
+    ? 'Select gear upgrade'
+    : 'No gear available';
+  gearPlaceholder.disabled = true;
+  gearPlaceholder.selected = true;
+  playerGearSelect.appendChild(gearPlaceholder);
+
+  PLAYER_GEAR_OPTIONS.forEach((option) => {
+    const optionElement = document.createElement('option');
+    optionElement.value = option.value;
+    const owned = Boolean(player && Array.isArray(player.inventory) && player.inventory.includes(option.value));
+    optionElement.textContent = owned ? `${option.label} (owned)` : option.label;
+    playerGearSelect.appendChild(optionElement);
+  });
+
+  if (PLAYER_GEAR_OPTIONS.some((entry) => entry.value === previousGear)) {
+    playerGearSelect.value = previousGear;
+    gearPlaceholder.selected = false;
+  } else if (PLAYER_GEAR_OPTIONS.length) {
+    playerGearSelect.value = PLAYER_GEAR_OPTIONS[0].value;
+    gearPlaceholder.selected = false;
+  }
+
+  const selectedGearOption = PLAYER_GEAR_OPTIONS.find((entry) => entry.value === playerGearSelect.value) ?? null;
+  const selectedGearConfig = selectedGearOption ? PLAYER_GEAR_CATALOG[selectedGearOption.value] : null;
+  const ownsSelectedGear = Boolean(
+    player &&
+      selectedGearOption &&
+      Array.isArray(player.inventory) &&
+      player.inventory.includes(selectedGearOption.value),
+  );
+  const gearCost = Number.isFinite(selectedGearOption?.cost) ? selectedGearOption.cost : 0;
+  const canAcquireGear = Boolean(missionSystem && economySystem && player && selectedGearOption);
+
+  playerGearButton.disabled =
+    !canAcquireGear ||
+    ownsSelectedGear ||
+    funds < gearCost;
+
+  if (!canAcquireGear) {
+    playerGearButton.title = 'Gear procurement unavailable.';
+  } else if (ownsSelectedGear) {
+    playerGearButton.title = 'Already equipped.';
+  } else if (funds < gearCost) {
+    playerGearButton.title = 'Insufficient funds.';
+  } else {
+    playerGearButton.removeAttribute('title');
+  }
+
+  if (selectedGearConfig) {
+    playerGearButton.textContent = `Acquire ${selectedGearConfig.label} (${formatCurrency(gearCost)})`;
+  } else {
+    playerGearButton.textContent = 'Acquire Gear';
+  }
+};
+
+const handlePlayerSkillTraining = () => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const select = missionControls.playerSkillSelect;
+
+  if (!missionSystem || !economySystem || !state || !select) {
+    setPlayerStatus('Player training systems unavailable.');
+    return;
+  }
+
+  const player = state.player;
+  if (!player) {
+    setPlayerStatus('Player profile unavailable.');
+    return;
+  }
+
+  const selectedValue = select.value;
+  const option = PLAYER_SKILL_OPTIONS.find((entry) => entry.value === selectedValue) ?? null;
+  const config = option ? PLAYER_SKILL_CONFIG[option.value] : null;
+  if (!option || !config) {
+    setPlayerStatus('Select a skill to train.');
+    return;
+  }
+
+  const cost = Number.isFinite(option.cost) ? option.cost : config.trainingCost ?? 0;
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  if (funds < cost) {
+    setPlayerStatus('Insufficient funds for skill training.');
+    return;
+  }
+
+  const baseLevel = Number.isFinite(config.baseLevel) ? config.baseLevel : 1;
+  const maxLevel = Number.isFinite(config.maxLevel) ? config.maxLevel : 6;
+  const currentLevelRaw = Number(player?.skills?.[option.value]);
+  const currentLevel = Number.isFinite(currentLevelRaw) ? currentLevelRaw : baseLevel;
+  if (currentLevel >= maxLevel) {
+    setPlayerStatus(`${config.label} is already mastered.`);
+    return;
+  }
+
+  economySystem.adjustFunds(-cost);
+  if (typeof player.improveSkill === 'function') {
+    player.improveSkill(option.value, 1);
+  } else {
+    if (!player.skills || typeof player.skills !== 'object') {
+      player.skills = {};
+    }
+    player.skills[option.value] = currentLevel + 1;
+  }
+
+  const newLevelRaw = Number(player.skills?.[option.value]);
+  const newLevel = Number.isFinite(newLevelRaw) ? newLevelRaw : currentLevel + 1;
+  setPlayerStatus(`${config.label} rises to L${newLevel}.`);
+  updatePlayerDevelopmentPanel();
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handlePlayerGearAcquisition = () => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const select = missionControls.playerGearSelect;
+
+  if (!missionSystem || !economySystem || !state || !select) {
+    setPlayerStatus('Gear procurement unavailable.');
+    return;
+  }
+
+  const player = state.player;
+  if (!player) {
+    setPlayerStatus('Player profile unavailable.');
+    return;
+  }
+
+  const selectedValue = select.value;
+  const option = PLAYER_GEAR_OPTIONS.find((entry) => entry.value === selectedValue) ?? null;
+  const config = option ? PLAYER_GEAR_CATALOG[option.value] : null;
+  if (!option || !config) {
+    setPlayerStatus('Select gear to acquire.');
+    return;
+  }
+
+  const cost = Number.isFinite(option.cost) ? option.cost : config.cost ?? 0;
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  if (funds < cost) {
+    setPlayerStatus('Insufficient funds for this gear.');
+    return;
+  }
+
+  const alreadyOwned = Array.isArray(player.inventory) && player.inventory.includes(config.id);
+  if (alreadyOwned) {
+    setPlayerStatus(`${config.label} is already equipped.`);
+    return;
+  }
+
+  economySystem.adjustFunds(-cost);
+  if (typeof player.addInventoryItem === 'function') {
+    player.addInventoryItem(config.id);
+  } else {
+    if (!Array.isArray(player.inventory)) {
+      player.inventory = [];
+    }
+    player.inventory.push(config.id);
+  }
+
+  setPlayerStatus(`${config.label} added to your kit.`);
+  updatePlayerDevelopmentPanel();
+  updateMissionControls();
+  triggerHudRender();
+};
+
 const updateCrewSelectionOptions = () => {
   const crewContainer = missionControls.crewList;
   if (!crewContainer) {
@@ -1442,6 +1832,7 @@ const updateMissionControls = () => {
     detailSuccess,
     detailRestriction,
     detailCrewImpact,
+    detailPlayerImpact,
     crewList,
     vehicleList,
     crackdownText,
@@ -1454,6 +1845,12 @@ const updateMissionControls = () => {
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
+    playerStatsList,
+    playerSkillSelect,
+    playerSkillButton,
+    playerGearSelect,
+    playerGearButton,
+    playerStatus,
   } = missionControls;
 
   const controls = [select, startButton];
@@ -1465,6 +1862,7 @@ const updateMissionControls = () => {
     detailSuccess,
     detailRestriction,
     detailCrewImpact,
+    detailPlayerImpact,
     crewList,
     vehicleList,
     crackdownText,
@@ -1477,6 +1875,12 @@ const updateMissionControls = () => {
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
+    playerStatsList,
+    playerSkillSelect,
+    playerSkillButton,
+    playerGearSelect,
+    playerGearButton,
+    playerStatus,
   ];
   const controlsReady = [...controls, ...detailElements].every(Boolean);
 
@@ -1488,6 +1892,7 @@ const updateMissionControls = () => {
   updateVehicleSelectionOptions();
   updateRecruitmentOptions();
   updateTrainingOptions();
+  updatePlayerDevelopmentPanel();
   updateMaintenancePanel();
 
   const isReady = Boolean(missionSystem && economySystem);
@@ -1597,6 +2002,24 @@ const updateMissionControls = () => {
         : ['Crew assignments locked in.', 'Vehicle assignment locked in.'];
     })();
 
+    const playerImpact = (() => {
+      if (selectedMission.status === 'available') {
+        const summary = Array.isArray(preview?.playerImpact?.summary)
+          ? preview.playerImpact.summary
+          : [];
+        return summary.length
+          ? summary
+          : ['Player influence steady — train to unlock bonuses.'];
+      }
+
+      const summary = Array.isArray(selectedMission.playerEffectSummary)
+        ? selectedMission.playerEffectSummary
+        : [];
+      return summary.length
+        ? summary
+        : ['Player expertise locked for this operation.'];
+    })();
+
     setMissionDetails({
       description: missionDescription,
       payout: missionPayout,
@@ -1605,6 +2028,7 @@ const updateMissionControls = () => {
       success: missionSuccess,
       restriction: restrictionMessage,
       crewImpact,
+      playerImpact,
     });
   }
 
@@ -1714,6 +2138,7 @@ const setupMissionControls = () => {
   missionControls.detailSuccess = document.getElementById('mission-detail-success');
   missionControls.detailRestriction = document.getElementById('mission-detail-restriction');
   missionControls.detailCrewImpact = document.getElementById('mission-detail-crew-impact');
+  missionControls.detailPlayerImpact = document.getElementById('mission-detail-player-impact');
   missionControls.crewList = document.getElementById('mission-crew-list');
   missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
@@ -1725,6 +2150,12 @@ const setupMissionControls = () => {
   missionControls.trainingLoyaltyButton = document.getElementById('mission-training-loyalty-btn');
   missionControls.trainingSpecialtyButton = document.getElementById('mission-training-specialty-btn');
   missionControls.trainingStatus = document.getElementById('mission-training-status');
+  missionControls.playerStatsList = document.getElementById('mission-player-stats');
+  missionControls.playerSkillSelect = document.getElementById('mission-player-skill');
+  missionControls.playerSkillButton = document.getElementById('mission-player-train-btn');
+  missionControls.playerGearSelect = document.getElementById('mission-player-gear');
+  missionControls.playerGearButton = document.getElementById('mission-player-gear-btn');
+  missionControls.playerStatus = document.getElementById('mission-player-status');
   missionControls.maintenanceRepairButton = document.getElementById('mission-maintenance-repair-btn');
   missionControls.maintenanceHeatButton = document.getElementById('mission-maintenance-heat-btn');
   missionControls.maintenanceStatus = document.getElementById('mission-maintenance-status');
@@ -1743,6 +2174,7 @@ const setupMissionControls = () => {
     detailSuccess,
     detailRestriction,
     detailCrewImpact,
+    detailPlayerImpact,
     crewList,
     vehicleList,
     crackdownText,
@@ -1754,6 +2186,12 @@ const setupMissionControls = () => {
     trainingLoyaltyButton,
     trainingSpecialtyButton,
     trainingStatus,
+    playerStatsList,
+    playerSkillSelect,
+    playerSkillButton,
+    playerGearSelect,
+    playerGearButton,
+    playerStatus,
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
@@ -1772,6 +2210,7 @@ const setupMissionControls = () => {
     detailSuccess,
     detailRestriction,
     detailCrewImpact,
+    detailPlayerImpact,
     crewList,
     vehicleList,
     crackdownText,
@@ -1783,6 +2222,12 @@ const setupMissionControls = () => {
     trainingLoyaltyButton,
     trainingSpecialtyButton,
     trainingStatus,
+    playerStatsList,
+    playerSkillSelect,
+    playerSkillButton,
+    playerGearSelect,
+    playerGearButton,
+    playerStatus,
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
@@ -1804,8 +2249,12 @@ const setupMissionControls = () => {
   });
   trainingCrewSelect.addEventListener('change', updateTrainingOptions);
   trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
+  playerSkillSelect.addEventListener('change', updatePlayerDevelopmentPanel);
+  playerGearSelect.addEventListener('change', updatePlayerDevelopmentPanel);
   trainingLoyaltyButton.addEventListener('click', handleLoyaltyTraining);
   trainingSpecialtyButton.addEventListener('click', handleSpecialtyTraining);
+  playerSkillButton.addEventListener('click', handlePlayerSkillTraining);
+  playerGearButton.addEventListener('click', handlePlayerGearAcquisition);
   maintenanceRepairButton.addEventListener('click', handleMaintenanceRepair);
   maintenanceHeatButton.addEventListener('click', handleMaintenanceHeat);
   heatLayLowButton.addEventListener('click', handleHeatLayLow);
@@ -1813,9 +2262,11 @@ const setupMissionControls = () => {
 
   setRecruitStatus('');
   setTrainingStatus('');
+  setPlayerStatus('');
   clearMaintenanceStatusDetail();
   updateRecruitmentOptions();
   updateTrainingOptions();
+  updatePlayerDevelopmentPanel();
   missionControls.heatStatusDetail = '';
   updateMaintenancePanel();
   updateHeatManagementPanel();

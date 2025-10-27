@@ -36,6 +36,101 @@ const GARAGE_MAINTENANCE_CONFIG = {
   },
 };
 
+const PLAYER_SKILL_CONFIG = {
+  driving: {
+    key: 'driving',
+    label: 'Driving',
+    description: 'Sharper getaway lines reduce duration and bolster odds.',
+    trainingCost: 3200,
+    baseLevel: 1,
+    maxLevel: 6,
+    effects: {
+      durationReductionPerLevel: 0.04,
+      durationReductionCap: 0.32,
+      successBonusPerLevel: 0.02,
+      successBonusCap: 0.24,
+    },
+  },
+  stealth: {
+    key: 'stealth',
+    label: 'Stealth',
+    description: 'Quieter infiltration trims heat and steadies outcomes.',
+    trainingCost: 3000,
+    baseLevel: 1,
+    maxLevel: 6,
+    effects: {
+      heatReductionPerLevel: 0.06,
+      heatReductionCap: 0.42,
+      successBonusPerLevel: 0.015,
+      successBonusCap: 0.18,
+    },
+  },
+  engineering: {
+    key: 'engineering',
+    label: 'Engineering',
+    description: 'Mechanical savvy squeezes extra payout and reliability.',
+    trainingCost: 3400,
+    baseLevel: 1,
+    maxLevel: 6,
+    effects: {
+      payoutBonusPerLevel: 0.05,
+      payoutBonusCap: 0.35,
+      successBonusPerLevel: 0.01,
+      successBonusCap: 0.14,
+    },
+  },
+  charisma: {
+    key: 'charisma',
+    label: 'Charisma',
+    description: 'Greases negotiations to lift payouts and cool heat.',
+    trainingCost: 3600,
+    baseLevel: 1,
+    maxLevel: 6,
+    effects: {
+      payoutBonusPerLevel: 0.03,
+      payoutBonusCap: 0.24,
+      heatReductionPerLevel: 0.02,
+      heatReductionCap: 0.22,
+      successBonusPerLevel: 0.01,
+      successBonusCap: 0.12,
+    },
+  },
+};
+
+const PLAYER_GEAR_CATALOG = {
+  'signal-scrambler': {
+    id: 'signal-scrambler',
+    label: 'Signal Scrambler',
+    description: 'Jams trackers to cut mission heat and steady success odds.',
+    cost: 4200,
+    effects: {
+      heatMultiplier: 0.88,
+      successBonus: 0.03,
+    },
+  },
+  'lockbreaker-kit': {
+    id: 'lockbreaker-kit',
+    label: 'Lockbreaker Kit',
+    description: 'Precision tools shorten entry time and improve outcomes.',
+    cost: 3800,
+    effects: {
+      durationMultiplier: 0.92,
+      successBonus: 0.02,
+    },
+  },
+  'insider-contacts': {
+    id: 'insider-contacts',
+    label: 'Insider Contacts',
+    description: 'Favors owed boost payouts and shade heat signatures.',
+    cost: 4600,
+    effects: {
+      payoutMultiplier: 1.08,
+      heatMultiplier: 0.93,
+      successBonus: 0.015,
+    },
+  },
+};
+
 const DEFAULT_DISPOSITION_CONFIG = {
   saleMultiplier: 0.68,
   scrapMultiplier: 0.32,
@@ -115,6 +210,198 @@ const summarizeCrewEffect = (
   }
 
   return `${member.name}: ${adjustments.join(', ')}`;
+};
+
+const summarizePlayerContribution = (
+  label,
+  { durationDelta = 0, payoutDelta = 0, successDelta = 0, heatDelta = 0 },
+) => {
+  const adjustments = [];
+  if (durationDelta) {
+    const labelText = durationDelta < 0 ? 'faster' : 'slower';
+    adjustments.push(`${Math.abs(Math.round(durationDelta * 100))}% ${labelText}`);
+  }
+  if (payoutDelta) {
+    const payoutLabel = payoutDelta > 0 ? 'more' : 'less';
+    adjustments.push(`${Math.abs(Math.round(payoutDelta * 100))}% ${payoutLabel} payout`);
+  }
+  if (successDelta) {
+    adjustments.push(`${successDelta > 0 ? '+' : '-'}${Math.abs(Math.round(successDelta * 100))}% success`);
+  }
+  if (heatDelta) {
+    const heatLabel = heatDelta < 0 ? 'less' : 'more';
+    adjustments.push(`${Math.abs(Math.round(heatDelta * 100))}% ${heatLabel} heat`);
+  }
+
+  if (!adjustments.length) {
+    return `${label}: steady influence.`;
+  }
+
+  return `${label}: ${adjustments.join(', ')}`;
+};
+
+const computeSkillImpact = (skillKey, levelValue, { difficulty }) => {
+  const config = PLAYER_SKILL_CONFIG[skillKey];
+  if (!config) {
+    return null;
+  }
+
+  const safeLevel = Number.isFinite(levelValue) ? levelValue : config.baseLevel ?? 1;
+  const baseLevel = Number.isFinite(config.baseLevel) ? config.baseLevel : 1;
+  const aboveBase = Math.max(0, safeLevel - baseLevel);
+  if (aboveBase <= 0) {
+    return null;
+  }
+
+  const contribution = {
+    durationMultiplier: 1,
+    payoutMultiplier: 1,
+    successBonus: 0,
+    heatMultiplier: 1,
+    summary: [],
+  };
+  const aggregated = { durationDelta: 0, payoutDelta: 0, successDelta: 0, heatDelta: 0 };
+
+  const effects = config.effects ?? {};
+
+  if (effects.durationReductionPerLevel) {
+    const cap = Math.max(0, effects.durationReductionCap ?? effects.durationReductionPerLevel * 4);
+    const totalReduction = Math.min(cap, aboveBase * effects.durationReductionPerLevel);
+    if (totalReduction > 0) {
+      contribution.durationMultiplier *= Math.max(0.2, 1 - totalReduction);
+      aggregated.durationDelta -= totalReduction;
+    }
+  }
+
+  if (effects.payoutBonusPerLevel) {
+    const cap = Math.max(0, effects.payoutBonusCap ?? effects.payoutBonusPerLevel * 4);
+    const totalBonus = Math.min(cap, aboveBase * effects.payoutBonusPerLevel);
+    if (totalBonus > 0) {
+      contribution.payoutMultiplier += totalBonus;
+      aggregated.payoutDelta += totalBonus;
+    }
+  }
+
+  if (effects.successBonusPerLevel) {
+    const cap = Math.max(0, effects.successBonusCap ?? effects.successBonusPerLevel * 6);
+    const totalBonus = Math.min(cap, aboveBase * effects.successBonusPerLevel);
+    if (totalBonus !== 0) {
+      contribution.successBonus += totalBonus;
+      aggregated.successDelta += totalBonus;
+    }
+  }
+
+  if (effects.heatReductionPerLevel) {
+    const cap = Math.max(0, effects.heatReductionCap ?? effects.heatReductionPerLevel * 4);
+    const totalReduction = Math.min(cap, aboveBase * effects.heatReductionPerLevel);
+    if (totalReduction > 0) {
+      contribution.heatMultiplier *= Math.max(0.2, 1 - totalReduction);
+      aggregated.heatDelta -= totalReduction;
+    }
+  }
+
+  const hasChange =
+    aggregated.durationDelta || aggregated.payoutDelta || aggregated.successDelta || aggregated.heatDelta;
+  if (hasChange) {
+    contribution.summary.push(
+      summarizePlayerContribution(`${config.label} L${safeLevel}`, aggregated),
+    );
+  }
+
+  return contribution;
+};
+
+const computeGearImpact = (gearId) => {
+  const config = PLAYER_GEAR_CATALOG[gearId];
+  if (!config) {
+    return null;
+  }
+
+  const effects = config.effects ?? {};
+  const durationMultiplier = Number.isFinite(effects.durationMultiplier)
+    ? clamp(effects.durationMultiplier, 0.35, 1.25)
+    : 1;
+  const payoutMultiplier = Number.isFinite(effects.payoutMultiplier)
+    ? clamp(effects.payoutMultiplier, 0.5, 1.6)
+    : 1;
+  const heatMultiplier = Number.isFinite(effects.heatMultiplier)
+    ? clamp(effects.heatMultiplier, 0.2, 1.6)
+    : 1;
+  const successBonus = Number.isFinite(effects.successBonus) ? effects.successBonus : 0;
+
+  const contribution = {
+    durationMultiplier,
+    payoutMultiplier,
+    successBonus,
+    heatMultiplier,
+    summary: summarizePlayerContribution(config.label, {
+      durationDelta: durationMultiplier - 1,
+      payoutDelta: payoutMultiplier - 1,
+      successDelta: successBonus,
+      heatDelta: heatMultiplier - 1,
+    }),
+  };
+
+  return contribution;
+};
+
+const computePlayerImpact = (mission, player) => {
+  const result = {
+    durationMultiplier: 1,
+    payoutMultiplier: 1,
+    successBonus: 0,
+    heatMultiplier: 1,
+    summary: [],
+    skillsApplied: [],
+    gearApplied: [],
+  };
+
+  if (!player) {
+    result.summary.push('Player expertise unavailable.');
+    return result;
+  }
+
+  const skills = player.skills ?? {};
+  Object.entries(PLAYER_SKILL_CONFIG).forEach(([skillKey, config]) => {
+    const levelValue = skills[skillKey];
+    const impact = computeSkillImpact(skillKey, levelValue, mission ?? {});
+    if (!impact) {
+      return;
+    }
+
+    result.durationMultiplier *= impact.durationMultiplier;
+    result.payoutMultiplier += impact.payoutMultiplier - 1;
+    result.successBonus += impact.successBonus;
+    result.heatMultiplier *= impact.heatMultiplier;
+    result.summary.push(...impact.summary);
+    result.skillsApplied.push({
+      key: skillKey,
+      level: Number.isFinite(levelValue) ? levelValue : config.baseLevel ?? 1,
+    });
+  });
+
+  const inventory = Array.isArray(player.inventory) ? [...new Set(player.inventory)] : [];
+  inventory.forEach((gearId) => {
+    const impact = computeGearImpact(gearId);
+    if (!impact) {
+      return;
+    }
+
+    result.durationMultiplier *= impact.durationMultiplier;
+    result.payoutMultiplier *= impact.payoutMultiplier;
+    result.successBonus += impact.successBonus;
+    result.heatMultiplier *= impact.heatMultiplier;
+    if (impact.summary) {
+      result.summary.push(impact.summary);
+    }
+    result.gearApplied.push(gearId);
+  });
+
+  if (!result.summary.length) {
+    result.summary.push('Player influence steady — train or equip to unlock bonuses.');
+  }
+
+  return result;
 };
 
 const crackdownPolicies = {
@@ -261,6 +548,7 @@ class MissionSystem {
       assignedCrewIds: [],
       assignedCrewImpact: null,
       crewEffectSummary: [],
+      playerEffectSummary: [],
       assignedVehicleId: null,
       assignedVehicleImpact: null,
       assignedVehicleSnapshot: null,
@@ -460,6 +748,14 @@ class MissionSystem {
     let successBonus = 0;
     let heatMultiplier = 1;
     const summary = [];
+
+    const playerImpact = computePlayerImpact(mission, this.state?.player ?? null);
+    if (playerImpact) {
+      durationMultiplier *= playerImpact.durationMultiplier ?? 1;
+      payoutMultiplier *= playerImpact.payoutMultiplier ?? 1;
+      successBonus += playerImpact.successBonus ?? 0;
+      heatMultiplier *= playerImpact.heatMultiplier ?? 1;
+    }
 
     crewMembers.forEach((member) => {
       if (!member) {
@@ -668,6 +964,7 @@ class MissionSystem {
       successBonus,
       heatMultiplier,
       vehicleImpact,
+      playerImpact,
     };
   }
 
@@ -770,6 +1067,9 @@ class MissionSystem {
       mission.assignedCrewImpact = crewImpact;
       mission.heat = crewImpact.adjustedHeat;
       mission.assignedVehicleImpact = assignedVehicle ? crewImpact.vehicleImpact : null;
+      mission.playerEffectSummary = Array.isArray(crewImpact.playerImpact?.summary)
+        ? crewImpact.playerImpact.summary
+        : [];
     } else {
       mission.duration = sanitizeDuration(mission.baseDuration ?? mission.duration, mission.difficulty);
       mission.payout = coerceFiniteNumber(mission.basePayout ?? mission.payout, 0);
@@ -781,6 +1081,7 @@ class MissionSystem {
         ? mission.baseHeat
         : coerceFiniteNumber(mission.heat, 0);
       mission.assignedVehicleImpact = null;
+      mission.playerEffectSummary = [];
     }
 
     mission.assignedCrewIds = assignedCrew.map((member) => member.id);
@@ -1402,4 +1703,4 @@ MissionSystem.prototype.applyHeatRestrictions = function applyHeatRestrictions()
   });
 };
 
-export { MissionSystem, GARAGE_MAINTENANCE_CONFIG };
+export { MissionSystem, GARAGE_MAINTENANCE_CONFIG, PLAYER_SKILL_CONFIG, PLAYER_GEAR_CATALOG };
