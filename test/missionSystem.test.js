@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MissionSystem } from '../src/game/carThief/systems/missionSystem.js';
+import { MissionSystem, GARAGE_MAINTENANCE_CONFIG } from '../src/game/carThief/systems/missionSystem.js';
 import { HeatSystem } from '../src/game/carThief/systems/heatSystem.js';
+import { EconomySystem } from '../src/game/carThief/systems/economySystem.js';
+import { Vehicle } from '../src/game/carThief/entities/vehicle.js';
 
 const createState = () => ({
   funds: 1000,
@@ -11,6 +13,91 @@ const createState = () => ({
   activeMission: null,
   heatTier: 'calm',
   missionLog: [],
+});
+
+test('Garage maintenance repairs restore condition when funds allow', (t) => {
+  const state = createState();
+  state.funds = 20_000;
+  const vehicle = new Vehicle({ model: 'Interceptor' });
+  vehicle.condition = 0.35;
+  vehicle.heat = 1.2;
+  state.garage.push(vehicle);
+
+  const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
+  const economySystem = new EconomySystem(state);
+
+  const repairCost = GARAGE_MAINTENANCE_CONFIG.repair.cost;
+  const repairBoost = GARAGE_MAINTENANCE_CONFIG.repair.conditionBoost;
+  const fundsBefore = state.funds;
+
+  const result = missionSystem.repairVehicleCondition(vehicle.id, economySystem);
+
+  assert.ok(result.success, 'repair succeeds when funds available');
+  assert.equal(state.funds, fundsBefore - repairCost, 'repair deducts the configured cost');
+
+  const expectedCondition = Math.min(1, 0.35 + repairBoost);
+  assert.equal(
+    vehicle.condition,
+    expectedCondition,
+    'vehicle condition increases and clamps at the maximum',
+  );
+  assert.equal(result.conditionAfter, expectedCondition, 'result reports the updated condition');
+  assert.ok(result.conditionDelta > 0, 'result includes a positive delta');
+  assert.equal(result.heatAfter, vehicle.heat, 'repairs do not modify vehicle heat');
+
+  assert.ok(state.lastVehicleReport, 'maintenance creates a vehicle report');
+  assert.equal(state.lastVehicleReport.maintenanceType, 'repair', 'report tracks repair type');
+});
+
+test('Garage maintenance heat purges reduce heat and clamp at zero', (t) => {
+  const state = createState();
+  state.funds = 15_000;
+  const vehicle = new Vehicle({ model: 'Courier' });
+  vehicle.condition = 0.9;
+  vehicle.heat = 0.8;
+  state.garage.push(vehicle);
+
+  const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
+  const economySystem = new EconomySystem(state);
+
+  const purgeCost = GARAGE_MAINTENANCE_CONFIG.heat.cost;
+  const heatReduction = GARAGE_MAINTENANCE_CONFIG.heat.heatReduction;
+
+  const result = missionSystem.reduceVehicleHeat(vehicle.id, economySystem);
+
+  assert.ok(result.success, 'heat purge succeeds when funds available');
+  assert.equal(state.funds, 15_000 - purgeCost, 'heat purge deducts the configured cost');
+
+  const expectedHeat = Math.max(0, 0.8 - heatReduction);
+  assert.equal(vehicle.heat, expectedHeat, 'vehicle heat is reduced and clamped');
+  assert.equal(result.heatAfter, expectedHeat, 'result reports new heat value');
+  assert.ok(result.heatDelta < 0, 'result delta reflects heat reduction');
+  assert.equal(vehicle.condition, 0.9, 'heat purge does not alter condition');
+
+  assert.ok(state.lastVehicleReport, 'maintenance updates last vehicle report');
+  assert.equal(state.lastVehicleReport.maintenanceType, 'heat', 'report tracks heat purge');
+});
+
+test('Garage maintenance aborts when funds are insufficient', (t) => {
+  const state = createState();
+  state.funds = 500; // below either maintenance cost
+  const vehicle = new Vehicle({ model: 'Runabout' });
+  vehicle.condition = 0.2;
+  vehicle.heat = 2.5;
+  state.garage.push(vehicle);
+
+  const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
+  const economySystem = new EconomySystem(state);
+
+  const result = missionSystem.repairVehicleCondition(vehicle.id, economySystem);
+
+  assert.ok(!result.success, 'repair fails when funds are insufficient');
+  assert.equal(result.reason, 'insufficient-funds', 'failure reason flags missing funds');
+  assert.equal(state.funds, 500, 'funds remain unchanged on failed maintenance');
+  assert.equal(vehicle.condition, 0.2, 'vehicle condition does not change on failure');
+  assert.equal(state.lastVehicleReport, undefined, 'no vehicle report is recorded on failure');
 });
 
 test('MissionSystem lifecycle from contract to resolution', (t) => {

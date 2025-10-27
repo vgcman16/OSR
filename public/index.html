@@ -130,6 +130,22 @@
             aria-labelledby="mission-vehicle-hint"
           ></div>
         </section>
+        <section class="mission-maintenance" aria-labelledby="mission-maintenance-title">
+          <h3 id="mission-maintenance-title" class="mission-details__title">Garage Maintenance</h3>
+          <p class="mission-details__hint">
+            Keep vehicles mission-ready by repairing damage or lowering attention levels.
+          </p>
+          <div class="mission-maintenance__actions">
+            <button id="mission-maintenance-repair-btn" type="button">Repair Condition</button>
+            <button id="mission-maintenance-heat-btn" type="button">Reduce Heat</button>
+          </div>
+          <p
+            id="mission-maintenance-status"
+            class="control-panel__status mission-maintenance__status"
+            role="status"
+            aria-live="polite"
+          ></p>
+        </section>
         <p
           id="mission-crackdown-text"
           class="control-panel__status control-panel__status--tier"
