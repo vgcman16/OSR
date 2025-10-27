@@ -28,9 +28,11 @@ const missionControls = {
   detailRestriction: null,
   detailCrewImpact: null,
   crewList: null,
+  vehicleList: null,
   crackdownText: null,
   logList: null,
   selectedCrewIds: [],
+  selectedVehicleId: null,
 };
 
 let missionControlSyncHandle = null;
@@ -104,7 +106,7 @@ const resetMissionDetails = (descriptionText) => {
     duration: '—',
     success: '—',
     restriction: 'All contracts are currently open.',
-    crewImpact: ['No crew assigned.'],
+    crewImpact: ['No crew assigned.', 'No vehicle selected.'],
   });
 };
 
@@ -157,6 +159,14 @@ const formatPercent = (value) => {
   }
 
   return `${Math.round(value * 100)}%`;
+};
+
+const formatHeatValue = (value) => {
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
+
+  return value.toFixed(1);
 };
 
 const formatAdjustedValue = (
@@ -249,6 +259,119 @@ const updateCrewSelectionOptions = () => {
   });
 
   missionControls.selectedCrewIds = Array.from(selectedSet);
+};
+
+const updateVehicleSelectionOptions = () => {
+  const vehicleContainer = missionControls.vehicleList;
+  if (!vehicleContainer) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const garage = Array.isArray(missionSystem?.state?.garage) ? missionSystem.state.garage : [];
+  const activeMissionVehicleId = missionSystem?.state?.activeMission?.assignedVehicleId ?? null;
+
+  vehicleContainer.innerHTML = '';
+
+  if (!missionSystem) {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = 'Garage manifest syncing…';
+    vehicleContainer.appendChild(placeholder);
+    missionControls.selectedVehicleId = null;
+    return;
+  }
+
+  if (!garage.length) {
+    const placeholder = document.createElement('p');
+    placeholder.textContent = 'No vehicles available. Complete missions to expand the garage.';
+    vehicleContainer.appendChild(placeholder);
+    missionControls.selectedVehicleId = null;
+    return;
+  }
+
+  const availableVehicles = garage.filter((vehicle) => {
+    if (!vehicle) {
+      return false;
+    }
+
+    const condition = Number(vehicle.condition);
+    const isOperational = Number.isFinite(condition) ? condition > 0.05 : true;
+    const statusLabel = (vehicle.status ?? '').toLowerCase();
+    const isInMission = Boolean(vehicle.inUse) || statusLabel === 'in-mission' || activeMissionVehicleId === vehicle.id;
+    return isOperational && !isInMission;
+  });
+
+  const selectionStillValid = availableVehicles.some(
+    (vehicle) => vehicle && vehicle.id === missionControls.selectedVehicleId,
+  );
+
+  if (!selectionStillValid) {
+    missionControls.selectedVehicleId = availableVehicles[0]?.id ?? null;
+  }
+
+  let hasSelectableOption = false;
+
+  garage.forEach((vehicle) => {
+    if (!vehicle) {
+      return;
+    }
+
+    const optionLabel = document.createElement('label');
+    optionLabel.className = 'mission-crew__option mission-vehicle__option';
+
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'mission-vehicle';
+    radio.value = vehicle.id;
+
+    const conditionValue = Number(vehicle.condition);
+    const conditionPercent = Number.isFinite(conditionValue)
+      ? Math.round(Math.max(0, Math.min(1, conditionValue)) * 100)
+      : null;
+    const isOperational = Number.isFinite(conditionValue) ? conditionValue > 0.05 : true;
+    const statusLabel = (vehicle.status ?? '').toLowerCase();
+    const isInMission = Boolean(vehicle.inUse) || statusLabel === 'in-mission' || activeMissionVehicleId === vehicle.id;
+    const disabled = !isOperational || isInMission;
+
+    if (!disabled) {
+      hasSelectableOption = true;
+    }
+
+    radio.checked = missionControls.selectedVehicleId === vehicle.id;
+    radio.disabled = disabled;
+
+    radio.addEventListener('change', () => {
+      missionControls.selectedVehicleId = radio.checked ? vehicle.id : null;
+      updateMissionControls();
+    });
+
+    const descriptor = document.createElement('span');
+    descriptor.className = 'mission-crew__label';
+
+    const heatLabel = Number.isFinite(vehicle.heat) ? vehicle.heat.toFixed(1) : 'N/A';
+    let statusText = 'Ready';
+    if (!isOperational) {
+      statusText = 'Inoperable';
+    } else if (isInMission) {
+      statusText = 'On mission';
+    }
+
+    const conditionLabel =
+      conditionPercent !== null ? `${conditionPercent}% condition` : 'Condition unknown';
+    descriptor.textContent = `${vehicle.model ?? 'Vehicle'} — ${conditionLabel} • Heat ${heatLabel} • ${statusText}`;
+
+    optionLabel.appendChild(radio);
+    optionLabel.appendChild(descriptor);
+    vehicleContainer.appendChild(optionLabel);
+  });
+
+  if (!hasSelectableOption) {
+    const placeholder = document.createElement('p');
+    placeholder.textContent =
+      'All vehicles are currently committed or inoperable. Wait for a mission to resolve.';
+    vehicleContainer.appendChild(placeholder);
+    missionControls.selectedVehicleId = null;
+  }
 };
 
 const describeCrackdownPolicy = () => {
@@ -363,6 +486,7 @@ const updateMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     crewList,
+    vehicleList,
     crackdownText,
     logList,
   } = missionControls;
@@ -377,6 +501,7 @@ const updateMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     crewList,
+    vehicleList,
     crackdownText,
     logList,
   ];
@@ -387,6 +512,7 @@ const updateMissionControls = () => {
   }
 
   updateCrewSelectionOptions();
+  updateVehicleSelectionOptions();
 
   const isReady = Boolean(missionSystem && economySystem);
   controls.forEach((control) => {
@@ -419,9 +545,14 @@ const updateMissionControls = () => {
   const isAnotherMissionRunning = Boolean(
     activeMission && activeMission.id !== selectedMissionId && activeMission.status !== 'completed',
   );
+  const hasVehicleSelection = Boolean(missionControls.selectedVehicleId);
 
   startButton.disabled =
-    !isReady || !isMissionAvailable || isAnotherMissionRunning || isMissionRestricted;
+    !isReady ||
+    !isMissionAvailable ||
+    isAnotherMissionRunning ||
+    isMissionRestricted ||
+    !hasVehicleSelection;
 
   if (!selectedMission) {
     resetMissionDetails('Select a mission to view its briefing.');
@@ -430,7 +561,11 @@ const updateMissionControls = () => {
     const selectedCrewIds = missionControls.selectedCrewIds ?? [];
     const preview =
       selectedMission.status === 'available'
-        ? missionSystem.previewCrewAssignment(selectedMission.id, selectedCrewIds)
+        ? missionSystem.previewCrewAssignment(
+            selectedMission.id,
+            selectedCrewIds,
+            missionControls.selectedVehicleId,
+          )
         : null;
 
     const basePayout = Number.isFinite(selectedMission.basePayout)
@@ -442,17 +577,21 @@ const updateMissionControls = () => {
     const baseSuccess = Number.isFinite(selectedMission.baseSuccessChance)
       ? selectedMission.baseSuccessChance
       : selectedMission.successChance;
+    const baseHeat = Number.isFinite(selectedMission.baseHeat)
+      ? selectedMission.baseHeat
+      : selectedMission.heat;
 
     const payoutValue = preview?.adjustedPayout ?? selectedMission.payout ?? basePayout;
     const durationValue = preview?.adjustedDuration ?? selectedMission.duration ?? baseDuration;
     const successValue = preview?.adjustedSuccessChance ?? selectedMission.successChance ?? baseSuccess;
+    const heatValue = preview?.adjustedHeat ?? selectedMission.heat ?? baseHeat;
 
     const missionPayout = selectedMission.status === 'available'
       ? formatAdjustedValue(basePayout, payoutValue, formatCurrency, formatCurrency, 1)
       : formatCurrency(payoutValue);
-    const missionHeat = Number.isFinite(selectedMission.heat)
-      ? `${selectedMission.heat}`
-      : '—';
+    const missionHeat = selectedMission.status === 'available'
+      ? formatAdjustedValue(baseHeat, heatValue, formatHeatValue, formatHeatValue, 0.05)
+      : formatHeatValue(heatValue);
     const missionDuration = selectedMission.status === 'available'
       ? formatAdjustedValue(baseDuration, durationValue, formatSeconds, formatSeconds, 1)
       : formatSeconds(durationValue);
@@ -475,7 +614,9 @@ const updateMissionControls = () => {
       const summary = Array.isArray(selectedMission.crewEffectSummary)
         ? selectedMission.crewEffectSummary
         : [];
-      return summary.length ? summary : ['Crew assignments locked in.'];
+      return summary.length
+        ? summary
+        : ['Crew assignments locked in.', 'Vehicle assignment locked in.'];
     })();
 
     setMissionDetails({
@@ -561,17 +702,23 @@ const handleMissionStart = () => {
   const crewIds = Array.isArray(missionControls.selectedCrewIds)
     ? missionControls.selectedCrewIds
     : [];
+  const vehicleId = missionControls.selectedVehicleId;
+  if (!vehicleId) {
+    return;
+  }
 
-  const mission = missionSystem.startMission(missionId, crewIds);
+  const mission = missionSystem.startMission(missionId, crewIds, vehicleId);
   if (!mission) {
     updateMissionStatusText();
     return;
   }
 
   missionControls.selectedCrewIds = [];
+  missionControls.selectedVehicleId = null;
   economySystem.payCrew();
   updateMissionSelect();
   updateMissionControls();
+  updateVehicleSelectionOptions();
   triggerHudRender();
 };
 
@@ -587,6 +734,7 @@ const setupMissionControls = () => {
   missionControls.detailRestriction = document.getElementById('mission-detail-restriction');
   missionControls.detailCrewImpact = document.getElementById('mission-detail-crew-impact');
   missionControls.crewList = document.getElementById('mission-crew-list');
+  missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
   missionControls.logList = document.getElementById('mission-log-list');
 
@@ -601,6 +749,7 @@ const setupMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     crewList,
+    vehicleList,
     crackdownText,
     logList,
   } = missionControls;
@@ -616,6 +765,7 @@ const setupMissionControls = () => {
     detailRestriction,
     detailCrewImpact,
     crewList,
+    vehicleList,
     crackdownText,
     logList,
   ].every(Boolean);
@@ -627,6 +777,7 @@ const setupMissionControls = () => {
   startButton.addEventListener('click', handleMissionStart);
   select.addEventListener('change', () => {
     missionControls.selectedCrewIds = [];
+    missionControls.selectedVehicleId = null;
     updateMissionControls();
   });
 

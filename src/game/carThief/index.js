@@ -47,11 +47,13 @@ const createCarThiefGame = ({ canvas, context }) => {
     const garage = Array.isArray(state.garage) ? state.garage : [];
     const garageStartY = garageLabelY + 30;
     const garageColumnWidth = 200;
-    const garageRowHeight = 60;
+    const garageRowHeight = 74;
     const maxGarageColumns = Math.max(1, Math.min(3, Math.floor((canvas.width - 64) / garageColumnWidth)));
     const maxGarageRows = 3;
     const maxVehiclesVisible = maxGarageColumns * maxGarageRows;
     const vehiclesToDisplay = garage.slice(0, maxVehiclesVisible);
+    const activeMissionVehicleId = state.activeMission?.assignedVehicleId ?? null;
+    const lastVehicleReport = state.lastVehicleReport ?? null;
 
     vehiclesToDisplay.forEach((vehicle, index) => {
       const columnIndex = index % maxGarageColumns;
@@ -59,13 +61,73 @@ const createCarThiefGame = ({ canvas, context }) => {
       const vehicleX = 32 + columnIndex * garageColumnWidth;
       const vehicleY = garageStartY + rowIndex * garageRowHeight;
 
-      const condition = typeof vehicle.condition === 'number' ? Math.round(vehicle.condition) : 'N/A';
-      const heat = typeof vehicle.heat === 'number' ? vehicle.heat.toFixed(1) : 'N/A';
+      const isAssigned = Boolean(activeMissionVehicleId && activeMissionVehicleId === vehicle.id);
+      const isRecentlyUsed = Boolean(!isAssigned && lastVehicleReport?.vehicleId === vehicle.id);
 
+      if (isAssigned || isRecentlyUsed) {
+        context.fillStyle = isAssigned ? 'rgba(255, 200, 80, 0.18)' : 'rgba(95, 150, 255, 0.18)';
+        context.fillRect(vehicleX - 16, vehicleY - 28, garageColumnWidth - 24, garageRowHeight - 12);
+      }
+
+      const nameColor = isAssigned ? '#ffe27a' : '#d1eaff';
+      const detailColor = isAssigned ? '#ffd15c' : '#9ac7ff';
+      const secondaryColor = isAssigned ? '#ffebb1' : '#b4d4ff';
+
+      const conditionValue = Number.isFinite(vehicle.condition)
+        ? Math.max(0, Math.min(1, vehicle.condition))
+        : null;
+      const conditionPercent = conditionValue !== null ? Math.round(conditionValue * 100) : null;
+      const conditionDelta =
+        isRecentlyUsed && Number.isFinite(lastVehicleReport?.conditionDelta)
+          ? Math.round(lastVehicleReport.conditionDelta * 100)
+          : null;
+      const conditionDeltaLabel =
+        conditionDelta !== null && Math.abs(conditionDelta) >= 1
+          ? ` (${conditionDelta > 0 ? '+' : ''}${conditionDelta}%)`
+          : '';
+
+      const heatValue = Number.isFinite(vehicle.heat) ? vehicle.heat.toFixed(1) : 'N/A';
+      const heatDelta =
+        isRecentlyUsed && Number.isFinite(lastVehicleReport?.heatDelta)
+          ? lastVehicleReport.heatDelta
+          : null;
+      const heatDeltaLabel =
+        heatDelta !== null && Math.abs(heatDelta) >= 0.05
+          ? ` (${heatDelta > 0 ? '+' : ''}${heatDelta.toFixed(1)})`
+          : '';
+
+      context.fillStyle = nameColor;
       context.fillText(vehicle.model ?? 'Unknown vehicle', vehicleX, vehicleY);
-      context.fillText(`Condition: ${condition}%`, vehicleX, vehicleY + 20);
-      context.fillText(`Heat: ${heat}`, vehicleX, vehicleY + 40);
+      context.fillStyle = detailColor;
+      context.fillText(
+        `Condition: ${conditionPercent !== null ? `${conditionPercent}%` : 'N/A'}${conditionDeltaLabel}`,
+        vehicleX,
+        vehicleY + 22,
+      );
+      context.fillText(`Heat: ${heatValue}${heatDeltaLabel}`, vehicleX, vehicleY + 42);
+
+      const statusSegments = [];
+      if (isAssigned) {
+        statusSegments.push('In mission');
+      } else {
+        const statusLabel = (vehicle.status ?? 'idle').replace(/-/g, ' ');
+        if (statusLabel && statusLabel.toLowerCase() !== 'idle') {
+          statusSegments.push(statusLabel);
+        }
+      }
+
+      if (isRecentlyUsed && lastVehicleReport?.outcome) {
+        const outcomeLabel = lastVehicleReport.outcome === 'success' ? 'Success' : 'Failure';
+        statusSegments.push(`Last: ${outcomeLabel}`);
+      }
+
+      if (statusSegments.length) {
+        context.fillStyle = secondaryColor;
+        context.fillText(statusSegments.join(' • '), vehicleX, vehicleY + 62);
+      }
     });
+
+    context.fillStyle = '#d1eaff';
 
     if (garage.length > vehiclesToDisplay.length) {
       const remaining = garage.length - vehiclesToDisplay.length;
@@ -108,6 +170,11 @@ const createCarThiefGame = ({ canvas, context }) => {
 
       if (activeMetadata.length) {
         context.fillText(activeMetadata.join(' • '), missionInfoX, missionInfoY);
+        missionInfoY += 26;
+      }
+
+      if (activeMission.assignedVehicleLabel) {
+        context.fillText(`Vehicle: ${activeMission.assignedVehicleLabel}`, missionInfoX, missionInfoY);
         missionInfoY += 26;
       }
 
