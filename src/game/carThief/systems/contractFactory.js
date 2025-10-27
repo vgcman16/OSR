@@ -78,14 +78,50 @@ const buildContractFromDistrict = (district) => {
   const wealthScore = normalizeNumber(district.wealth, 1, 0);
   const securityScore = normalizeNumber(district.security, 1, 0);
 
-  const riskTier = determineRiskTier(securityScore);
-  const basePayout = 6000;
-  const payoutMultiplier = 1 + wealthScore * 0.6 + securityScore * 0.25;
-  const basePayoutValue = Math.round(basePayout * payoutMultiplier);
+  const clamp = (value, min, max) => {
+    if (!Number.isFinite(value)) {
+      return min;
+    }
+    if (value < min) {
+      return min;
+    }
+    if (value > max) {
+      return max;
+    }
+    return value;
+  };
 
-  const baseHeat = Math.round(1 + securityScore * 0.8);
-  const difficulty = Math.max(1, Math.round((wealthScore + securityScore) / 2));
-  const baseDuration = Math.round(25 + securityScore * 8 + difficulty * 4);
+  const normalizeMeter = (value, fallback = 50) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return fallback;
+    }
+    return clamp(numeric, 0, 100);
+  };
+
+  const influenceScore = normalizeMeter(district.influence, 50);
+  const intelScore = normalizeMeter(district.intelLevel, 45);
+  const crackdownScore = normalizeMeter(district.crackdownPressure, 40);
+
+  const influenceModifier = 1 + ((influenceScore - 50) / 100) * 0.45;
+  const intelHeatModifier = 1 - ((intelScore - 50) / 100) * 0.5;
+  const intelDurationModifier = 1 - ((intelScore - 50) / 100) * 0.35;
+  const crackdownHeatModifier = 1 + (Math.max(0, crackdownScore - 50) / 100) * 0.65;
+  const crackdownRiskShift = crackdownScore > 70 ? 1 : crackdownScore < 35 ? -1 : 0;
+
+  const adjustedSecurity = Math.max(0, securityScore + crackdownRiskShift * 0.6);
+  const riskTier = determineRiskTier(adjustedSecurity);
+  const basePayout = 6000;
+  const payoutMultiplier = 1 + wealthScore * 0.6 + adjustedSecurity * 0.25;
+  const basePayoutValue = Math.round(basePayout * payoutMultiplier * influenceModifier);
+
+  const rawBaseHeat = Math.round(1 + adjustedSecurity * 0.8);
+  const baseHeat = Math.max(1, Math.round(rawBaseHeat * intelHeatModifier * crackdownHeatModifier));
+  const difficulty = Math.max(
+    1,
+    Math.round((wealthScore + adjustedSecurity) / 2 + Math.max(0, crackdownScore - 60) / 25),
+  );
+  const baseDuration = Math.round(25 + adjustedSecurity * 8 + difficulty * 4);
 
   const poi = pickPointOfInterest(district);
 
@@ -99,7 +135,7 @@ const buildContractFromDistrict = (district) => {
     deltaKey: 'heatDelta',
     minValue: 1,
   });
-  const duration = applyPoiModifier(Math.max(20, baseDuration), poi, {
+  const duration = applyPoiModifier(Math.max(20, Math.round(baseDuration * intelDurationModifier)), poi, {
     multiplierKey: 'durationMultiplier',
     deltaKey: 'durationDelta',
     minValue: 20,
@@ -114,6 +150,12 @@ const buildContractFromDistrict = (district) => {
     missionDescriptionParts.join(' ') ||
     "Pull off a daring job tailored to the district's unique opportunities.";
 
+  const districtIntel = {
+    influence: Math.round(influenceScore),
+    intelLevel: Math.round(intelScore),
+    crackdownPressure: Math.round(crackdownScore),
+  };
+
   return {
     id: createContractId(district),
     name: missionName,
@@ -126,6 +168,7 @@ const buildContractFromDistrict = (district) => {
     riskTier,
     description: missionDescription,
     pointOfInterest: poi,
+    districtIntel,
   };
 };
 

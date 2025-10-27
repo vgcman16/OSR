@@ -44,6 +44,9 @@ const missionControls = {
   cityIntelDistrictName: null,
   cityIntelDistrictDescription: null,
   cityIntelRisk: null,
+  cityIntelInfluence: null,
+  cityIntelIntelLevel: null,
+  cityIntelCrackdown: null,
   cityIntelPoiName: null,
   cityIntelPoiDescription: null,
   cityIntelPoiPerks: null,
@@ -717,10 +720,68 @@ const describePoiModifiers = (modifiers = {}) => {
   return [...new Set(perks)];
 };
 
+const clampDistrictMeter = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return Math.round(Math.max(0, Math.min(100, numeric)));
+};
+
+const describeDistrictMeter = (value, thresholds = [], fallback = 'Data pending.') => {
+  const numeric = clampDistrictMeter(value);
+  if (numeric === null) {
+    return fallback;
+  }
+
+  const tier = thresholds.find((entry) => numeric <= entry.max) ?? thresholds[thresholds.length - 1];
+  const descriptor = tier ? tier.label : null;
+  return descriptor ? `${numeric} — ${descriptor}` : `${numeric}`;
+};
+
+const describeDistrictInfluence = (value) =>
+  describeDistrictMeter(
+    value,
+    [
+      { max: 29, label: 'Fragmented foothold' },
+      { max: 54, label: 'Steady network' },
+      { max: 79, label: 'Strong syndicate sway' },
+      { max: Infinity, label: 'Dominant control' },
+    ],
+    'Influence readings pending.',
+  );
+
+const describeDistrictIntelLevel = (value) =>
+  describeDistrictMeter(
+    value,
+    [
+      { max: 24, label: 'Blind spots everywhere' },
+      { max: 49, label: 'Partial surveillance' },
+      { max: 74, label: 'Mapped routes' },
+      { max: Infinity, label: 'Ghosted oversight' },
+    ],
+    'Intel sweep pending.',
+  );
+
+const describeDistrictCrackdown = (value) =>
+  describeDistrictMeter(
+    value,
+    [
+      { max: 24, label: 'Calm patrol rotations' },
+      { max: 49, label: 'Raised alertness' },
+      { max: 74, label: 'Intensified sweeps' },
+      { max: Infinity, label: 'Severe pressure' },
+    ],
+    'Crackdown telemetry pending.',
+  );
+
 const setCityIntelDetails = ({
   districtName,
   districtDescription,
   risk,
+  influence,
+  intelLevel,
+  crackdownPressure,
   poiName,
   poiDescription,
   poiPerks,
@@ -729,6 +790,9 @@ const setCityIntelDetails = ({
     cityIntelDistrictName,
     cityIntelDistrictDescription,
     cityIntelRisk,
+    cityIntelInfluence,
+    cityIntelIntelLevel,
+    cityIntelCrackdown,
     cityIntelPoiName,
     cityIntelPoiDescription,
     cityIntelPoiPerks,
@@ -739,6 +803,9 @@ const setCityIntelDetails = ({
       cityIntelDistrictName &&
       cityIntelDistrictDescription &&
       cityIntelRisk &&
+      cityIntelInfluence &&
+      cityIntelIntelLevel &&
+      cityIntelCrackdown &&
       cityIntelPoiName &&
       cityIntelPoiDescription &&
       cityIntelPoiPerks
@@ -750,6 +817,9 @@ const setCityIntelDetails = ({
   cityIntelDistrictName.textContent = districtName;
   cityIntelDistrictDescription.textContent = districtDescription;
   cityIntelRisk.textContent = risk;
+  cityIntelInfluence.textContent = influence;
+  cityIntelIntelLevel.textContent = intelLevel;
+  cityIntelCrackdown.textContent = crackdownPressure;
   cityIntelPoiName.textContent = poiName;
   cityIntelPoiDescription.textContent = poiDescription;
 
@@ -767,6 +837,9 @@ const resetCityIntelPanel = () => {
     districtName: 'District intel unavailable.',
     districtDescription: 'Select a contract to load local surveillance notes.',
     risk: 'Risk profile pending.',
+    influence: 'Influence readings pending.',
+    intelLevel: 'Intel sweep pending.',
+    crackdownPressure: 'Crackdown telemetry pending.',
     poiName: 'No special target flagged.',
     poiDescription: 'District sweep awaiting recon.',
     poiPerks: ['No unique perks detected.'],
@@ -995,10 +1068,33 @@ const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission
   const poiDescription = poi?.description ?? 'No notable point of interest for this contract.';
   const poiPerks = describePoiModifiers(poi?.modifiers ?? {});
 
+  const districtIntelSnapshot = (() => {
+    if (district && typeof district.getIntelSnapshot === 'function') {
+      return district.getIntelSnapshot();
+    }
+    if (mission.districtIntel && typeof mission.districtIntel === 'object') {
+      return { ...mission.districtIntel };
+    }
+    if (mission.districtIntelAfter) {
+      return { ...mission.districtIntelAfter };
+    }
+    if (mission.districtIntelBefore) {
+      return { ...mission.districtIntelBefore };
+    }
+    return null;
+  })();
+
+  const influenceLabel = describeDistrictInfluence(districtIntelSnapshot?.influence);
+  const intelLabel = describeDistrictIntelLevel(districtIntelSnapshot?.intelLevel);
+  const crackdownLabel = describeDistrictCrackdown(districtIntelSnapshot?.crackdownPressure);
+
   setCityIntelDetails({
     districtName,
     districtDescription,
     risk: riskLabel,
+    influence: influenceLabel,
+    intelLevel: intelLabel,
+    crackdownPressure: crackdownLabel,
     poiName,
     poiDescription,
     poiPerks,
@@ -4371,6 +4467,9 @@ const updateMissionControls = () => {
     cityIntelDistrictName,
     cityIntelDistrictDescription,
     cityIntelRisk,
+    cityIntelInfluence,
+    cityIntelIntelLevel,
+    cityIntelCrackdown,
     cityIntelPoiName,
     cityIntelPoiDescription,
     cityIntelPoiPerks,
@@ -4428,6 +4527,9 @@ const updateMissionControls = () => {
     cityIntelDistrictName,
     cityIntelDistrictDescription,
     cityIntelRisk,
+    cityIntelInfluence,
+    cityIntelIntelLevel,
+    cityIntelCrackdown,
     cityIntelPoiName,
     cityIntelPoiDescription,
     cityIntelPoiPerks,
@@ -5023,6 +5125,9 @@ const setupMissionControls = () => {
     'mission-city-intel-district-description',
   );
   missionControls.cityIntelRisk = document.getElementById('mission-city-intel-risk');
+  missionControls.cityIntelInfluence = document.getElementById('mission-city-intel-influence');
+  missionControls.cityIntelIntelLevel = document.getElementById('mission-city-intel-intel');
+  missionControls.cityIntelCrackdown = document.getElementById('mission-city-intel-crackdown');
   missionControls.cityIntelPoiName = document.getElementById('mission-city-intel-poi-name');
   missionControls.cityIntelPoiDescription = document.getElementById('mission-city-intel-poi-description');
   missionControls.cityIntelPoiPerks = document.getElementById('mission-city-intel-poi-perks');
@@ -5082,6 +5187,9 @@ const setupMissionControls = () => {
     cityIntelDistrictName,
     cityIntelDistrictDescription,
     cityIntelRisk,
+    cityIntelInfluence,
+    cityIntelIntelLevel,
+    cityIntelCrackdown,
     cityIntelPoiName,
     cityIntelPoiDescription,
     cityIntelPoiPerks,
@@ -5139,6 +5247,9 @@ const setupMissionControls = () => {
     cityIntelDistrictName,
     cityIntelDistrictDescription,
     cityIntelRisk,
+    cityIntelInfluence,
+    cityIntelIntelLevel,
+    cityIntelCrackdown,
     cityIntelPoiName,
     cityIntelPoiDescription,
     cityIntelPoiPerks,

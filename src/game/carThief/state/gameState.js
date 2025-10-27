@@ -94,7 +94,9 @@ class GameState {
         ? {
             name: this.city.name,
             districts: Array.isArray(this.city.districts)
-              ? this.city.districts.map((district) => ({ ...district }))
+              ? this.city.districts.map((district) =>
+                  typeof district?.toJSON === 'function' ? district.toJSON() : { ...district },
+                )
               : [],
           }
         : serializeObject(this.city),
