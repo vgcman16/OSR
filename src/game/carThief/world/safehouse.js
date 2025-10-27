@@ -6,6 +6,36 @@ const getRandomId = () => {
   return Math.random().toString(36).slice(2);
 };
 
+const DEFAULT_PROJECT_COST = 9000;
+const DEFAULT_PROJECT_DURATION_DAYS = 3;
+const DEFAULT_RUSH_COST_PER_DAY = 3000;
+
+const normalizeStatus = (status, { defaultStatus = 'planned' } = {}) => {
+  const normalized = typeof status === 'string' ? status.trim().toLowerCase() : '';
+
+  if (!normalized) {
+    return defaultStatus;
+  }
+
+  if (['active', 'online', 'ready', 'operational', 'complete', 'installed'].includes(normalized)) {
+    return 'active';
+  }
+
+  if (['building', 'fabricating', 'installing', 'construction', 'deploying'].includes(normalized)) {
+    return 'building';
+  }
+
+  if (
+    ['queued', 'planned', 'planning', 'staged', 'in-design', 'design', 'pending', 'fundraising'].includes(
+      normalized,
+    )
+  ) {
+    return 'queued';
+  }
+
+  return normalized;
+};
+
 const normalizeFacility = (entry, fallbackId, defaultName) => {
   if (!entry || typeof entry !== 'object') {
     return {
@@ -13,19 +43,55 @@ const normalizeFacility = (entry, fallbackId, defaultName) => {
       name: defaultName,
       summary: '',
       status: 'planned',
+      cost: 0,
+      durationDays: 0,
+      fundedAmount: 0,
+      timeInvested: 0,
+      progress: 0,
+      rushCostPerDay: null,
     };
   }
 
   const id = entry.id ?? fallbackId;
   const name = entry.name ?? defaultName;
   const summary = entry.summary ?? entry.description ?? '';
-  const status = entry.status ?? entry.state ?? null;
+  const status = normalizeStatus(entry.status ?? entry.state ?? null);
+  const costSource = entry.cost ?? entry.buildCost ?? entry.price ?? entry.requiredFunds;
+  const durationSource =
+    entry.duration ?? entry.durationDays ?? entry.time ?? entry.timeRequired ?? entry.days ?? entry.buildDays;
+  const fundedSource = entry.fundedAmount ?? entry.funded ?? entry.investment ?? entry.allocatedFunds;
+  const timeSource = entry.timeInvested ?? entry.progressDays ?? entry.daysWorked ?? entry.daysBuilt;
+  const rushSource = entry.rushCostPerDay ?? entry.rushCost ?? entry.accelerateCostPerDay;
+  const normalizedCost = Number.isFinite(costSource) ? Math.max(0, costSource) : 0;
+  const normalizedDuration = Number.isFinite(durationSource) ? Math.max(0, durationSource) : 0;
+  const normalizedFunded = Number.isFinite(fundedSource) ? Math.max(0, fundedSource) : 0;
+  const normalizedTime = Number.isFinite(timeSource) ? Math.max(0, timeSource) : 0;
+  const normalizedRush = Number.isFinite(rushSource) ? Math.max(0, rushSource) : null;
+  const normalizedProgressSource = Number.isFinite(entry.progress) ? Math.max(0, entry.progress) : null;
+  const safeFunded = normalizedCost > 0 ? Math.min(normalizedCost, normalizedFunded) : normalizedFunded;
+  const safeTime = normalizedDuration > 0 ? Math.min(normalizedDuration, normalizedTime) : normalizedTime;
+  let progress = 0;
+  if (normalizedProgressSource !== null) {
+    progress = Math.min(1, normalizedProgressSource);
+  } else if (normalizedDuration > 0) {
+    progress = Math.min(1, normalizedDuration ? safeTime / normalizedDuration : 0);
+  } else if (normalizedCost > 0) {
+    progress = Math.min(1, normalizedCost ? safeFunded / normalizedCost : 0);
+  } else {
+    progress = safeFunded > 0 || safeTime > 0 ? 1 : 0;
+  }
 
   return {
     id,
     name,
     summary,
     status: status ?? 'planned',
+    cost: normalizedCost,
+    durationDays: normalizedDuration,
+    fundedAmount: safeFunded,
+    timeInvested: safeTime,
+    progress,
+    rushCostPerDay: normalizedRush,
   };
 };
 
@@ -70,6 +136,118 @@ const normalizeTier = (tier, index) => {
 };
 
 class Safehouse {
+  _findProjectRecord(projectId) {
+    if (!projectId) {
+      return null;
+    }
+
+    for (let tierIndex = 0; tierIndex < this.tiers.length; tierIndex += 1) {
+      const tier = this.tiers[tierIndex];
+      if (!tier || !Array.isArray(tier.projects)) {
+        continue;
+      }
+
+      for (let projectIndex = 0; projectIndex < tier.projects.length; projectIndex += 1) {
+        const project = tier.projects[projectIndex];
+        if (project?.id === projectId) {
+          return { tier, tierIndex, projectIndex, project };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  _getProjectCost(project) {
+    if (!project || typeof project !== 'object') {
+      return DEFAULT_PROJECT_COST;
+    }
+
+    const cost = Number.isFinite(project.cost) ? project.cost : DEFAULT_PROJECT_COST;
+    return Math.max(0, cost);
+  }
+
+  _getProjectDuration(project) {
+    if (!project || typeof project !== 'object') {
+      return DEFAULT_PROJECT_DURATION_DAYS;
+    }
+
+    const duration = Number.isFinite(project.durationDays)
+      ? project.durationDays
+      : Number.isFinite(project.duration)
+        ? project.duration
+        : DEFAULT_PROJECT_DURATION_DAYS;
+    return Math.max(0, duration);
+  }
+
+  _getProjectRushCost(project) {
+    if (!project || typeof project !== 'object') {
+      return DEFAULT_RUSH_COST_PER_DAY;
+    }
+
+    if (Number.isFinite(project.rushCostPerDay) && project.rushCostPerDay > 0) {
+      return project.rushCostPerDay;
+    }
+
+    const cost = this._getProjectCost(project);
+    const duration = this._getProjectDuration(project);
+    if (duration > 0) {
+      return Math.max(500, Math.round(cost / duration));
+    }
+
+    return DEFAULT_RUSH_COST_PER_DAY;
+  }
+
+  _getProjectFunded(project) {
+    if (!project || typeof project !== 'object') {
+      return 0;
+    }
+
+    const funded = Number.isFinite(project.fundedAmount) ? project.fundedAmount : 0;
+    return Math.max(0, funded);
+  }
+
+  _getProjectTimeInvested(project) {
+    if (!project || typeof project !== 'object') {
+      return 0;
+    }
+
+    const time = Number.isFinite(project.timeInvested) ? project.timeInvested : 0;
+    return Math.max(0, time);
+  }
+
+  _computeProjectProgress(project, { cost = null, duration = null, fundedAmount = null, timeInvested = null } = {}) {
+    if (!project || typeof project !== 'object') {
+      return 0;
+    }
+
+    const resolvedCost = cost ?? this._getProjectCost(project);
+    const resolvedDuration = duration ?? this._getProjectDuration(project);
+    const resolvedFunded = fundedAmount ?? this._getProjectFunded(project);
+    const resolvedTime = timeInvested ?? this._getProjectTimeInvested(project);
+
+    let progress = 0;
+    if (resolvedDuration > 0) {
+      progress = Math.min(1, resolvedTime / resolvedDuration);
+    } else if (resolvedCost > 0) {
+      progress = Math.min(1, resolvedFunded / resolvedCost);
+    } else if (resolvedFunded > 0 || resolvedTime > 0) {
+      progress = 1;
+    }
+
+    return progress;
+  }
+
+  _refreshProjectProgress(project) {
+    if (!project || typeof project !== 'object') {
+      return 0;
+    }
+
+    const progress = this._computeProjectProgress(project);
+    project.progress = progress;
+    return progress;
+  }
+
   constructor({
     id,
     name = 'Unknown Safehouse',
@@ -102,7 +280,15 @@ class Safehouse {
       name: this.name,
       location: this.location,
       description: this.description,
-      tiers: this.tiers.map((tier) => ({ ...tier })),
+      tiers: this.tiers.map((tier) => ({
+        ...tier,
+        amenities: Array.isArray(tier.amenities)
+          ? tier.amenities.map((amenity) => ({ ...amenity }))
+          : [],
+        projects: Array.isArray(tier.projects)
+          ? tier.projects.map((project) => ({ ...project }))
+          : [],
+      })),
       tierIndex: this.tierIndex,
       purchaseCost: this.purchaseCost,
       owned: this.owned,
@@ -190,6 +376,260 @@ class Safehouse {
     return projects;
   }
 
+  getActiveProjectSummaries() {
+    const tier = this.getCurrentTier();
+    if (!tier || !Array.isArray(tier.projects)) {
+      return [];
+    }
+
+    return tier.projects.map((project) => this.getProjectSummary(project.id)).filter(Boolean);
+  }
+
+  getProjectSummary(projectId) {
+    const record = this._findProjectRecord(projectId);
+    if (!record) {
+      return null;
+    }
+
+    const { project } = record;
+    const cost = this._getProjectCost(project);
+    const duration = this._getProjectDuration(project);
+    const fundedAmount = this._getProjectFunded(project);
+    const timeInvested = this._getProjectTimeInvested(project);
+    const fundingRemaining = Math.max(0, cost - fundedAmount);
+    const timeRemaining = Math.max(0, duration - timeInvested);
+    const rushCostPerDay = this._getProjectRushCost(project);
+    const progress = this._computeProjectProgress(project, { cost, duration, fundedAmount, timeInvested });
+
+    return {
+      id: project.id,
+      name: project.name,
+      summary: project.summary,
+      status: project.status ?? 'planned',
+      cost,
+      durationDays: duration,
+      fundedAmount,
+      timeInvested,
+      fundingRemaining,
+      timeRemaining,
+      rushCostPerDay,
+      progress,
+    };
+  }
+
+  getProjectRushQuote(projectId, { days = null } = {}) {
+    const record = this._findProjectRecord(projectId);
+    if (!record) {
+      return null;
+    }
+
+    const { project } = record;
+    const duration = this._getProjectDuration(project);
+    const rushCostPerDay = this._getProjectRushCost(project);
+    const timeInvested = this._getProjectTimeInvested(project);
+    const availableDays = Math.max(0, duration - timeInvested);
+    const targetDays = Number.isFinite(days) ? Math.min(Math.max(0, days), availableDays) : availableDays;
+
+    return {
+      projectId,
+      rushCostPerDay,
+      availableDays,
+      cost: rushCostPerDay * targetDays,
+    };
+  }
+
+  startProject(projectId, { fundsAvailable = 0 } = {}) {
+    const record = this._findProjectRecord(projectId);
+    if (!record) {
+      return { success: false, reason: 'not-found' };
+    }
+
+    if (record.tierIndex > this.tierIndex) {
+      return { success: false, reason: 'locked' };
+    }
+
+    const project = record.project;
+    const cost = this._getProjectCost(project);
+    const fundedAmount = this._getProjectFunded(project);
+    const remainingCost = Math.max(0, cost - fundedAmount);
+    const availableFunds = Number.isFinite(fundsAvailable) ? Math.max(0, fundsAvailable) : 0;
+
+    let fundsSpent = 0;
+    if (remainingCost > 0) {
+      if (availableFunds <= 0) {
+        return {
+          success: false,
+          reason: 'insufficient-funds',
+          required: remainingCost,
+        };
+      }
+
+      fundsSpent = Math.min(remainingCost, availableFunds);
+      project.fundedAmount = fundedAmount + fundsSpent;
+    }
+
+    const outstanding = Math.max(0, cost - this._getProjectFunded(project));
+    if (outstanding > 0) {
+      project.status = 'fundraising';
+      this._refreshProjectProgress(project);
+      return {
+        success: true,
+        fundsSpent,
+        remainingCost: outstanding,
+        project,
+      };
+    }
+
+    project.status = 'building';
+    if (!Number.isFinite(project.timeInvested)) {
+      project.timeInvested = 0;
+    }
+    this._refreshProjectProgress(project);
+
+    if (this._getProjectDuration(project) <= 0) {
+      const completion = this.completeProject(projectId, { record });
+      if (completion?.success) {
+        return { ...completion, success: true, fundsSpent, completed: true };
+      }
+    }
+
+    return {
+      success: true,
+      fundsSpent,
+      project,
+      completed: false,
+    };
+  }
+
+  advanceProject(projectId, { days = 0, fundsAvailable = 0 } = {}) {
+    const record = this._findProjectRecord(projectId);
+    if (!record) {
+      return { success: false, reason: 'not-found' };
+    }
+
+    if (record.tierIndex > this.tierIndex) {
+      return { success: false, reason: 'locked' };
+    }
+
+    const project = record.project;
+    const status = typeof project.status === 'string' ? project.status.toLowerCase() : '';
+    if (status !== 'building' && status !== 'fabricating') {
+      return { success: false, reason: 'not-started', status };
+    }
+
+    const cost = this._getProjectCost(project);
+    const fundedAmount = this._getProjectFunded(project);
+    if (fundedAmount < cost) {
+      return {
+        success: false,
+        reason: 'needs-funding',
+        remainingCost: cost - fundedAmount,
+      };
+    }
+
+    const duration = this._getProjectDuration(project);
+    const availableFunds = Number.isFinite(fundsAvailable) ? Math.max(0, fundsAvailable) : 0;
+    const rushCostPerDay = this._getProjectRushCost(project);
+    let timeInvested = this._getProjectTimeInvested(project);
+    let fundsSpent = 0;
+    let daysAdvanced = 0;
+
+    if (Number.isFinite(days) && days > 0 && duration > 0) {
+      const manualAdvance = Math.min(days, Math.max(0, duration - timeInvested));
+      if (manualAdvance > 0) {
+        timeInvested += manualAdvance;
+        daysAdvanced += manualAdvance;
+      }
+    }
+
+    if (availableFunds > 0 && duration > 0 && rushCostPerDay > 0) {
+      const remainingTime = Math.max(0, duration - timeInvested);
+      const affordableDays = Math.min(remainingTime, Math.floor(availableFunds / rushCostPerDay));
+      if (affordableDays > 0) {
+        const rushCost = affordableDays * rushCostPerDay;
+        fundsSpent += rushCost;
+        timeInvested += affordableDays;
+        daysAdvanced += affordableDays;
+      }
+    }
+
+    project.timeInvested = Math.min(duration, timeInvested);
+    const completed = duration <= 0 || project.timeInvested >= duration;
+    this._refreshProjectProgress(project);
+
+    if (completed) {
+      const completion = this.completeProject(projectId, { record });
+      if (completion?.success) {
+        return {
+          ...completion,
+          success: true,
+          fundsSpent,
+          daysAdvanced,
+          completed: true,
+        };
+      }
+    }
+
+    return {
+      success: daysAdvanced > 0 || fundsSpent > 0,
+      fundsSpent,
+      daysAdvanced,
+      completed: false,
+      remainingTime: Math.max(0, duration - project.timeInvested),
+      project,
+    };
+  }
+
+  completeProject(projectId, { record = null } = {}) {
+    const resolvedRecord = record ?? this._findProjectRecord(projectId);
+    if (!resolvedRecord) {
+      return { success: false, reason: 'not-found' };
+    }
+
+    const { tier, tierIndex, projectIndex, project } = resolvedRecord;
+    if (tierIndex > this.tierIndex) {
+      return { success: false, reason: 'locked' };
+    }
+
+    const cost = this._getProjectCost(project);
+    const fundedAmount = this._getProjectFunded(project);
+    if (fundedAmount < cost) {
+      return {
+        success: false,
+        reason: 'needs-funding',
+        remainingCost: cost - fundedAmount,
+      };
+    }
+
+    const duration = this._getProjectDuration(project);
+    const timeInvested = this._getProjectTimeInvested(project);
+    if (duration > 0 && timeInvested < duration) {
+      return {
+        success: false,
+        reason: 'needs-time',
+        remainingTime: duration - timeInvested,
+      };
+    }
+
+    if (!Array.isArray(tier.amenities)) {
+      tier.amenities = [];
+    }
+
+    project.status = 'active';
+    this._refreshProjectProgress(project);
+    const amenity = { ...project };
+    if (Array.isArray(tier.projects)) {
+      tier.projects.splice(projectIndex, 1);
+    }
+    tier.amenities.push(amenity);
+
+    return {
+      success: true,
+      amenity,
+      projectId,
+    };
+  }
+
   getPurchaseCost() {
     return Number.isFinite(this.purchaseCost) ? this.purchaseCost : 0;
   }
@@ -208,7 +648,15 @@ class Safehouse {
       name: this.name,
       location: this.location,
       description: this.description,
-      tiers: this.tiers.map((tier) => ({ ...tier })),
+      tiers: this.tiers.map((tier) => ({
+        ...tier,
+        amenities: Array.isArray(tier.amenities)
+          ? tier.amenities.map((amenity) => ({ ...amenity }))
+          : [],
+        projects: Array.isArray(tier.projects)
+          ? tier.projects.map((project) => ({ ...project }))
+          : [],
+      })),
       tierIndex: this.tierIndex,
       purchaseCost: this.purchaseCost,
       owned: this.owned,
@@ -410,6 +858,9 @@ const DEFAULT_SAFEHOUSES = [
             name: 'Reinforce Loading Bay',
             summary: 'Materials staged to expand the bay once crews secure more funding.',
             status: 'queued',
+            cost: 6500,
+            durationDays: 3,
+            rushCostPerDay: 2400,
           },
         ],
       },
@@ -442,6 +893,9 @@ const DEFAULT_SAFEHOUSES = [
             name: 'Operations Floor Plans',
             summary: 'Blueprints drafted for a command mezzanine to coordinate crews.',
             status: 'in-design',
+            cost: 9800,
+            durationDays: 4,
+            rushCostPerDay: 3200,
           },
         ],
       },
@@ -474,6 +928,9 @@ const DEFAULT_SAFEHOUSES = [
             name: 'Ghost Terminal Core',
             summary: 'Shell companies assemble a laundering terminal for the final tier.',
             status: 'fabricating',
+            cost: 14200,
+            durationDays: 5,
+            rushCostPerDay: 3600,
           },
         ],
       },
@@ -540,6 +997,9 @@ const DEFAULT_SAFEHOUSES = [
             name: 'Private Elevator Upfit',
             summary: 'Security upgrades queued to harden access control.',
             status: 'queued',
+            cost: 11500,
+            durationDays: 3,
+            rushCostPerDay: 3400,
           },
         ],
       },
@@ -572,6 +1032,9 @@ const DEFAULT_SAFEHOUSES = [
             name: 'Shadow Boardroom Designs',
             summary: 'Architects draft secret boardrooms to steer city movers.',
             status: 'in-design',
+            cost: 16800,
+            durationDays: 4,
+            rushCostPerDay: 4200,
           },
         ],
       },
@@ -604,6 +1067,9 @@ const DEFAULT_SAFEHOUSES = [
             name: 'Phantom Syndicate Expansion',
             summary: 'Lays groundwork for a whisper-network to erase crackdown traces.',
             status: 'fabricating',
+            cost: 22800,
+            durationDays: 5,
+            rushCostPerDay: 5200,
           },
         ],
       },

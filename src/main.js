@@ -95,6 +95,8 @@ const missionControls = {
   safehouseEffects: null,
   safehouseList: null,
   safehouseUpgradeButton: null,
+  safehouseProjectButton: null,
+  safehouseRushButton: null,
   safehouseStatus: null,
   safehouseStatusDetail: '',
   selectedCrewIds: [],
@@ -278,6 +280,34 @@ const describeFacilityEffectLine = (facility, { prefix = 'Facility', isActive = 
   const config = getFacilityEffectConfig(facility.id);
   const name = facility.name ?? config?.name ?? 'Facility';
   const effectParts = [];
+
+  const fundingRemaining =
+    Number.isFinite(facility.cost) && Number.isFinite(facility.fundedAmount)
+      ? Math.max(0, facility.cost - facility.fundedAmount)
+      : null;
+  if (fundingRemaining !== null && fundingRemaining > 0) {
+    effectParts.push(`${formatCurrency(fundingRemaining)} funding needed`);
+  }
+
+  const durationValue = Number.isFinite(facility.durationDays) ? Math.max(0, facility.durationDays) : null;
+  const timeInvestedValue = Number.isFinite(facility.timeInvested) ? Math.max(0, facility.timeInvested) : null;
+  if (
+    durationValue !== null &&
+    timeInvestedValue !== null &&
+    durationValue > 0 &&
+    fundingRemaining !== null &&
+    fundingRemaining <= 0
+  ) {
+    const remaining = Math.max(0, durationValue - timeInvestedValue);
+    if (remaining > 0) {
+      const dayLabel = remaining === 1 ? '1 day' : `${remaining} days`;
+      effectParts.push(`${dayLabel} remaining`);
+    }
+  }
+
+  if (Number.isFinite(facility.progress) && facility.progress > 0 && facility.progress < 1) {
+    effectParts.push(`${Math.round(facility.progress * 100)}% complete`);
+  }
 
   if (config) {
     if (Number.isFinite(config.passiveIncomeBonus) && config.passiveIncomeBonus !== 0) {
@@ -1261,6 +1291,8 @@ const updateSafehousePanel = () => {
     safehouseEffects,
     safehouseList,
     safehouseUpgradeButton,
+    safehouseProjectButton,
+    safehouseRushButton,
     safehouseStatus,
   } = missionControls;
 
@@ -1410,6 +1442,28 @@ const updateSafehousePanel = () => {
     });
   };
 
+  const setProjectButtonState = (button, {
+    text,
+    title,
+    disabled = true,
+    projectId = '',
+  } = {}) => {
+    if (!button) {
+      return;
+    }
+
+    if (typeof text === 'string') {
+      button.textContent = text;
+    }
+    if (typeof title === 'string') {
+      button.title = title;
+    }
+    button.disabled = Boolean(disabled);
+    if (button.dataset) {
+      button.dataset.projectId = projectId ?? '';
+    }
+  };
+
   if (!state) {
     safehouseName.textContent = 'Safehouse network offline.';
     safehouseTier.textContent = '—';
@@ -1422,6 +1476,16 @@ const updateSafehousePanel = () => {
     safehouseUpgradeButton.disabled = true;
     safehouseUpgradeButton.title = 'Safehouse systems offline.';
     safehouseUpgradeButton.textContent = 'Upgrade Safehouse';
+    setProjectButtonState(safehouseProjectButton, {
+      text: 'Fund Project',
+      title: 'Safehouse systems offline.',
+      disabled: true,
+    });
+    setProjectButtonState(safehouseRushButton, {
+      text: 'Rush Project',
+      title: 'Safehouse systems offline.',
+      disabled: true,
+    });
     const detail = missionControls.safehouseStatusDetail?.trim();
     const summary = 'Safehouse telemetry unavailable.';
     safehouseStatus.textContent = [detail, summary].filter(Boolean).join(' ');
@@ -1454,6 +1518,108 @@ const updateSafehousePanel = () => {
 
   const nextTier = safehouse?.getNextTier?.() ?? null;
   let summaryMessage;
+  let projectSummaryLine = '';
+
+  const projectSummaries = safehouse?.getActiveProjectSummaries?.()
+    ? safehouse.getActiveProjectSummaries()
+    : [];
+  const fundingTarget = projectSummaries.find(
+    (project) => Number.isFinite(project?.fundingRemaining) && project.fundingRemaining > 0,
+  );
+  const rushTarget = projectSummaries.find(
+    (project) =>
+      Number.isFinite(project?.timeRemaining) &&
+      project.timeRemaining > 0 &&
+      (!Number.isFinite(project?.fundingRemaining) || project.fundingRemaining <= 0),
+  );
+
+  if (!economySystem || !safehouse || !(safehouse.isOwned?.() ?? safehouse.owned ?? false)) {
+    const baseTitle = !economySystem
+      ? 'Economy systems offline.'
+      : !safehouse
+        ? 'Assign a safehouse to manage projects.'
+        : 'Purchase this safehouse before investing in projects.';
+    setProjectButtonState(safehouseProjectButton, {
+      text: 'Fund Project',
+      title: baseTitle,
+      disabled: true,
+    });
+    setProjectButtonState(safehouseRushButton, {
+      text: 'Rush Project',
+      title: baseTitle,
+      disabled: true,
+    });
+  } else if (!projectSummaries.length) {
+    setProjectButtonState(safehouseProjectButton, {
+      text: 'Fund Project',
+      title: 'No safehouse projects available at this tier.',
+      disabled: true,
+    });
+    setProjectButtonState(safehouseRushButton, {
+      text: 'Rush Project',
+      title: 'No safehouse projects available at this tier.',
+      disabled: true,
+    });
+  } else {
+    if (fundingTarget) {
+      const remainingCost = Math.max(0, fundingTarget.fundingRemaining);
+      const canInvest = funds > 0;
+      const title = canInvest
+        ? `${fundingTarget.name ?? 'Project'} requires ${formatCurrency(remainingCost)}.`
+        : `${fundingTarget.name ?? 'Project'} needs ${formatCurrency(remainingCost)} in funding.`;
+      setProjectButtonState(safehouseProjectButton, {
+        text: `Fund ${fundingTarget.name ?? 'Project'} (${formatCurrency(remainingCost)})`,
+        title,
+        disabled: !canInvest,
+        projectId: fundingTarget.id ?? '',
+      });
+      projectSummaryLine = `${fundingTarget.name ?? 'Project'} awaiting ${formatCurrency(remainingCost)} in funding.`;
+    } else {
+      setProjectButtonState(safehouseProjectButton, {
+        text: 'Fund Project',
+        title: 'All projects fully funded.',
+        disabled: true,
+      });
+    }
+
+    if (rushTarget) {
+      const rushQuote = safehouse.getProjectRushQuote?.(rushTarget.id) ?? null;
+      const rushCostPerDay = Number.isFinite(rushQuote?.rushCostPerDay) ? rushQuote.rushCostPerDay : null;
+      const timeRemaining = Number.isFinite(rushTarget.timeRemaining)
+        ? Math.max(0, rushTarget.timeRemaining)
+        : 0;
+      const costLabel = rushCostPerDay ? formatCurrency(rushCostPerDay) : null;
+      const canRush = rushCostPerDay && funds >= rushCostPerDay;
+      const rushTitle = rushCostPerDay
+        ? canRush
+          ? `${rushTarget.name ?? 'Project'} has ${Math.ceil(timeRemaining)} days remaining.`
+          : `Requires ${formatCurrency(rushCostPerDay)} to accelerate a day — available ${formatCurrency(funds)}.`
+        : `${rushTarget.name ?? 'Project'} cannot be rushed further.`;
+      setProjectButtonState(safehouseRushButton, {
+        text: costLabel
+          ? `Rush ${rushTarget.name ?? 'Project'} (${costLabel}/day)`
+          : `Rush ${rushTarget.name ?? 'Project'}`,
+        title: rushTitle,
+        disabled: !canRush,
+        projectId: rushTarget.id ?? '',
+      });
+      if (!projectSummaryLine) {
+        const daysRemainingLabel = Math.ceil(timeRemaining);
+        const progressLabel =
+          daysRemainingLabel === 1 ? 'finishes in 1 day.' : `has ${daysRemainingLabel} days remaining.`;
+        projectSummaryLine = `${rushTarget.name ?? 'Project'} ${progressLabel}`;
+      }
+    } else {
+      setProjectButtonState(safehouseRushButton, {
+        text: 'Rush Project',
+        title: fundingTarget ? 'Fund the next project before rushing construction.' : 'All projects complete.',
+        disabled: true,
+      });
+      if (!projectSummaryLine && projectSummaries.length) {
+        projectSummaryLine = 'All safehouse projects installed.';
+      }
+    }
+  }
 
   if (!economySystem) {
     safehouseUpgradeButton.disabled = true;
@@ -1489,7 +1655,7 @@ const updateSafehousePanel = () => {
   }
 
   const detail = missionControls.safehouseStatusDetail?.trim();
-  safehouseStatus.textContent = [detail, summaryMessage].filter(Boolean).join(' ');
+  safehouseStatus.textContent = [detail, projectSummaryLine, summaryMessage].filter(Boolean).join(' ');
 };
 
 const clearMaintenanceStatusDetail = () => {
@@ -2248,6 +2414,224 @@ const handleSafehouseUpgrade = () => {
 
   const tierLabel = result?.tier?.label ?? nextTier.label ?? 'new tier';
   missionControls.safehouseStatusDetail = `Upgraded safehouse to ${tierLabel} for ${formatCurrency(upgradeCost)}.`;
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleSafehouseProjectFunding = () => {
+  const economySystem = getEconomySystem();
+  const state = getSharedState();
+
+  if (!economySystem || !state) {
+    missionControls.safehouseStatusDetail = 'Safehouse systems offline.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const safehouse = getActiveSafehouseFromState(state);
+  if (!safehouse) {
+    missionControls.safehouseStatusDetail = 'No safehouse assigned — expand operations to unlock one.';
+    updateSafehousePanel();
+    return;
+  }
+
+  if (!(safehouse.isOwned?.() ?? safehouse.owned ?? false)) {
+    missionControls.safehouseStatusDetail = 'Purchase this safehouse before funding projects.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const projectSummaries = safehouse.getActiveProjectSummaries?.() ?? [];
+  if (!projectSummaries.length) {
+    missionControls.safehouseStatusDetail = 'No safehouse projects available to fund.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const preferredId = missionControls.safehouseProjectButton?.dataset.projectId ?? '';
+  let targetProject = preferredId
+    ? projectSummaries.find((project) => project?.id === preferredId)
+    : null;
+  if (!targetProject) {
+    targetProject = projectSummaries.find(
+      (project) => Number.isFinite(project?.fundingRemaining) && project.fundingRemaining > 0,
+    );
+  }
+
+  if (!targetProject) {
+    missionControls.safehouseStatusDetail = 'All safehouse projects already fully funded.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  const remainingCost = Math.max(0, Number(targetProject.fundingRemaining) || 0);
+
+  if (remainingCost <= 0) {
+    missionControls.safehouseStatusDetail = `${targetProject.name ?? 'Project'} already funded.`;
+    updateSafehousePanel();
+    return;
+  }
+
+  if (funds <= 0) {
+    missionControls.safehouseStatusDetail = `Insufficient funds — ${formatCurrency(remainingCost)} needed to fund ${
+      targetProject.name ?? 'this project'
+    }.`;
+    updateSafehousePanel();
+    return;
+  }
+
+  const fundsToInvest = Math.min(funds, remainingCost);
+  const result = safehouse.startProject?.(targetProject.id, { fundsAvailable: fundsToInvest }) ?? null;
+
+  if (!result || result.success === false) {
+    let message = 'Unable to fund project.';
+    if (result?.reason === 'locked') {
+      message = 'Unlock this safehouse tier before funding projects.';
+    } else if (result?.reason === 'insufficient-funds') {
+      const required = formatCurrency(result.required ?? remainingCost);
+      message = `Requires ${required} to fund ${targetProject.name ?? 'this project'}.`;
+    }
+    missionControls.safehouseStatusDetail = message;
+    updateSafehousePanel();
+    return;
+  }
+
+  if (Number.isFinite(result.fundsSpent) && result.fundsSpent > 0) {
+    economySystem.adjustFunds(-result.fundsSpent);
+  }
+
+  let statusMessage;
+  if (result.completed) {
+    const amenityName = result.amenity?.name ?? targetProject.name ?? 'Project';
+    statusMessage = `${amenityName} completed and brought online.`;
+  } else if (Number.isFinite(result.remainingCost) && result.remainingCost > 0) {
+    statusMessage = `Allocated ${formatCurrency(result.fundsSpent ?? fundsToInvest)} to ${
+      targetProject.name ?? 'the project'
+    } — ${formatCurrency(result.remainingCost)} still required.`;
+  } else {
+    statusMessage = `Funded ${targetProject.name ?? 'the project'} for ${formatCurrency(
+      result.fundsSpent ?? fundsToInvest,
+    )}.`;
+  }
+
+  missionControls.safehouseStatusDetail = statusMessage;
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleSafehouseProjectRush = () => {
+  const economySystem = getEconomySystem();
+  const state = getSharedState();
+
+  if (!economySystem || !state) {
+    missionControls.safehouseStatusDetail = 'Safehouse systems offline.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const safehouse = getActiveSafehouseFromState(state);
+  if (!safehouse) {
+    missionControls.safehouseStatusDetail = 'No safehouse assigned — expand operations to unlock one.';
+    updateSafehousePanel();
+    return;
+  }
+
+  if (!(safehouse.isOwned?.() ?? safehouse.owned ?? false)) {
+    missionControls.safehouseStatusDetail = 'Purchase this safehouse before accelerating projects.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const projectSummaries = safehouse.getActiveProjectSummaries?.() ?? [];
+  if (!projectSummaries.length) {
+    missionControls.safehouseStatusDetail = 'No safehouse projects currently in progress.';
+    updateSafehousePanel();
+    return;
+  }
+
+  const preferredId = missionControls.safehouseRushButton?.dataset.projectId ?? '';
+  let targetProject = preferredId
+    ? projectSummaries.find((project) => project?.id === preferredId)
+    : null;
+  if (!targetProject) {
+    targetProject = projectSummaries.find(
+      (project) =>
+        Number.isFinite(project?.timeRemaining) &&
+        project.timeRemaining > 0 &&
+        (!Number.isFinite(project?.fundingRemaining) || project.fundingRemaining <= 0),
+    );
+  }
+
+  if (!targetProject) {
+    missionControls.safehouseStatusDetail = 'No eligible projects to accelerate — fund a project first.';
+    updateSafehousePanel();
+    return;
+  }
+
+  if (Number.isFinite(targetProject.fundingRemaining) && targetProject.fundingRemaining > 0) {
+    missionControls.safehouseStatusDetail = `Fund ${targetProject.name ?? 'the project'} before rushing construction.`;
+    updateSafehousePanel();
+    return;
+  }
+
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  const rushQuote = safehouse.getProjectRushQuote?.(targetProject.id) ?? null;
+  const rushCostPerDay = Number.isFinite(rushQuote?.rushCostPerDay) ? rushQuote.rushCostPerDay : null;
+
+  if (!rushCostPerDay || rushCostPerDay <= 0) {
+    missionControls.safehouseStatusDetail = `${targetProject.name ?? 'Project'} cannot be rushed.`;
+    updateSafehousePanel();
+    return;
+  }
+
+  if (funds < rushCostPerDay) {
+    missionControls.safehouseStatusDetail = `Requires ${formatCurrency(rushCostPerDay)} to rush ${
+      targetProject.name ?? 'this project'
+    }.`;
+    updateSafehousePanel();
+    return;
+  }
+
+  const result = safehouse.advanceProject?.(targetProject.id, { fundsAvailable: funds }) ?? null;
+
+  if (!result || result.success === false) {
+    let message = 'Unable to accelerate project.';
+    if (result?.reason === 'needs-funding') {
+      message = `Fund ${targetProject.name ?? 'the project'} before accelerating it.`;
+    } else if (result?.reason === 'not-started') {
+      message = `Begin construction on ${targetProject.name ?? 'the project'} before rushing it.`;
+    } else if (result?.reason === 'locked') {
+      message = 'Unlock this safehouse tier before accelerating projects.';
+    }
+    missionControls.safehouseStatusDetail = message;
+    updateSafehousePanel();
+    return;
+  }
+
+  if (Number.isFinite(result.fundsSpent) && result.fundsSpent > 0) {
+    economySystem.adjustFunds(-result.fundsSpent);
+  }
+
+  let statusMessage;
+  if (result.completed) {
+    const amenityName = result.amenity?.name ?? targetProject.name ?? 'Project';
+    statusMessage = `${amenityName} completed and brought online.`;
+  } else if (Number.isFinite(result.daysAdvanced) && result.daysAdvanced > 0) {
+    const daysLabel = result.daysAdvanced === 1 ? '1 day' : `${result.daysAdvanced} days`;
+    statusMessage = `Accelerated ${targetProject.name ?? 'the project'} by ${daysLabel} for ${formatCurrency(
+      result.fundsSpent ?? rushCostPerDay,
+    )}.`;
+    if (Number.isFinite(result.remainingTime) && result.remainingTime > 0) {
+      statusMessage += ` ${Math.ceil(result.remainingTime)} days remaining.`;
+    }
+  } else {
+    statusMessage = `Invested ${formatCurrency(result.fundsSpent ?? rushCostPerDay)} into ${
+      targetProject.name ?? 'the project'
+    }.`;
+  }
+
+  missionControls.safehouseStatusDetail = statusMessage;
   updateMissionControls();
   triggerHudRender();
 };
@@ -4004,6 +4388,8 @@ const updateMissionControls = () => {
     safehouseEffects,
     safehouseList,
     safehouseUpgradeButton,
+    safehouseProjectButton,
+    safehouseRushButton,
     safehouseStatus,
     trainingCrewSelect,
     trainingSpecialtySelect,
@@ -4572,6 +4958,20 @@ const setupMissionControls = () => {
       catalogPlaceholder.textContent = 'Safehouse manifest loading…';
       catalog.appendChild(catalogPlaceholder);
 
+      const projectButton = document.createElement('button');
+      projectButton.id = 'mission-safehouse-project-btn';
+      projectButton.type = 'button';
+      projectButton.className = 'button button--secondary mission-safehouse__project-btn';
+      projectButton.textContent = 'Fund Project';
+      projectButton.disabled = true;
+
+      const rushButton = document.createElement('button');
+      rushButton.id = 'mission-safehouse-rush-btn';
+      rushButton.type = 'button';
+      rushButton.className = 'button button--secondary mission-safehouse__rush-btn';
+      rushButton.textContent = 'Rush Project';
+      rushButton.disabled = true;
+
       const upgradeButton = document.createElement('button');
       upgradeButton.id = 'mission-safehouse-upgrade-btn';
       upgradeButton.type = 'button';
@@ -4583,7 +4983,7 @@ const setupMissionControls = () => {
       status.setAttribute('role', 'status');
       status.setAttribute('aria-live', 'polite');
 
-      safehouseSection.append(title, hint, grid, catalog, upgradeButton, status);
+      safehouseSection.append(title, hint, grid, catalog, projectButton, rushButton, upgradeButton, status);
 
       const heatSection = controlPanel.querySelector('.mission-heat');
       if (heatSection && heatSection.parentElement === controlPanel) {
@@ -4598,6 +4998,8 @@ const setupMissionControls = () => {
     missionControls.safehouseTier = safehouseSection.querySelector('#mission-safehouse-tier');
     missionControls.safehouseEffects = safehouseSection.querySelector('#mission-safehouse-effects');
     missionControls.safehouseList = safehouseSection.querySelector('#mission-safehouse-catalog');
+    missionControls.safehouseProjectButton = safehouseSection.querySelector('#mission-safehouse-project-btn');
+    missionControls.safehouseRushButton = safehouseSection.querySelector('#mission-safehouse-rush-btn');
     missionControls.safehouseUpgradeButton = safehouseSection.querySelector('#mission-safehouse-upgrade-btn');
     missionControls.safehouseStatus = safehouseSection.querySelector('#mission-safehouse-status');
   }
@@ -4807,6 +5209,8 @@ const setupMissionControls = () => {
   maintenanceUpgradeSelect?.addEventListener('change', updateMaintenancePanel);
   heatLayLowButton.addEventListener('click', handleHeatLayLow);
   heatBribeButton.addEventListener('click', handleHeatBribe);
+  missionControls.safehouseProjectButton?.addEventListener('click', handleSafehouseProjectFunding);
+  missionControls.safehouseRushButton?.addEventListener('click', handleSafehouseProjectRush);
   missionControls.safehouseUpgradeButton?.addEventListener('click', handleSafehouseUpgrade);
   missionControls.safehouseList?.addEventListener('click', handleSafehouseListClick);
 
