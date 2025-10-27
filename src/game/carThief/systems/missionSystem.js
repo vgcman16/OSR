@@ -31,6 +31,189 @@ const clamp = (value, min, max) => {
 
 const REQUIRED_TEMPLATE_FIELDS = ['id', 'name'];
 
+const RISK_TIER_ORDER = ['low', 'moderate', 'high'];
+
+const NOTORIETY_LEVELS = [
+  {
+    id: 'unknown',
+    label: 'Unknown',
+    min: 0,
+    max: 14,
+    payoutBonus: 0,
+    heatMultiplier: 1,
+    difficultyDelta: 0,
+    riskShift: 0,
+    crackdownPressure: 0,
+    summary: 'Fixers barely know your name — contracts stay routine.',
+  },
+  {
+    id: 'watched',
+    label: 'Watched',
+    min: 15,
+    max: 29,
+    payoutBonus: 0.05,
+    heatMultiplier: 1.1,
+    difficultyDelta: 0,
+    riskShift: 0,
+    crackdownPressure: 0.4,
+    summary: 'Word travels. Expect ~5% richer scores but more patrol interest.',
+  },
+  {
+    id: 'notorious',
+    label: 'Notorious',
+    min: 30,
+    max: 49,
+    payoutBonus: 0.12,
+    heatMultiplier: 1.25,
+    difficultyDelta: 1,
+    riskShift: 1,
+    crackdownPressure: 0.8,
+    summary: 'Crews line up, but the city responds hard — payouts climb while risk escalates.',
+  },
+  {
+    id: 'legendary',
+    label: 'Legendary',
+    min: 50,
+    max: Infinity,
+    payoutBonus: 0.2,
+    heatMultiplier: 1.5,
+    difficultyDelta: 2,
+    riskShift: 1,
+    crackdownPressure: 1.2,
+    summary: 'Every move is headline news — massive paydays, crushing pressure.',
+  },
+];
+
+const CRACKDOWN_NOTORIETY_PRESSURE = {
+  calm: 0,
+  alert: 4,
+  lockdown: 8,
+};
+
+const normalizeNotoriety = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  return Math.max(0, numeric);
+};
+
+const getNotorietyProfile = (value) => {
+  const notoriety = normalizeNotoriety(value);
+  const profile = NOTORIETY_LEVELS.find((level) => notoriety >= level.min && notoriety <= level.max);
+  if (profile) {
+    return { ...profile, notoriety };
+  }
+
+  const last = NOTORIETY_LEVELS[NOTORIETY_LEVELS.length - 1];
+  return { ...last, notoriety };
+};
+
+const getNextNotorietyProfile = (value) => {
+  const notoriety = normalizeNotoriety(value);
+  const index = NOTORIETY_LEVELS.findIndex((level) => notoriety >= level.min && notoriety <= level.max);
+  if (index === -1) {
+    return null;
+  }
+
+  return NOTORIETY_LEVELS[index + 1] ?? null;
+};
+
+const shiftRiskTier = (baseTier, shift = 0) => {
+  const baseIndex = RISK_TIER_ORDER.indexOf(baseTier);
+  const normalizedBase = baseIndex === -1 ? 0 : baseIndex;
+  const offset = Number.isFinite(shift) ? Math.trunc(shift) : 0;
+  const targetIndex = clamp(normalizedBase + offset, 0, RISK_TIER_ORDER.length - 1);
+  return RISK_TIER_ORDER[targetIndex];
+};
+
+const applyNotorietyModifiersToMission = (missionValues, notorietyProfile, crackdownPolicy) => {
+  if (!notorietyProfile) {
+    return {
+      ...missionValues,
+      notorietyLevelId: null,
+      notorietyModifiers: null,
+    };
+  }
+
+  const payoutBonus = Number.isFinite(notorietyProfile.payoutBonus) ? notorietyProfile.payoutBonus : 0;
+  const heatMultiplier = Number.isFinite(notorietyProfile.heatMultiplier)
+    ? notorietyProfile.heatMultiplier
+    : 1;
+  const difficultyDelta = Number.isFinite(notorietyProfile.difficultyDelta)
+    ? notorietyProfile.difficultyDelta
+    : 0;
+  const riskShift = Number.isFinite(notorietyProfile.riskShift) ? notorietyProfile.riskShift : 0;
+  const crackdownPressure = Number.isFinite(notorietyProfile.crackdownPressure)
+    ? notorietyProfile.crackdownPressure
+    : 0;
+
+  const policyMultiplier = Number.isFinite(crackdownPolicy?.failureHeatMultiplier)
+    ? crackdownPolicy.failureHeatMultiplier
+    : 1;
+
+  const basePayout = Math.max(0, Number(missionValues.payout) || 0);
+  const baseHeat = Math.max(1, Math.round(Number(missionValues.heat) || 1));
+  const baseDifficulty = Math.max(1, Math.round(Number(missionValues.difficulty) || 1));
+  const baseRiskTier = missionValues.riskTier ?? 'low';
+
+  const adjustedPayout = Math.round(basePayout * (1 + payoutBonus));
+  const notorietyHeat = Math.round(baseHeat * heatMultiplier + crackdownPressure * policyMultiplier);
+  const adjustedHeat = Math.max(1, notorietyHeat);
+  const adjustedDifficulty = Math.max(1, Math.round(baseDifficulty + difficultyDelta));
+  const adjustedRiskTier = shiftRiskTier(baseRiskTier, riskShift);
+
+  return {
+    payout: adjustedPayout,
+    heat: adjustedHeat,
+    difficulty: adjustedDifficulty,
+    riskTier: adjustedRiskTier,
+    notorietyLevelId: notorietyProfile.id,
+    notorietyModifiers: {
+      payoutBonus,
+      heatMultiplier,
+      difficultyDelta,
+      riskShift,
+      crackdownPressure,
+    },
+  };
+};
+
+const computeMissionNotorietyDelta = (mission, outcome, crackdownPolicy) => {
+  if (!mission) {
+    return 0;
+  }
+
+  const baseHeat = Number.isFinite(mission.baseHeat)
+    ? Math.max(0, mission.baseHeat)
+    : Math.max(0, Number(mission.heat) || 0);
+  const appliedHeat = Math.max(0, Number(mission.heat) || baseHeat);
+  const difficulty = Math.max(0, Number(mission.difficulty) || 0);
+  const payout = Math.max(0, Number(mission.payout) || 0);
+  const crackdownMultiplier = Number.isFinite(crackdownPolicy?.failureHeatMultiplier)
+    ? crackdownPolicy.failureHeatMultiplier
+    : 1;
+
+  if (mission.category === 'crackdown-operation' && outcome === 'success') {
+    return -Math.max(1, Math.round(baseHeat * 1.5));
+  }
+
+  const payoutWeight = Math.log10(payout + 10);
+  const baseScore = appliedHeat * 1.2 + difficulty * 0.8 + payoutWeight;
+
+  if (outcome === 'success') {
+    return Math.round(baseScore * 10) / 10;
+  }
+
+  if (outcome === 'failure') {
+    const amplified = baseScore * (0.75 + crackdownMultiplier * 0.4);
+    return Math.round(amplified * 10) / 10;
+  }
+
+  return 0;
+};
+
 const CREW_TRAIT_EFFECTS = {
   stealth: {
     durationReduction: 0.01,
@@ -807,9 +990,25 @@ class MissionSystem {
       return null;
     }
 
-    const payout = coerceFiniteNumber(template.payout, 0);
-    const heat = coerceFiniteNumber(template.heat, 0);
-    const difficulty = coerceFiniteNumber(template.difficulty, 1);
+    const basePayout = coerceFiniteNumber(template.payout, 0);
+    const baseHeat = coerceFiniteNumber(template.heat, 0);
+    const baseDifficulty = coerceFiniteNumber(template.difficulty, 1);
+    const notorietyProfile = getNotorietyProfile(this.state?.player?.notoriety);
+    const crackdownPolicy = this.getCurrentCrackdownPolicy();
+    const notorietyAdjusted = applyNotorietyModifiersToMission(
+      {
+        payout: basePayout,
+        heat: baseHeat,
+        difficulty: baseDifficulty,
+        riskTier: template.riskTier ?? 'low',
+      },
+      notorietyProfile,
+      crackdownPolicy,
+    );
+
+    const payout = notorietyAdjusted.payout;
+    const heat = notorietyAdjusted.heat;
+    const difficulty = notorietyAdjusted.difficulty;
     const duration = sanitizeDuration(template.duration, difficulty);
     const baseSuccessChance = deriveBaseSuccessChance(difficulty);
     const pointOfInterest =
@@ -846,10 +1045,14 @@ class MissionSystem {
       storyline,
       crackdownEffects,
       payout,
-      basePayout: payout,
+      basePayout,
       heat,
-      baseHeat: heat,
+      baseHeat,
       difficulty,
+      baseDifficulty,
+      riskTier: notorietyAdjusted.riskTier,
+      notorietyLevel: notorietyAdjusted.notorietyLevelId ?? null,
+      notorietyModifiers: notorietyAdjusted.notorietyModifiers,
       vehicle: new Vehicle(vehicleConfig),
       status: 'available',
       restricted: false,
@@ -1513,6 +1716,9 @@ class MissionSystem {
     if (extras?.crackdownSummary) {
       summary = `${summary} — ${extras.crackdownSummary}`;
     }
+    if (extras?.notorietySummary) {
+      summary = `${summary} — ${extras.notorietySummary}`;
+    }
 
     const clonedFallout = falloutEntries.map((entry) => ({ ...entry }));
     const clonedFollowUps = followUpEntries.map((entry) => ({ ...entry }));
@@ -1560,6 +1766,7 @@ class MissionSystem {
       followUpSummary,
       storylineSummary: extras?.storylineSummary ?? null,
       crackdownSummary: extras?.crackdownSummary ?? null,
+      notorietySummary: extras?.notorietySummary ?? null,
     };
 
     this.state.missionLog.unshift(entry);
@@ -2359,6 +2566,16 @@ class MissionSystem {
       this.syncHeatTier();
     }
 
+    const notorietyChange = computeMissionNotorietyDelta(mission, outcome, crackdownPolicy);
+    const notorietyBefore = this.getPlayerNotoriety();
+    let notorietyAfter = notorietyBefore;
+    if (notorietyChange !== 0) {
+      notorietyAfter = this.adjustPlayerNotoriety(notorietyChange, { reason: `mission-${outcome}` });
+      mission.notorietyDelta = notorietyChange;
+      mission.notorietyBefore = notorietyBefore;
+      mission.notorietyAfter = notorietyAfter;
+    }
+
     let vehicleReport = null;
     if (assignedVehicle) {
       const wearAmount = (() => {
@@ -2482,6 +2699,10 @@ class MissionSystem {
     }
     if (crackdownOutcome) {
       telemetryExtras.crackdownSummary = crackdownOutcome;
+    }
+    if (notorietyChange !== 0) {
+      const formattedChange = notorietyChange > 0 ? `+${notorietyChange.toFixed(1)}` : notorietyChange.toFixed(1);
+      telemetryExtras.notorietySummary = `Notoriety ${formattedChange} (now ${notorietyAfter.toFixed(1)})`;
     }
 
     this.recordMissionTelemetry(mission, outcome, telemetryExtras);
@@ -3022,9 +3243,11 @@ MissionSystem.prototype.getCurrentCrackdownPolicy = function getCurrentCrackdown
 MissionSystem.prototype.syncHeatTier = function syncHeatTier() {
   const latestTier = this.heatSystem.getCurrentTier();
   if (this.currentCrackdownTier !== latestTier) {
+    const previousTier = this.currentCrackdownTier;
     this.currentCrackdownTier = latestTier;
     this.ensureCrackdownOperations(latestTier);
     this.applyHeatRestrictions();
+    this.applyCrackdownNotorietyShift(previousTier, latestTier);
   } else {
     this.ensureCrackdownOperations(latestTier);
   }
@@ -3063,10 +3286,69 @@ MissionSystem.prototype.applyHeatRestrictions = function applyHeatRestrictions()
   });
 };
 
+MissionSystem.prototype.getPlayerNotoriety = function getPlayerNotoriety() {
+  if (!this.state.player || typeof this.state.player !== 'object') {
+    this.state.player = { notoriety: 0 };
+  }
+
+  const notoriety = normalizeNotoriety(this.state.player.notoriety);
+  this.state.player.notoriety = notoriety;
+  return notoriety;
+};
+
+MissionSystem.prototype.adjustPlayerNotoriety = function adjustPlayerNotoriety(delta, options = {}) {
+  if (!Number.isFinite(delta) || delta === 0) {
+    return this.getPlayerNotoriety();
+  }
+
+  const cap = Number.isFinite(options.cap) ? options.cap : null;
+  const current = this.getPlayerNotoriety();
+  let next = current + delta;
+  if (cap !== null) {
+    next = Math.min(next, cap);
+  }
+  next = Math.max(0, Math.round(next * 10) / 10);
+
+  this.state.player.notoriety = next;
+  this.state.lastNotorietyUpdate = {
+    timestamp: Date.now(),
+    delta,
+    notoriety: next,
+    reason: options.reason ?? null,
+  };
+
+  return next;
+};
+
+MissionSystem.prototype.getPlayerNotorietyProfile = function getPlayerNotorietyProfile() {
+  const notoriety = this.getPlayerNotoriety();
+  return getNotorietyProfile(notoriety);
+};
+
+MissionSystem.prototype.applyCrackdownNotorietyShift = function applyCrackdownNotorietyShift(
+  previousTier,
+  nextTier,
+) {
+  const previousPressure = CRACKDOWN_NOTORIETY_PRESSURE[previousTier] ?? 0;
+  const nextPressure = CRACKDOWN_NOTORIETY_PRESSURE[nextTier] ?? 0;
+  const delta = nextPressure - previousPressure;
+
+  if (!delta) {
+    return this.getPlayerNotoriety();
+  }
+
+  return this.adjustPlayerNotoriety(delta, {
+    reason: 'crackdown-shift',
+  });
+};
+
 export {
   MissionSystem,
   GARAGE_MAINTENANCE_CONFIG,
   PLAYER_SKILL_CONFIG,
   PLAYER_GEAR_CATALOG,
   VEHICLE_UPGRADE_CATALOG,
+  NOTORIETY_LEVELS,
+  getNotorietyProfile,
+  getNextNotorietyProfile,
 };
