@@ -63,6 +63,11 @@ const CREW_FATIGUE_CONFIG = {
   recoveryPerDay: 35,
 };
 
+const CREW_REST_CONFIG = {
+  maxDurationDays: 4,
+  recoveryMultiplier: 1.6,
+};
+
 const clampFatigue = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -88,6 +93,35 @@ const clampTraitLevel = (value) => {
   }
 
   return Math.max(0, Math.min(6, Math.round(numeric)));
+};
+
+const normalizeRestPlan = (plan) => {
+  if (!plan || typeof plan !== 'object') {
+    return null;
+  }
+
+  const remainingDaysRaw = Number(plan.remainingDays);
+  const safeRemaining = Number.isFinite(remainingDaysRaw)
+    ? Math.max(0, Math.min(CREW_REST_CONFIG.maxDurationDays, Math.round(remainingDaysRaw)))
+    : 0;
+
+  if (safeRemaining <= 0) {
+    return null;
+  }
+
+  const multiplierRaw = Number(plan.recoveryMultiplier);
+  const normalizedMultiplier = Number.isFinite(multiplierRaw) && multiplierRaw > 0
+    ? multiplierRaw
+    : CREW_REST_CONFIG.recoveryMultiplier;
+
+  const orderedAtRaw = Number(plan.orderedAt);
+  const orderedAt = Number.isFinite(orderedAtRaw) ? orderedAtRaw : Date.now();
+
+  return {
+    remainingDays: safeRemaining,
+    recoveryMultiplier: normalizedMultiplier,
+    orderedAt,
+  };
 };
 
 const SPECIALTY_TRAIT_PROFILE = {
@@ -342,6 +376,8 @@ class CrewMember {
     this.lastMissionCompletedAt = Number.isFinite(lastMissionCompletedAt)
       ? lastMissionCompletedAt
       : null;
+    const restPlan = options.restPlan ?? null;
+    this.restPlan = normalizeRestPlan(restPlan);
     if (this.isExhausted()) {
       this.status = 'needs-rest';
     }
@@ -362,6 +398,9 @@ class CrewMember {
   }
 
   getReadinessState() {
+    if (this.hasActiveRestOrder() && (this.status ?? '').toLowerCase() !== 'on-mission') {
+      return 'resting';
+    }
     const fatigue = this.getFatigueLevel();
     if (fatigue >= CREW_FATIGUE_CONFIG.exhaustionThreshold) {
       return 'exhausted';
@@ -380,11 +419,110 @@ class CrewMember {
       state: this.getReadinessState(),
       recoveryPerDay: this.getFatigueRecoveryRate(),
       maxFatigue: CREW_FATIGUE_CONFIG.maxFatigue,
+      restPlan: this.restPlan && this.restPlan.remainingDays > 0 ? { ...this.restPlan } : null,
     };
   }
 
   isExhausted() {
     return this.getFatigueLevel() >= CREW_FATIGUE_CONFIG.exhaustionThreshold;
+  }
+
+  hasActiveRestOrder() {
+    return Boolean(this.restPlan && this.restPlan.remainingDays > 0);
+  }
+
+  isResting() {
+    const statusLabel = (this.status ?? '').toLowerCase();
+    return this.hasActiveRestOrder() && statusLabel === 'resting';
+  }
+
+  isRestEligible() {
+    const statusLabel = (this.status ?? '').toLowerCase();
+    if (statusLabel === 'on-mission' || statusLabel === 'captured') {
+      return false;
+    }
+
+    return true;
+  }
+
+  markRestOrder({ days = 1, recoveryMultiplier = CREW_REST_CONFIG.recoveryMultiplier } = {}) {
+    if (!this.isRestEligible()) {
+      return null;
+    }
+
+    const normalizedDays = Number.isFinite(days) ? Math.max(1, Math.round(days)) : 1;
+    const normalizedMultiplier = Number.isFinite(recoveryMultiplier)
+      ? Math.max(1, recoveryMultiplier)
+      : CREW_REST_CONFIG.recoveryMultiplier;
+
+    if (!this.restPlan || this.restPlan.remainingDays <= 0) {
+      this.restPlan = {
+        remainingDays: Math.min(normalizedDays, CREW_REST_CONFIG.maxDurationDays),
+        recoveryMultiplier: normalizedMultiplier,
+        orderedAt: Date.now(),
+      };
+    } else {
+      const combinedDays = this.restPlan.remainingDays + normalizedDays;
+      this.restPlan.remainingDays = Math.min(combinedDays, CREW_REST_CONFIG.maxDurationDays);
+      this.restPlan.recoveryMultiplier = normalizedMultiplier;
+      this.restPlan.orderedAt = Date.now();
+    }
+
+    if ((this.status ?? '').toLowerCase() !== 'on-mission') {
+      this.setStatus('resting');
+    }
+
+    return { ...this.restPlan };
+  }
+
+  clearRestOrder({ keepStatus = false } = {}) {
+    this.restPlan = null;
+
+    if (keepStatus) {
+      return;
+    }
+
+    if (this.isExhausted()) {
+      this.setStatus('needs-rest');
+    } else {
+      this.setStatus('idle');
+    }
+  }
+
+  applyRestRecovery(days = 1) {
+    const normalizedDays = Number.isFinite(days) ? Math.max(0, days) : 0;
+    if (normalizedDays <= 0) {
+      return this.getFatigueLevel();
+    }
+
+    if (!this.hasActiveRestOrder()) {
+      return this.recoverFatigue(normalizedDays);
+    }
+
+    const plan = this.restPlan;
+    const restMultiplier = Number.isFinite(plan.recoveryMultiplier)
+      ? Math.max(1, plan.recoveryMultiplier)
+      : CREW_REST_CONFIG.recoveryMultiplier;
+
+    let remainingDays = normalizedDays;
+    const acceleratedDays = Math.min(plan.remainingDays, remainingDays);
+    if (acceleratedDays > 0) {
+      this.recoverFatigue(acceleratedDays, { recoveryMultiplier: restMultiplier, preserveStatus: true });
+      plan.remainingDays -= acceleratedDays;
+      remainingDays -= acceleratedDays;
+    }
+
+    if (remainingDays > 0) {
+      this.recoverFatigue(remainingDays, { preserveStatus: true });
+    }
+
+    if (plan.remainingDays <= 0 || this.getFatigueLevel() === 0) {
+      this.clearRestOrder();
+    } else if ((this.status ?? '').toLowerCase() !== 'on-mission') {
+      this.setStatus('resting');
+    }
+
+    return this.getFatigueLevel();
   }
 
   isMissionReady() {
@@ -397,6 +535,9 @@ class CrewMember {
   }
 
   beginMission() {
+    if (this.hasActiveRestOrder()) {
+      this.clearRestOrder({ keepStatus: true });
+    }
     this.setStatus('on-mission');
   }
 
@@ -479,7 +620,7 @@ class CrewMember {
     return resultingFatigue;
   }
 
-  recoverFatigue(days = 1) {
+  recoverFatigue(days = 1, { recoveryMultiplier = 1, preserveStatus = false } = {}) {
     if ((this.status ?? '').toLowerCase() === 'on-mission') {
       return this.getFatigueLevel();
     }
@@ -490,7 +631,10 @@ class CrewMember {
       return this.getFatigueLevel();
     }
 
-    const recoveryPerDay = this.getFatigueRecoveryRate();
+    const normalizedMultiplier = Number.isFinite(recoveryMultiplier) && recoveryMultiplier > 0
+      ? recoveryMultiplier
+      : 1;
+    const recoveryPerDay = this.getFatigueRecoveryRate() * normalizedMultiplier;
     const totalRecovery = Math.max(0, recoveryPerDay * safeDays);
     if (totalRecovery <= 0) {
       return this.getFatigueLevel();
@@ -503,8 +647,12 @@ class CrewMember {
       this.lastRestedAt = Date.now();
     }
 
-    if (this.status === 'needs-rest' && nextFatigue < CREW_FATIGUE_CONFIG.exhaustionThreshold) {
-      this.setStatus('idle');
+    if (!preserveStatus) {
+      if (this.status === 'needs-rest' && nextFatigue < CREW_FATIGUE_CONFIG.exhaustionThreshold) {
+        this.setStatus('idle');
+      } else if (nextFatigue === 0) {
+        this.setStatus('idle');
+      }
     }
 
     return this.fatigue;
@@ -550,4 +698,5 @@ export {
   createCrewTemplate,
   getBackgroundById,
   CREW_FATIGUE_CONFIG,
+  CREW_REST_CONFIG,
 };
