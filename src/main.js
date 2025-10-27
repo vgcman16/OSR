@@ -102,6 +102,9 @@ const missionControls = {
   safehouseRushButton: null,
   safehouseStatus: null,
   safehouseStatusDetail: '',
+  safehouseAlertPrompt: null,
+  safehouseAlertsList: null,
+  safehouseAlertStatus: null,
   selectedCrewIds: [],
   selectedVehicleId: null,
 };
@@ -1390,6 +1393,9 @@ const updateSafehousePanel = () => {
     safehouseProjectButton,
     safehouseRushButton,
     safehouseStatus,
+    safehouseAlertPrompt,
+    safehouseAlertsList,
+    safehouseAlertStatus,
   } = missionControls;
 
   if (
@@ -1398,13 +1404,84 @@ const updateSafehousePanel = () => {
     !safehouseEffects ||
     !safehouseList ||
     !safehouseUpgradeButton ||
-    !safehouseStatus
+    !safehouseStatus ||
+    !safehouseAlertPrompt ||
+    !safehouseAlertsList ||
+    !safehouseAlertStatus
   ) {
     return;
   }
 
   const economySystem = getEconomySystem();
   const state = getSharedState();
+  let alertSummaryLine = '';
+
+  const renderSafehouseAlerts = (alerts, { day } = {}) => {
+    safehouseAlertsList.innerHTML = '';
+
+    const entries = Array.isArray(alerts) ? alerts.filter((entry) => entry && entry.id) : [];
+    if (!entries.length) {
+      safehouseAlertPrompt.textContent = 'Safehouse quiet — no alerts active.';
+      const item = document.createElement('li');
+      item.className = 'mission-safehouse__alerts-item mission-safehouse__alerts-item--empty';
+      item.textContent = 'No incursions detected. Keep crew pressure low to stay hidden.';
+      safehouseAlertsList.appendChild(item);
+      safehouseAlertStatus.textContent = '';
+      return { summaryLine: '' };
+    }
+
+    const activeAlerts = entries.filter((entry) => (entry.status ?? 'alert') === 'alert');
+    safehouseAlertPrompt.textContent = activeAlerts.length
+      ? 'Safehouse systems flag live incursions requiring attention.'
+      : 'Safehouse teams are cooling down after recent incursions.';
+
+    const numericDay = Number.isFinite(day) ? day : null;
+    const summarySegments = [];
+
+    entries.forEach((entry) => {
+      const status = typeof entry.status === 'string' ? entry.status : 'alert';
+      const label = entry.label ?? entry.id;
+      const baseSummary = entry.summary ?? '';
+      const item = document.createElement('li');
+      item.className = 'mission-safehouse__alerts-item';
+      item.dataset.status = status;
+
+      let detailLine = baseSummary;
+      let summaryLine = '';
+      if (status === 'cooldown') {
+        const cooldownEndsOnDay = Number.isFinite(entry.cooldownEndsOnDay) ? entry.cooldownEndsOnDay : null;
+        const remaining =
+          cooldownEndsOnDay !== null && numericDay !== null ? cooldownEndsOnDay - numericDay : null;
+        if (remaining !== null) {
+          if (remaining > 0) {
+            detailLine = `${baseSummary} — Cooldown ${remaining} day${remaining === 1 ? '' : 's'} remaining.`;
+            summaryLine = `${label} cooldown ${remaining} day${remaining === 1 ? '' : 's'} left.`;
+          } else {
+            detailLine = `${baseSummary} — Cooldown complete. Systems ready.`;
+            summaryLine = `${label} cooldown cleared.`;
+          }
+        } else if (baseSummary) {
+          detailLine = `${baseSummary} — Cooldown active.`;
+          summaryLine = `${label} cooldown active.`;
+        } else {
+          detailLine = 'Cooldown active.';
+          summaryLine = `${label} cooldown active.`;
+        }
+      } else {
+        summaryLine = `${label} alert active.`;
+      }
+
+      const icon = status === 'alert' ? '⚠️' : status === 'cooldown' ? '⏳' : 'ℹ️';
+      item.textContent = icon ? `${icon} ${label} — ${detailLine}` : `${label} — ${detailLine}`;
+      safehouseAlertsList.appendChild(item);
+      if (summaryLine) {
+        summarySegments.push(summaryLine);
+      }
+    });
+
+    safehouseAlertStatus.textContent = summarySegments.join(' ');
+    return { summaryLine: summarySegments[0] ?? '' };
+  };
 
   const renderEffects = (lines) => {
     safehouseEffects.innerHTML = '';
@@ -1582,14 +1659,26 @@ const updateSafehousePanel = () => {
       title: 'Safehouse systems offline.',
       disabled: true,
     });
+    safehouseAlertPrompt.textContent = 'Safehouse telemetry offline.';
+    safehouseAlertsList.innerHTML = '';
+    const offlineAlert = document.createElement('li');
+    offlineAlert.className = 'mission-safehouse__alerts-item mission-safehouse__alerts-item--empty';
+    offlineAlert.textContent = 'Reconnect the command uplink to monitor incursions.';
+    safehouseAlertsList.appendChild(offlineAlert);
+    safehouseAlertStatus.textContent = '';
     const detail = missionControls.safehouseStatusDetail?.trim();
     const summary = 'Safehouse telemetry unavailable.';
-    safehouseStatus.textContent = [detail, summary].filter(Boolean).join(' ');
+    safehouseStatus.textContent = [detail, alertSummaryLine, summary].filter(Boolean).join(' ');
     return;
   }
 
   const safehouse = getActiveSafehouseFromState(state);
   const tier = safehouse?.getCurrentTier?.() ?? null;
+
+  const dayValue = Number.isFinite(state.day) ? state.day : null;
+  const safehouseAlerts = Array.isArray(state.safehouseIncursions) ? state.safehouseIncursions : [];
+  const alertRenderResult = renderSafehouseAlerts(safehouseAlerts, { day: dayValue });
+  alertSummaryLine = alertRenderResult?.summaryLine ?? '';
 
   if (safehouse) {
     const nameLabel = `${safehouse.name}${safehouse.location ? ` — ${safehouse.location}` : ''}`;
@@ -1751,7 +1840,9 @@ const updateSafehousePanel = () => {
   }
 
   const detail = missionControls.safehouseStatusDetail?.trim();
-  safehouseStatus.textContent = [detail, projectSummaryLine, summaryMessage].filter(Boolean).join(' ');
+  safehouseStatus.textContent = [detail, alertSummaryLine, projectSummaryLine, summaryMessage]
+    .filter(Boolean)
+    .join(' ');
 };
 
 const clearMaintenanceStatusDetail = () => {
@@ -5060,6 +5151,34 @@ const setupMissionControls = () => {
       catalogPlaceholder.textContent = 'Safehouse manifest loading…';
       catalog.appendChild(catalogPlaceholder);
 
+      const alertsContainer = document.createElement('div');
+      alertsContainer.className = 'mission-safehouse__alerts';
+
+      const alertsTitle = document.createElement('h4');
+      alertsTitle.className = 'mission-details__title mission-safehouse__alerts-title';
+      alertsTitle.textContent = 'Safehouse Alerts';
+
+      const alertsPrompt = document.createElement('p');
+      alertsPrompt.id = 'mission-safehouse-alert-prompt';
+      alertsPrompt.className = 'mission-safehouse__alerts-prompt';
+      alertsPrompt.textContent = 'No safehouse telemetry available yet.';
+
+      const alertsList = document.createElement('ul');
+      alertsList.id = 'mission-safehouse-alerts';
+      alertsList.className = 'mission-details__list mission-safehouse__alerts-list';
+      const alertsPlaceholder = document.createElement('li');
+      alertsPlaceholder.className = 'mission-safehouse__alerts-item mission-safehouse__alerts-item--empty';
+      alertsPlaceholder.textContent = 'Alerts will appear here when the safehouse reacts to city pressure.';
+      alertsList.appendChild(alertsPlaceholder);
+
+      const alertsStatus = document.createElement('p');
+      alertsStatus.id = 'mission-safehouse-alert-status';
+      alertsStatus.className = 'control-panel__status mission-safehouse__alerts-status';
+      alertsStatus.setAttribute('role', 'status');
+      alertsStatus.setAttribute('aria-live', 'polite');
+
+      alertsContainer.append(alertsTitle, alertsPrompt, alertsList, alertsStatus);
+
       const projectButton = document.createElement('button');
       projectButton.id = 'mission-safehouse-project-btn';
       projectButton.type = 'button';
@@ -5085,7 +5204,17 @@ const setupMissionControls = () => {
       status.setAttribute('role', 'status');
       status.setAttribute('aria-live', 'polite');
 
-      safehouseSection.append(title, hint, grid, catalog, projectButton, rushButton, upgradeButton, status);
+      safehouseSection.append(
+        title,
+        hint,
+        grid,
+        catalog,
+        alertsContainer,
+        projectButton,
+        rushButton,
+        upgradeButton,
+        status,
+      );
 
       const heatSection = controlPanel.querySelector('.mission-heat');
       if (heatSection && heatSection.parentElement === controlPanel) {
@@ -5104,6 +5233,9 @@ const setupMissionControls = () => {
     missionControls.safehouseRushButton = safehouseSection.querySelector('#mission-safehouse-rush-btn');
     missionControls.safehouseUpgradeButton = safehouseSection.querySelector('#mission-safehouse-upgrade-btn');
     missionControls.safehouseStatus = safehouseSection.querySelector('#mission-safehouse-status');
+    missionControls.safehouseAlertPrompt = safehouseSection.querySelector('#mission-safehouse-alert-prompt');
+    missionControls.safehouseAlertsList = safehouseSection.querySelector('#mission-safehouse-alerts');
+    missionControls.safehouseAlertStatus = safehouseSection.querySelector('#mission-safehouse-alert-status');
   }
 
   ensureCrewAttributeControls();
