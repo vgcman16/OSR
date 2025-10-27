@@ -22,6 +22,10 @@ const missionControls = {
   successButton: null,
   failureButton: null,
   statusText: null,
+  detailDescription: null,
+  detailPayout: null,
+  detailHeat: null,
+  detailDuration: null,
 };
 
 let missionControlSyncHandle = null;
@@ -35,6 +39,33 @@ const triggerHudRender = () => {
   if (gameInstance?.loop?.render) {
     gameInstance.loop.render();
   }
+};
+
+const setMissionDetails = ({ description, payout, heat, duration }) => {
+  const {
+    detailDescription,
+    detailPayout,
+    detailHeat,
+    detailDuration,
+  } = missionControls;
+
+  if (!(detailDescription && detailPayout && detailHeat && detailDuration)) {
+    return;
+  }
+
+  detailDescription.textContent = description;
+  detailPayout.textContent = payout;
+  detailHeat.textContent = heat;
+  detailDuration.textContent = duration;
+};
+
+const resetMissionDetails = (descriptionText) => {
+  setMissionDetails({
+    description: descriptionText,
+    payout: '—',
+    heat: '—',
+    duration: '—',
+  });
 };
 
 const formatMissionStatusMessage = (mission) => {
@@ -82,10 +113,17 @@ const updateMissionControls = () => {
     startButton,
     successButton,
     failureButton,
+    detailDescription,
+    detailPayout,
+    detailHeat,
+    detailDuration,
   } = missionControls;
 
   const controls = [select, startButton, successButton, failureButton];
-  if (controls.some((control) => !control)) {
+  const detailElements = [detailDescription, detailPayout, detailHeat, detailDuration];
+  const controlsReady = [...controls, ...detailElements].every(Boolean);
+
+  if (!controlsReady) {
     return;
   }
 
@@ -98,6 +136,10 @@ const updateMissionControls = () => {
   });
 
   if (!isReady) {
+    const descriptionText = missionSystem
+      ? 'Select a mission to view its briefing.'
+      : 'Mission database initializing…';
+    resetMissionDetails(descriptionText);
     updateMissionStatusText();
     return;
   }
@@ -122,6 +164,28 @@ const updateMissionControls = () => {
   startButton.disabled = !isReady || !isMissionAvailable || isAnotherMissionRunning;
   successButton.disabled = !missionReadyForOutcome;
   failureButton.disabled = !missionCanFail;
+
+  if (!selectedMission) {
+    resetMissionDetails('Select a mission to view its briefing.');
+  } else {
+    const missionDescription = selectedMission.description ?? 'No description available.';
+    const missionPayout = Number.isFinite(selectedMission.payout)
+      ? `$${Math.round(selectedMission.payout).toLocaleString()}`
+      : '—';
+    const missionHeat = Number.isFinite(selectedMission.heat)
+      ? `${selectedMission.heat}`
+      : '—';
+    const missionDuration = Number.isFinite(selectedMission.duration)
+      ? `${Math.round(selectedMission.duration)}s`
+      : '—';
+
+    setMissionDetails({
+      description: missionDescription,
+      payout: missionPayout,
+      heat: missionHeat,
+      duration: missionDuration,
+    });
+  }
 
   updateMissionStatusText();
 };
@@ -230,15 +294,34 @@ const setupMissionControls = () => {
   missionControls.successButton = document.getElementById('mission-success-btn');
   missionControls.failureButton = document.getElementById('mission-failure-btn');
   missionControls.statusText = document.getElementById('mission-status-text');
+  missionControls.detailDescription = document.getElementById('mission-detail-description');
+  missionControls.detailPayout = document.getElementById('mission-detail-payout');
+  missionControls.detailHeat = document.getElementById('mission-detail-heat');
+  missionControls.detailDuration = document.getElementById('mission-detail-duration');
 
   const {
     select,
     startButton,
     successButton,
     failureButton,
+    detailDescription,
+    detailPayout,
+    detailHeat,
+    detailDuration,
   } = missionControls;
 
-  if (!(select && startButton && successButton && failureButton)) {
+  const controlsReady = [
+    select,
+    startButton,
+    successButton,
+    failureButton,
+    detailDescription,
+    detailPayout,
+    detailHeat,
+    detailDuration,
+  ].every(Boolean);
+
+  if (!controlsReady) {
     return;
   }
 

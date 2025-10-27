@@ -29,6 +29,27 @@
         <select id="mission-select" name="mission-select" aria-describedby="mission-status-text">
           <option value="" disabled selected>Select a mission</option>
         </select>
+        <section class="mission-details" aria-live="polite">
+          <h3 class="mission-details__title">Mission Briefing</h3>
+          <dl class="mission-details__grid">
+            <div class="mission-details__row">
+              <dt>Description</dt>
+              <dd id="mission-detail-description">Select a mission to view its briefing.</dd>
+            </div>
+            <div class="mission-details__row">
+              <dt>Payout</dt>
+              <dd id="mission-detail-payout">—</dd>
+            </div>
+            <div class="mission-details__row">
+              <dt>Heat</dt>
+              <dd id="mission-detail-heat">—</dd>
+            </div>
+            <div class="mission-details__row">
+              <dt>Estimated Duration</dt>
+              <dd id="mission-detail-duration">—</dd>
+            </div>
+          </dl>
+        </section>
         <div class="control-panel__actions">
           <button id="start-mission-btn" type="button">Start Mission</button>
           <button id="mission-success-btn" type="button">Mark Success</button>
