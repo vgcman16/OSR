@@ -1,4 +1,5 @@
 import { Vehicle } from '../entities/vehicle.js';
+import { CREW_TRAIT_KEYS } from '../entities/crewMember.js';
 import { HeatSystem } from './heatSystem.js';
 import { generateContractsFromDistricts } from './contractFactory.js';
 
@@ -24,6 +25,59 @@ const clamp = (value, min, max) => {
 };
 
 const REQUIRED_TEMPLATE_FIELDS = ['id', 'name'];
+
+const CREW_TRAIT_EFFECTS = {
+  stealth: {
+    durationReduction: 0.01,
+    heatReduction: 0.055,
+    successBonus: 0.012,
+  },
+  tech: {
+    durationReduction: 0.006,
+    payoutBonus: 0.018,
+    successBonus: 0.028,
+  },
+  driving: {
+    durationReduction: 0.045,
+    successBonus: 0.01,
+    heatReduction: 0.01,
+  },
+  tactics: {
+    durationReduction: 0.01,
+    successBonus: 0.022,
+    heatReduction: 0.02,
+  },
+  charisma: {
+    payoutBonus: 0.024,
+    heatReduction: 0.012,
+    successBonus: 0.008,
+  },
+  muscle: {
+    payoutBonus: 0.022,
+    successBonus: 0.012,
+    heatIncrease: 0.006,
+  },
+};
+
+const CREW_SPECIALTY_SYNERGIES = {
+  wheelman: { driving: 1.6, tactics: 1.2, stealth: 0.9 },
+  hacker: { tech: 1.6, stealth: 1.2, charisma: 0.8 },
+  mechanic: { tech: 1.4, muscle: 1.2, tactics: 1.1 },
+  face: { charisma: 1.7, tech: 0.9, tactics: 1.1 },
+  infiltrator: { stealth: 1.7, tech: 1.3, tactics: 1.2 },
+  tactician: { tactics: 1.8, charisma: 1.2, stealth: 1.1 },
+  spotter: { tactics: 1.5, stealth: 1.3, tech: 1.3 },
+};
+
+const getCrewTraitLevel = (member, traitKey) => {
+  const traits = member?.traits ?? {};
+  const rawValue = Number(traits[traitKey]);
+  if (!Number.isFinite(rawValue)) {
+    return 0;
+  }
+
+  return Math.max(0, rawValue);
+};
 
 const GARAGE_MAINTENANCE_CONFIG = {
   repair: {
@@ -210,6 +264,117 @@ const summarizeCrewEffect = (
   }
 
   return `${member.name}: ${adjustments.join(', ')}`;
+};
+
+const computeCrewMemberTraitImpact = (member, mission) => {
+  const normalizedSpecialty = typeof member?.specialty === 'string'
+    ? member.specialty.toLowerCase()
+    : '';
+  const synergyProfile = CREW_SPECIALTY_SYNERGIES[normalizedSpecialty] ?? {};
+  const missionDifficulty = Number(mission?.difficulty);
+  const difficultyFactor = Number.isFinite(missionDifficulty)
+    ? clamp(1 + (missionDifficulty - 2) * 0.08, 0.8, 1.2)
+    : 1;
+  const loyaltyValue = Number(member?.loyalty);
+  const loyaltyBoost = Number.isFinite(loyaltyValue)
+    ? 1 + Math.max(0, loyaltyValue) * 0.05
+    : 1;
+
+  const totals = {
+    durationReduction: 0,
+    payoutBonus: 0,
+    heatReduction: 0,
+    heatIncrease: 0,
+    successBonus: 0,
+  };
+
+  CREW_TRAIT_KEYS.forEach((traitKey) => {
+    const traitLevel = getCrewTraitLevel(member, traitKey);
+    const aboveBase = Math.max(0, traitLevel - 1);
+    if (aboveBase <= 0) {
+      return;
+    }
+
+    const traitEffect = CREW_TRAIT_EFFECTS[traitKey];
+    if (!traitEffect) {
+      return;
+    }
+
+    const synergy = Number.isFinite(synergyProfile[traitKey]) ? synergyProfile[traitKey] : 1;
+    const contributionStrength = aboveBase * Math.max(0.5, synergy) * loyaltyBoost * difficultyFactor;
+
+    if (traitEffect.durationReduction) {
+      totals.durationReduction += traitEffect.durationReduction * contributionStrength;
+    }
+    if (traitEffect.payoutBonus) {
+      totals.payoutBonus += traitEffect.payoutBonus * contributionStrength;
+    }
+    if (traitEffect.heatReduction) {
+      totals.heatReduction += traitEffect.heatReduction * contributionStrength;
+    }
+    if (traitEffect.heatIncrease) {
+      totals.heatIncrease += traitEffect.heatIncrease * contributionStrength;
+    }
+    if (traitEffect.successBonus) {
+      totals.successBonus += traitEffect.successBonus * contributionStrength;
+    }
+  });
+
+  totals.durationReduction = Math.max(0, Math.min(0.55, totals.durationReduction));
+  totals.payoutBonus = Math.max(-0.2, Math.min(0.7, totals.payoutBonus));
+  totals.heatReduction = Math.max(0, Math.min(0.75, totals.heatReduction));
+  totals.heatIncrease = Math.max(0, Math.min(0.6, totals.heatIncrease));
+  totals.successBonus = Math.max(-0.1, Math.min(0.45, totals.successBonus));
+
+  const backgroundEffects = (member?.background?.effects && typeof member.background.effects === 'object')
+    ? member.background.effects
+    : {};
+
+  const durationMultiplier = Math.max(
+    0.3,
+    (1 - totals.durationReduction) * (Number.isFinite(backgroundEffects.durationMultiplier)
+      ? backgroundEffects.durationMultiplier
+      : 1),
+  );
+
+  const payoutMultiplier = Math.max(
+    0.4,
+    (1 + totals.payoutBonus) * (Number.isFinite(backgroundEffects.payoutMultiplier)
+      ? backgroundEffects.payoutMultiplier
+      : 1),
+  );
+
+  const heatMultiplier = Math.max(
+    0.2,
+    Math.min(
+      2.5,
+      (1 - totals.heatReduction + totals.heatIncrease) * (Number.isFinite(backgroundEffects.heatMultiplier)
+        ? backgroundEffects.heatMultiplier
+        : 1),
+    ),
+  );
+
+  const successBonus = totals.successBonus + (Number.isFinite(backgroundEffects.successBonus)
+    ? backgroundEffects.successBonus
+    : 0);
+
+  const summary = summarizeCrewEffect(member, {
+    durationDelta: durationMultiplier - 1,
+    payoutDelta: payoutMultiplier - 1,
+    successDelta: successBonus,
+    heatDelta: heatMultiplier - 1,
+  });
+
+  const perkLabel = member?.background?.perkLabel;
+  const summaryWithPerk = perkLabel ? `${summary} — ${perkLabel}` : summary;
+
+  return {
+    durationMultiplier,
+    payoutMultiplier,
+    heatMultiplier,
+    successBonus,
+    summary: summaryWithPerk,
+  };
 };
 
 const summarizePlayerContribution = (
@@ -762,86 +927,15 @@ class MissionSystem {
         return;
       }
 
-      const loyalty = Number(member.loyalty) >= 0 ? Number(member.loyalty) : 0;
-      const safeLoyalty = Number.isFinite(loyalty) ? loyalty : 0;
-      const contribution = { durationDelta: 0, payoutDelta: 0, successDelta: 0, heatDelta: 0 };
+      const impact = computeCrewMemberTraitImpact(member, mission);
+      durationMultiplier *= impact?.durationMultiplier ?? 1;
+      payoutMultiplier *= impact?.payoutMultiplier ?? 1;
+      successBonus += impact?.successBonus ?? 0;
+      heatMultiplier *= impact?.heatMultiplier ?? 1;
 
-      switch ((member.specialty ?? '').toLowerCase()) {
-        case 'wheelman': {
-          const reduction = Math.min(0.3, 0.04 * safeLoyalty);
-          durationMultiplier -= reduction;
-          contribution.durationDelta = -reduction;
-          successBonus += 0.01 * safeLoyalty;
-          contribution.successDelta += 0.01 * safeLoyalty;
-          break;
-        }
-        case 'hacker': {
-          const bonus = 0.05 + 0.02 * safeLoyalty;
-          successBonus += bonus;
-          contribution.successDelta += bonus;
-          durationMultiplier -= Math.min(0.1, 0.01 * safeLoyalty);
-          contribution.durationDelta -= Math.min(0.1, 0.01 * safeLoyalty);
-          break;
-        }
-        case 'mechanic': {
-          const payoutBoost = 0.03 * (1 + safeLoyalty / 2);
-          payoutMultiplier += payoutBoost;
-          contribution.payoutDelta = payoutBoost;
-          successBonus += 0.005 * safeLoyalty;
-          contribution.successDelta += 0.005 * safeLoyalty;
-          break;
-        }
-        case 'face': {
-          const payoutBoost = 0.02 * safeLoyalty;
-          payoutMultiplier += payoutBoost;
-          contribution.payoutDelta = payoutBoost;
-          const success = 0.03 + 0.01 * safeLoyalty;
-          successBonus += success;
-          contribution.successDelta += success;
-          break;
-        }
-        case 'infiltrator': {
-          const stealthEdge = Math.min(0.45, 0.18 + 0.05 * safeLoyalty);
-          heatMultiplier *= Math.max(0.25, 1 - stealthEdge);
-          contribution.heatDelta = -stealthEdge;
-          const tempoBoost = Math.min(0.12, 0.02 * (safeLoyalty + 1));
-          durationMultiplier -= tempoBoost;
-          contribution.durationDelta -= tempoBoost;
-          const precisionBonus = 0.015 * (safeLoyalty + 1);
-          successBonus += precisionBonus;
-          contribution.successDelta += precisionBonus;
-          break;
-        }
-        case 'tactician': {
-          const tempoBoost = Math.min(0.25, 0.05 + 0.015 * safeLoyalty);
-          durationMultiplier -= tempoBoost;
-          contribution.durationDelta -= tempoBoost;
-          const strategyBonus = 0.05 + 0.015 * safeLoyalty;
-          successBonus += strategyBonus;
-          contribution.successDelta += strategyBonus;
-          const heatTrim = Math.min(0.25, 0.05 * (1 + safeLoyalty / 2));
-          heatMultiplier *= Math.max(0.3, 1 - heatTrim);
-          contribution.heatDelta = -heatTrim;
-          break;
-        }
-        case 'spotter': {
-          const intelBonus = 0.03 + 0.01 * safeLoyalty;
-          successBonus += intelBonus;
-          contribution.successDelta += intelBonus;
-          const payoutBoost = 0.015 * (1 + safeLoyalty / 3);
-          payoutMultiplier += payoutBoost;
-          contribution.payoutDelta = payoutBoost;
-          break;
-        }
-        default: {
-          const genericBonus = 0.02 * (1 + safeLoyalty / 2);
-          successBonus += genericBonus;
-          contribution.successDelta += genericBonus;
-          break;
-        }
+      if (impact?.summary) {
+        summary.push(impact.summary);
       }
-
-      summary.push(summarizeCrewEffect(member, contribution));
     });
 
     durationMultiplier = Math.max(0.5, durationMultiplier);

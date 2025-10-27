@@ -1,5 +1,5 @@
 import { createCarThiefGame } from './game/carThief/index.js';
-import { CrewMember } from './game/carThief/entities/crewMember.js';
+import { CrewMember, CREW_TRAIT_CONFIG } from './game/carThief/entities/crewMember.js';
 import {
   GARAGE_MAINTENANCE_CONFIG,
   PLAYER_SKILL_CONFIG,
@@ -46,6 +46,9 @@ const missionControls = {
   trainingSpecialtySelect: null,
   trainingLoyaltyButton: null,
   trainingSpecialtyButton: null,
+   trainingAttributeSelect: null,
+   trainingAttributeButton: null,
+   trainingAttributeList: null,
   trainingStatus: null,
   playerStatsList: null,
   playerSkillSelect: null,
@@ -86,6 +89,113 @@ const SPECIALTY_OPTIONS = [
   { value: 'tactician', label: 'Tactician — choreograph operations' },
   { value: 'spotter', label: 'Spotter — relay recon intel' },
 ];
+
+const CREW_ATTRIBUTE_OPTIONS = Object.values(CREW_TRAIT_CONFIG)
+  .map((entry) => ({
+    value: entry.key,
+    label: entry.label,
+    description: entry.description,
+    trainingCost: entry.trainingCost,
+    maxLevel: entry.maxLevel ?? 6,
+  }))
+  .sort((a, b) => a.label.localeCompare(b.label));
+
+const getCrewTraitLevel = (entity, traitKey) => {
+  if (!entity) {
+    return 0;
+  }
+
+  const traits = entity.traits ?? {};
+  const rawValue = Number(traits[traitKey]);
+  return Number.isFinite(rawValue) ? rawValue : 0;
+};
+
+const computeAttributeTrainingCost = (traitKey, currentLevel = 0) => {
+  const config = CREW_TRAIT_CONFIG[traitKey];
+  if (!config) {
+    return Infinity;
+  }
+
+  const baseCost = Number.isFinite(config.trainingCost) ? config.trainingCost : 3000;
+  const normalizedLevel = Number.isFinite(currentLevel) ? Math.max(0, currentLevel) : 0;
+  return Math.round(baseCost + normalizedLevel * 400);
+};
+
+const formatCrewTraitSummary = (entity, limit = 3) => {
+  if (!entity) {
+    return '';
+  }
+
+  const entries = CREW_ATTRIBUTE_OPTIONS.map((option) => ({
+    key: option.value,
+    label: option.label,
+    value: getCrewTraitLevel(entity, option.value),
+  }));
+
+  entries.sort((a, b) => {
+    if (b.value === a.value) {
+      return a.label.localeCompare(b.label);
+    }
+    return b.value - a.value;
+  });
+
+  const selection = entries.filter((entry) => entry.value > 0).slice(0, limit);
+  return selection
+    .map((entry) => `${entry.label} ${entry.value}`)
+    .join(', ');
+};
+
+const renderCrewTraitList = (container, member) => {
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = '';
+
+  if (!member) {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'Select a crew member to inspect their attributes.';
+    container.appendChild(placeholder);
+    return;
+  }
+
+  if (member.background?.name || member.background?.perkLabel) {
+    const backgroundItem = document.createElement('li');
+    const perkLabel = member.background?.perkLabel ?? '';
+    const backgroundLabel = member.background?.name ?? '';
+    backgroundItem.textContent = perkLabel
+      ? `${backgroundLabel || 'Background'} — ${perkLabel}`
+      : backgroundLabel;
+    container.appendChild(backgroundItem);
+  }
+
+  const additionalPerks = Array.isArray(member.perks)
+    ? member.perks.filter((perk) => perk && perk !== member.background?.perkLabel)
+    : [];
+  additionalPerks.forEach((perk) => {
+    const perkItem = document.createElement('li');
+    perkItem.textContent = perk;
+    container.appendChild(perkItem);
+  });
+
+  CREW_ATTRIBUTE_OPTIONS.map((option) => ({
+    key: option.value,
+    label: option.label,
+    maxLevel: option.maxLevel,
+    value: getCrewTraitLevel(member, option.value),
+  }))
+    .sort((a, b) => {
+      if (b.value === a.value) {
+        return a.label.localeCompare(b.label);
+      }
+      return b.value - a.value;
+    })
+    .forEach((entry) => {
+      const item = document.createElement('li');
+      item.textContent = `${entry.label}: ${entry.value}/${entry.maxLevel}`;
+      container.appendChild(item);
+    });
+};
 
 const PLAYER_SKILL_OPTIONS = Object.values(PLAYER_SKILL_CONFIG).map((entry) => ({
   value: entry.key,
@@ -993,12 +1103,12 @@ const handleRecruitHire = (candidateId) => {
 
   economySystem.adjustFunds(-hireCost);
 
-  const newMember = new CrewMember({
-    name: candidate.name,
-    specialty: candidate.specialty,
-    upkeep: candidate.upkeep,
-    loyalty: candidate.loyalty,
-  });
+  const profile = { ...candidate };
+  delete profile.id;
+  delete profile.hiringCost;
+  delete profile.description;
+
+  const newMember = new CrewMember(profile);
 
   if (!Array.isArray(state.crew)) {
     state.crew = [];
@@ -1057,10 +1167,31 @@ const updateRecruitmentOptions = () => {
     title.className = 'mission-recruit__name';
     const loyaltyLabel = Number.isFinite(candidate.loyalty) ? `L${candidate.loyalty}` : 'L?';
     title.textContent = `${candidate.name} — ${candidate.specialty} (${loyaltyLabel})`;
+    card.appendChild(title);
 
     const description = document.createElement('p');
     description.className = 'mission-recruit__description';
     description.textContent = candidate.description ?? 'Eager to prove their worth on the next score.';
+    card.appendChild(description);
+
+    if (candidate.background?.name || candidate.background?.perkLabel) {
+      const backgroundLine = document.createElement('p');
+      backgroundLine.className = 'mission-recruit__background';
+      const perkLabel = candidate.background?.perkLabel ?? '';
+      const backgroundLabel = candidate.background?.name ?? '';
+      backgroundLine.textContent = perkLabel
+        ? `${backgroundLabel || 'Background'} — ${perkLabel}`
+        : backgroundLabel;
+      card.appendChild(backgroundLine);
+    }
+
+    const traitSummary = formatCrewTraitSummary(candidate, 4);
+    if (traitSummary) {
+      const traitsLine = document.createElement('p');
+      traitsLine.className = 'mission-recruit__traits';
+      traitsLine.textContent = `Attributes: ${traitSummary}`;
+      card.appendChild(traitsLine);
+    }
 
     const cost = Number(candidate.hiringCost);
     const upkeep = Number(candidate.upkeep);
@@ -1079,8 +1210,6 @@ const updateRecruitmentOptions = () => {
     }
     button.addEventListener('click', () => handleRecruitHire(candidate.id));
 
-    card.appendChild(title);
-    card.appendChild(description);
     card.appendChild(costLine);
     card.appendChild(button);
 
@@ -1093,8 +1222,19 @@ const updateTrainingOptions = () => {
   const specialtySelect = missionControls.trainingSpecialtySelect;
   const loyaltyButton = missionControls.trainingLoyaltyButton;
   const specialtyButton = missionControls.trainingSpecialtyButton;
+  const attributeSelect = missionControls.trainingAttributeSelect;
+  const attributeButton = missionControls.trainingAttributeButton;
+  const attributeList = missionControls.trainingAttributeList;
 
-  if (!crewSelect || !specialtySelect || !loyaltyButton || !specialtyButton) {
+  if (
+    !crewSelect ||
+    !specialtySelect ||
+    !loyaltyButton ||
+    !specialtyButton ||
+    !attributeSelect ||
+    !attributeButton ||
+    !attributeList
+  ) {
     return;
   }
 
@@ -1132,6 +1272,8 @@ const updateTrainingOptions = () => {
 
   const currentSelection = crew.find((member) => member?.id === crewSelect.value) ?? null;
 
+  renderCrewTraitList(attributeList, currentSelection);
+
   const previousSpecialty = specialtySelect.value;
   specialtySelect.innerHTML = '';
   SPECIALTY_OPTIONS.forEach((entry) => {
@@ -1149,24 +1291,68 @@ const updateTrainingOptions = () => {
     specialtySelect.value = SPECIALTY_OPTIONS[0].value;
   }
 
+  const previousAttribute = attributeSelect.value;
+  attributeSelect.innerHTML = '';
+  CREW_ATTRIBUTE_OPTIONS.forEach((entry) => {
+    const option = document.createElement('option');
+    option.value = entry.value;
+    const level = currentSelection ? Math.round(getCrewTraitLevel(currentSelection, entry.value)) : null;
+    const levelLabel = level !== null ? ` L${level}/${entry.maxLevel}` : '';
+    const descriptor = entry.description ? ` — ${entry.description}` : '';
+    option.textContent = `${entry.label}${levelLabel}${descriptor}`;
+    attributeSelect.appendChild(option);
+  });
+
+  if (CREW_ATTRIBUTE_OPTIONS.some((entry) => entry.value === previousAttribute)) {
+    attributeSelect.value = previousAttribute;
+  }
+
+  if (!attributeSelect.value && CREW_ATTRIBUTE_OPTIONS.length) {
+    attributeSelect.value = CREW_ATTRIBUTE_OPTIONS[0].value;
+  }
+
   const canTrain = Boolean(missionSystem && economySystem && currentSelection);
   const atMaxLoyalty = currentSelection ? Number(currentSelection.loyalty) >= 5 : true;
 
-  loyaltyButton.disabled =
-    !canTrain ||
-    atMaxLoyalty ||
-    funds < LOYALTY_TRAINING_COST;
+  loyaltyButton.disabled = !canTrain || atMaxLoyalty || funds < LOYALTY_TRAINING_COST;
   loyaltyButton.textContent = `Boost Loyalty (${formatCurrency(LOYALTY_TRAINING_COST)})`;
 
-  const desiredSpecialty = specialtySelect.value;
+  const desiredSpecialty = (specialtySelect.value ?? '').toLowerCase();
   const alreadySpecialty = currentSelection
     ? (currentSelection.specialty ?? '').toLowerCase() === desiredSpecialty
     : false;
-  specialtyButton.disabled =
-    !canTrain ||
-    alreadySpecialty ||
-    funds < SPECIALTY_TRAINING_COST;
+  specialtyButton.disabled = !canTrain || alreadySpecialty || funds < SPECIALTY_TRAINING_COST;
   specialtyButton.textContent = `Specialty Training (${formatCurrency(SPECIALTY_TRAINING_COST)})`;
+
+  const selectedAttribute = attributeSelect.value;
+  const attributeConfig = CREW_TRAIT_CONFIG[selectedAttribute];
+  const attributeLevel = currentSelection ? Math.round(getCrewTraitLevel(currentSelection, selectedAttribute)) : 0;
+  const attributeMax = Number.isFinite(attributeConfig?.maxLevel) ? attributeConfig.maxLevel : 6;
+  const attributeCost = computeAttributeTrainingCost(selectedAttribute, attributeLevel);
+
+  attributeSelect.disabled = !currentSelection;
+
+  attributeButton.disabled =
+    !canTrain ||
+    !attributeConfig ||
+    attributeLevel >= attributeMax ||
+    funds < attributeCost;
+
+  if (!currentSelection) {
+    attributeButton.title = 'Select a crew member to train.';
+  } else if (!attributeConfig) {
+    attributeButton.title = 'Select an attribute focus.';
+  } else if (attributeLevel >= attributeMax) {
+    attributeButton.title = `${attributeConfig.label} is already at peak potential.`;
+  } else if (funds < attributeCost) {
+    attributeButton.title = 'Insufficient funds for attribute training.';
+  } else {
+    attributeButton.title = '';
+  }
+
+  attributeButton.textContent = attributeConfig
+    ? `Train ${attributeConfig.label} (${formatCurrency(attributeCost)})`
+    : 'Train Attribute';
 };
 
 const handleLoyaltyTraining = () => {
@@ -1256,6 +1442,69 @@ const handleSpecialtyTraining = () => {
   economySystem.adjustFunds(-SPECIALTY_TRAINING_COST);
   member.specialty = desiredSpecialty;
   setTrainingStatus(`${member.name} retrains as a ${desiredSpecialty}.`);
+  updateTrainingOptions();
+  updateCrewSelectionOptions();
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleAttributeTraining = () => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const crewSelect = missionControls.trainingCrewSelect;
+  const attributeSelect = missionControls.trainingAttributeSelect;
+
+  if (!missionSystem || !economySystem || !state || !crewSelect || !attributeSelect) {
+    setTrainingStatus('Training systems unavailable.');
+    return;
+  }
+
+  const crew = Array.isArray(state.crew) ? state.crew : [];
+  const selectedId = crewSelect.value;
+  const member = crew.find((entry) => entry?.id === selectedId);
+
+  if (!member) {
+    setTrainingStatus('Select a crew member to coach.');
+    return;
+  }
+
+  const traitKey = attributeSelect.value;
+  const traitConfig = CREW_TRAIT_CONFIG[traitKey];
+
+  if (!traitKey || !traitConfig) {
+    setTrainingStatus('Choose an attribute focus before training.');
+    return;
+  }
+
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  const currentLevel = Math.round(getCrewTraitLevel(member, traitKey));
+  const maxLevel = Number.isFinite(traitConfig.maxLevel) ? traitConfig.maxLevel : 6;
+
+  if (currentLevel >= maxLevel) {
+    setTrainingStatus(`${member.name}'s ${traitConfig.label} is already at peak potential.`);
+    return;
+  }
+
+  const cost = computeAttributeTrainingCost(traitKey, currentLevel);
+  if (funds < cost) {
+    setTrainingStatus('Insufficient funds for attribute training.');
+    return;
+  }
+
+  economySystem.adjustFunds(-cost);
+
+  if (typeof member.adjustTrait === 'function') {
+    member.adjustTrait(traitKey, 1);
+  } else {
+    if (!member.traits || typeof member.traits !== 'object') {
+      member.traits = {};
+    }
+    member.traits[traitKey] = Math.min(maxLevel, Math.max(0, Math.round((Number(member.traits[traitKey]) || 0) + 1)));
+  }
+
+  const updatedLevel = Math.round(getCrewTraitLevel(member, traitKey));
+  setTrainingStatus(`${member.name}'s ${traitConfig.label} rises to ${updatedLevel}.`);
   updateTrainingOptions();
   updateCrewSelectionOptions();
   updateMissionControls();
@@ -1667,7 +1916,12 @@ const updateCrewSelectionOptions = () => {
     descriptor.className = 'mission-crew__label';
     const loyaltyLabel = Number.isFinite(member.loyalty) ? `L${member.loyalty}` : 'L?';
     const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
-    descriptor.textContent = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}`;
+    const backgroundName = member.background?.name || member.background?.perkLabel || '';
+    const backgroundLabel = backgroundName ? ` • ${backgroundName}` : '';
+    const traitSummary = formatCrewTraitSummary(member, 3);
+    const traitsLabel = traitSummary ? ` • ${traitSummary}` : '';
+    const descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${backgroundLabel}${traitsLabel}`;
+    descriptor.textContent = descriptorText;
 
     optionLabel.appendChild(checkbox);
     optionLabel.appendChild(descriptor);
@@ -2034,6 +2288,9 @@ const updateMissionControls = () => {
     trainingSpecialtySelect,
     trainingLoyaltyButton,
     trainingSpecialtyButton,
+    trainingAttributeSelect,
+    trainingAttributeButton,
+    trainingAttributeList,
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
@@ -2069,6 +2326,9 @@ const updateMissionControls = () => {
     trainingSpecialtySelect,
     trainingLoyaltyButton,
     trainingSpecialtyButton,
+    trainingAttributeSelect,
+    trainingAttributeButton,
+    trainingAttributeList,
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
@@ -2327,6 +2587,55 @@ const handleMissionStart = () => {
 };
 
 const setupMissionControls = () => {
+  const ensureCrewAttributeControls = () => {
+    const trainingSection = document.querySelector('.mission-training');
+    if (!trainingSection) {
+      return;
+    }
+
+    if (trainingSection.querySelector('#mission-training-attribute')) {
+      return;
+    }
+
+    const statusNode = trainingSection.querySelector('#mission-training-status');
+    const insertBeforeNode = statusNode ?? null;
+
+    const attributeLabel = document.createElement('label');
+    attributeLabel.className = 'mission-training__label';
+    attributeLabel.id = 'mission-training-attribute-label';
+    attributeLabel.setAttribute('for', 'mission-training-attribute');
+    attributeLabel.textContent = 'Attribute focus';
+
+    const attributeSelect = document.createElement('select');
+    attributeSelect.id = 'mission-training-attribute';
+    attributeSelect.name = 'mission-training-attribute';
+
+    const actions = document.createElement('div');
+    actions.className = 'mission-training__actions';
+
+    const attributeButton = document.createElement('button');
+    attributeButton.id = 'mission-training-attribute-btn';
+    attributeButton.type = 'button';
+    attributeButton.textContent = 'Attribute Training';
+    actions.appendChild(attributeButton);
+
+    const attributeList = document.createElement('ul');
+    attributeList.id = 'mission-training-attribute-list';
+    attributeList.className = 'mission-details__list mission-training__traits';
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'Select a crew member to inspect their attributes.';
+    attributeList.appendChild(placeholder);
+
+    if (insertBeforeNode) {
+      trainingSection.insertBefore(attributeLabel, insertBeforeNode);
+      trainingSection.insertBefore(attributeSelect, insertBeforeNode);
+      trainingSection.insertBefore(actions, insertBeforeNode);
+      trainingSection.insertBefore(attributeList, insertBeforeNode);
+    } else {
+      trainingSection.append(attributeLabel, attributeSelect, actions, attributeList);
+    }
+  };
+
   const controlPanel = document.querySelector('.control-panel');
   if (controlPanel) {
     let safehouseSection = controlPanel.querySelector('.mission-safehouse');
@@ -2412,6 +2721,8 @@ const setupMissionControls = () => {
     missionControls.safehouseStatus = safehouseSection.querySelector('#mission-safehouse-status');
   }
 
+  ensureCrewAttributeControls();
+
   missionControls.select = document.getElementById('mission-select');
   missionControls.startButton = document.getElementById('start-mission-btn');
   missionControls.statusText = document.getElementById('mission-status-text');
@@ -2433,6 +2744,9 @@ const setupMissionControls = () => {
   missionControls.trainingSpecialtySelect = document.getElementById('mission-training-specialty');
   missionControls.trainingLoyaltyButton = document.getElementById('mission-training-loyalty-btn');
   missionControls.trainingSpecialtyButton = document.getElementById('mission-training-specialty-btn');
+  missionControls.trainingAttributeSelect = document.getElementById('mission-training-attribute');
+  missionControls.trainingAttributeButton = document.getElementById('mission-training-attribute-btn');
+  missionControls.trainingAttributeList = document.getElementById('mission-training-attribute-list');
   missionControls.trainingStatus = document.getElementById('mission-training-status');
   missionControls.playerStatsList = document.getElementById('mission-player-stats');
   missionControls.playerSkillSelect = document.getElementById('mission-player-skill');
@@ -2474,6 +2788,9 @@ const setupMissionControls = () => {
     trainingSpecialtySelect,
     trainingLoyaltyButton,
     trainingSpecialtyButton,
+    trainingAttributeSelect,
+    trainingAttributeButton,
+    trainingAttributeList,
     trainingStatus,
     playerStatsList,
     playerSkillSelect,
@@ -2515,6 +2832,9 @@ const setupMissionControls = () => {
     trainingSpecialtySelect,
     trainingLoyaltyButton,
     trainingSpecialtyButton,
+    trainingAttributeSelect,
+    trainingAttributeButton,
+    trainingAttributeList,
     trainingStatus,
     playerStatsList,
     playerSkillSelect,
@@ -2543,10 +2863,12 @@ const setupMissionControls = () => {
   });
   trainingCrewSelect.addEventListener('change', updateTrainingOptions);
   trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
+  trainingAttributeSelect?.addEventListener('change', updateTrainingOptions);
   playerSkillSelect.addEventListener('change', updatePlayerDevelopmentPanel);
   playerGearSelect.addEventListener('change', updatePlayerDevelopmentPanel);
   trainingLoyaltyButton.addEventListener('click', handleLoyaltyTraining);
   trainingSpecialtyButton.addEventListener('click', handleSpecialtyTraining);
+  trainingAttributeButton?.addEventListener('click', handleAttributeTraining);
   playerSkillButton.addEventListener('click', handlePlayerSkillTraining);
   playerGearButton.addEventListener('click', handlePlayerGearAcquisition);
   maintenanceRepairButton.addEventListener('click', handleMaintenanceRepair);
