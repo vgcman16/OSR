@@ -3,6 +3,7 @@ import { CREW_TRAIT_KEYS } from '../entities/crewMember.js';
 import { HeatSystem } from './heatSystem.js';
 import { generateContractsFromDistricts } from './contractFactory.js';
 import { buildMissionEventDeck } from './missionEvents.js';
+import { getActiveStorageCapacityFromState } from '../world/safehouse.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
   const numeric = Number(value);
@@ -1547,10 +1548,36 @@ class MissionSystem {
         ? assignedVehicle.heat
         : null;
 
+    let storageBlockedReport = null;
+
     if (outcome === 'success') {
       this.state.funds += mission.payout;
       this.heatSystem.increase(mission.heat);
-      this.state.garage.push(mission.vehicle);
+      let rewardVehicleAdded = false;
+      const storageCapacity = getActiveStorageCapacityFromState(this.state);
+      const hasFiniteCapacity = Number.isFinite(storageCapacity) && storageCapacity >= 0;
+      const capacityLimit = hasFiniteCapacity ? storageCapacity : Infinity;
+      const garageSize = garage.length;
+
+      if (mission.vehicle) {
+        if (!hasFiniteCapacity || garageSize < capacityLimit) {
+          this.state.garage.push(mission.vehicle);
+          rewardVehicleAdded = true;
+        } else {
+          const vehicleModel = mission.vehicle.model ?? 'Vehicle';
+          const summary = `${vehicleModel} couldn't enter the garage — capacity ${garageSize}/${storageCapacity} reached. ` +
+            'Sell or scrap a vehicle to free space.';
+          storageBlockedReport = {
+            outcome: 'storage-blocked',
+            vehicleId: mission.vehicle.id ?? null,
+            vehicleModel,
+            garageSize,
+            storageCapacity,
+            summary,
+            timestamp: Date.now(),
+          };
+        }
+      }
 
       assignedCrew.forEach((member) => {
         if (typeof member.adjustLoyalty === 'function') {
@@ -1558,7 +1585,7 @@ class MissionSystem {
         }
       });
 
-      if (mission.vehicle && typeof mission.vehicle.applyWear === 'function') {
+      if (rewardVehicleAdded && mission.vehicle && typeof mission.vehicle.applyWear === 'function') {
         const mechanicScore = assignedCrew
           .filter((member) => (member.specialty ?? '').toLowerCase() === 'mechanic')
           .reduce((total, member) => total + (Number(member.loyalty) || 0), 0);
@@ -1566,13 +1593,13 @@ class MissionSystem {
         const wearAmount = Math.max(0.05, 0.18 - wearReduction);
         mission.vehicle.applyWear(wearAmount);
       }
-      if (mission.vehicle && typeof mission.vehicle.setStatus === 'function') {
+      if (rewardVehicleAdded && mission.vehicle && typeof mission.vehicle.setStatus === 'function') {
         mission.vehicle.setStatus('idle');
-      } else if (mission.vehicle) {
+      } else if (rewardVehicleAdded && mission.vehicle) {
         mission.vehicle.status = 'idle';
         mission.vehicle.inUse = false;
       }
-      if (typeof mission.vehicle?.markStolen === 'function') {
+      if (rewardVehicleAdded && typeof mission.vehicle?.markStolen === 'function') {
         mission.vehicle.markStolen();
       }
     } else if (outcome === 'failure') {
@@ -1681,7 +1708,13 @@ class MissionSystem {
     mission.assignedVehicleSnapshot = null;
     mission.assignedVehicleLabel = null;
 
-    this.state.lastVehicleReport = vehicleReport;
+    if (vehicleReport) {
+      this.state.lastVehicleReport = vehicleReport;
+    }
+
+    if (storageBlockedReport) {
+      this.state.lastVehicleReport = storageBlockedReport;
+    }
 
     this.respawnMissionTemplate(mission.id);
     this.drawContractFromPool();

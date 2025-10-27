@@ -42,6 +42,20 @@ class EconomySystem {
     return Number.isFinite(income) ? income : 0;
   }
 
+  getActiveStorageCapacity() {
+    const safehouse = this.getActiveSafehouse();
+    if (!safehouse || typeof safehouse.getStorageCapacity !== 'function') {
+      return null;
+    }
+
+    const capacity = safehouse.getStorageCapacity();
+    if (!Number.isFinite(capacity) || capacity < 0) {
+      return null;
+    }
+
+    return capacity;
+  }
+
   getCrewPayroll() {
     const crew = Array.isArray(this.state.crew) ? this.state.crew : [];
     return crew.reduce((total, member) => {

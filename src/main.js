@@ -6,7 +6,7 @@ import {
   PLAYER_GEAR_CATALOG,
 } from './game/carThief/systems/missionSystem.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
-import { getActiveSafehouseFromState } from './game/carThief/world/safehouse.js';
+import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
 
 let gameInstance = null;
 
@@ -516,6 +516,15 @@ const describeVehicleReportOutcome = (report) => {
     return `${modelLabel} maintenance complete.`;
   }
 
+  if (report.outcome === 'storage-blocked') {
+    const capacity = Number.isFinite(report.storageCapacity) ? report.storageCapacity : null;
+    const garageSize = Number.isFinite(report.garageSize) ? report.garageSize : null;
+    if (capacity !== null && garageSize !== null) {
+      return `${modelLabel} stalled — garage capacity ${garageSize}/${capacity}. Sell or scrap to free space.`;
+    }
+    return `${modelLabel} stalled — garage full. Sell or scrap to free space.`;
+  }
+
   if (typeof report.summary === 'string' && report.summary.trim()) {
     return report.summary.trim();
   }
@@ -1011,6 +1020,58 @@ const updateMaintenancePanel = () => {
     ? garage.find((vehicle) => vehicle?.id === selectedVehicleId) ?? null
     : null;
   const funds = Number.isFinite(state?.funds) ? state.funds : 0;
+  const latestVehicleReport = missionSystem?.state?.lastVehicleReport ?? null;
+
+  const resolvedCapacity = (() => {
+    if (economySystem && typeof economySystem.getActiveStorageCapacity === 'function') {
+      const capacity = economySystem.getActiveStorageCapacity();
+      if (Number.isFinite(capacity) && capacity >= 0) {
+        return capacity;
+      }
+    }
+
+    const fallback = getActiveStorageCapacityFromState(state);
+    if (Number.isFinite(fallback) && fallback >= 0) {
+      return fallback;
+    }
+
+    return null;
+  })();
+
+  const hasFiniteCapacity = Number.isFinite(resolvedCapacity);
+  const garageSize = garage.length;
+  const atCapacity = hasFiniteCapacity ? garageSize >= resolvedCapacity : false;
+  const overCapacity = hasFiniteCapacity ? garageSize > resolvedCapacity : false;
+  const capacitySegments = [];
+
+  if (hasFiniteCapacity) {
+    const baseLabel = `Garage capacity: ${garageSize}/${resolvedCapacity}.`;
+    if (overCapacity) {
+      capacitySegments.push(
+        `${baseLabel} Over capacity — sell or scrap vehicles immediately.`,
+      );
+    } else if (atCapacity) {
+      capacitySegments.push(
+        `${baseLabel} Storage full — sell or scrap to claim new vehicles.`,
+      );
+    } else {
+      const slotsFree = Math.max(0, resolvedCapacity - garageSize);
+      capacitySegments.push(
+        `${baseLabel} ${slotsFree === 1 ? '1 slot' : `${slotsFree} slots`} available.`,
+      );
+    }
+  } else {
+    capacitySegments.push(`Garage capacity telemetry unavailable — ${garageSize} vehicles stored.`);
+  }
+
+  if (latestVehicleReport?.outcome === 'storage-blocked') {
+    const reportSummary = describeVehicleReportOutcome(latestVehicleReport);
+    if (reportSummary) {
+      capacitySegments.push(reportSummary);
+    }
+  }
+
+  const capacityMessage = capacitySegments.join(' ').trim();
 
   const rawRepairCost = Number(GARAGE_MAINTENANCE_CONFIG?.repair?.cost);
   const repairCost = Number.isFinite(rawRepairCost) && rawRepairCost > 0 ? rawRepairCost : 0;
@@ -1070,6 +1131,10 @@ const updateMaintenancePanel = () => {
     )} for up to ${repairPercent}% restoration; heat purges cost ${formatCurrency(
       heatCost,
     )} to lower heat by ${heatLabel}.${affordabilityMessage}`;
+  }
+
+  if (capacityMessage) {
+    summaryMessage = `${summaryMessage} ${capacityMessage}`.trim();
   }
 
   if (systemsReady && hasSelection) {

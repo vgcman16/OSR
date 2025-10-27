@@ -5,6 +5,7 @@ import { MissionSystem, GARAGE_MAINTENANCE_CONFIG } from '../src/game/carThief/s
 import { HeatSystem } from '../src/game/carThief/systems/heatSystem.js';
 import { EconomySystem } from '../src/game/carThief/systems/economySystem.js';
 import { Vehicle } from '../src/game/carThief/entities/vehicle.js';
+import { Safehouse, SafehouseCollection } from '../src/game/carThief/world/safehouse.js';
 
 const createState = () => ({
   funds: 1000,
@@ -183,6 +184,62 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
   assert.equal(refreshedMission.startedAt, null, 'respawned mission clears start timestamp');
   assert.equal(refreshedMission.completedAt, null, 'respawned mission clears completion timestamp');
   assert.equal(refreshedMission.outcome, null, 'respawned mission clears prior outcome');
+});
+
+test('Successful missions block reward vehicles when garage capacity is full', (t) => {
+  const state = createState();
+  const safehouse = new Safehouse({
+    id: 'capacity-safehouse',
+    owned: true,
+    tiers: [
+      {
+        level: 0,
+        storageCapacity: 1,
+        passiveIncome: 0,
+        heatReduction: 0,
+        overheadModifier: 0,
+        upgradeCost: 0,
+      },
+    ],
+  });
+  const safehouses = new SafehouseCollection([safehouse]);
+  safehouses.setDefault(safehouse.id);
+  state.safehouses = safehouses;
+  state.player = {
+    safehouseId: safehouse.id,
+    assignSafehouse(id) {
+      this.safehouseId = id;
+    },
+  };
+
+  const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
+  missionSystem.generateInitialContracts();
+  const mission = missionSystem.availableMissions[0];
+  assert.ok(mission, 'a mission is available to run');
+
+  const storedVehicle = new Vehicle({ model: 'Stored Ride' });
+  state.garage.push(storedVehicle);
+  assert.equal(state.garage.length, 1, 'garage starts at the storage limit');
+
+  missionSystem.startMission(mission.id);
+  mission.status = 'awaiting-resolution';
+
+  const fundsBefore = state.funds;
+  const garageBefore = state.garage.length;
+
+  const resolvedMission = missionSystem.resolveMission(mission.id, 'success');
+
+  assert.equal(resolvedMission, mission, 'resolveMission returns the mission instance');
+  assert.equal(state.funds, fundsBefore + mission.payout, 'funds still increase on success');
+  assert.equal(state.garage.length, garageBefore, 'reward vehicle is blocked when capacity is full');
+  assert.ok(state.lastVehicleReport, 'blocking the reward generates a vehicle report');
+  assert.equal(state.lastVehicleReport.outcome, 'storage-blocked', 'report flags the storage block outcome');
+  assert.equal(state.lastVehicleReport.storageCapacity, 1, 'report records the storage capacity limit');
+  assert.equal(
+    state.lastVehicleReport.garageSize,
+    garageBefore,
+    'report records the current garage size when the block occurs',
+  );
 });
 
 test('MissionSystem resolves failures from in-progress and awaiting-resolution states', async (t) => {
