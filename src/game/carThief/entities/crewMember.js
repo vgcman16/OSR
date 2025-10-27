@@ -68,6 +68,8 @@ const CREW_REST_CONFIG = {
   recoveryMultiplier: 1.6,
 };
 
+const CREW_REST_INELIGIBLE_STATUSES = new Set(['on-mission', 'captured', 'injured']);
+
 const clampFatigue = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -438,11 +440,7 @@ class CrewMember {
 
   isRestEligible() {
     const statusLabel = (this.status ?? '').toLowerCase();
-    if (statusLabel === 'on-mission' || statusLabel === 'captured') {
-      return false;
-    }
-
-    return true;
+    return !CREW_REST_INELIGIBLE_STATUSES.has(statusLabel);
   }
 
   markRestOrder({ days = 1, recoveryMultiplier = CREW_REST_CONFIG.recoveryMultiplier } = {}) {
@@ -468,7 +466,8 @@ class CrewMember {
       this.restPlan.orderedAt = Date.now();
     }
 
-    if ((this.status ?? '').toLowerCase() !== 'on-mission') {
+    const statusLabel = (this.status ?? '').toLowerCase();
+    if (!CREW_REST_INELIGIBLE_STATUSES.has(statusLabel)) {
       this.setStatus('resting');
     }
 

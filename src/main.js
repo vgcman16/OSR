@@ -2244,7 +2244,7 @@ const updateTrainingOptions = () => {
   const restEligible = restingSelection
     ? typeof restingSelection.isRestEligible === 'function'
       ? restingSelection.isRestEligible()
-      : !['on-mission', 'captured'].includes((restingSelection.status ?? '').toLowerCase())
+      : !['on-mission', 'captured', 'injured'].includes((restingSelection.status ?? '').toLowerCase())
     : false;
 
   const previousRestDuration = restDurationSelect.value;
