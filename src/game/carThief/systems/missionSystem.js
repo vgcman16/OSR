@@ -655,7 +655,19 @@ class MissionSystem {
     }
 
     if (!this.templateMap.has(template.id)) {
-      const storedTemplate = { ...template };
+      const storedTemplate = {
+        ...template,
+        pointOfInterest:
+          typeof template.pointOfInterest === 'object' && template.pointOfInterest !== null
+            ? {
+                ...template.pointOfInterest,
+                modifiers:
+                  typeof template.pointOfInterest.modifiers === 'object' && template.pointOfInterest.modifiers !== null
+                    ? { ...template.pointOfInterest.modifiers }
+                    : undefined,
+              }
+            : null,
+      };
       this.templateMap.set(template.id, storedTemplate);
       this.missionTemplates.push(storedTemplate);
     }
@@ -683,6 +695,16 @@ class MissionSystem {
     const difficulty = coerceFiniteNumber(template.difficulty, 1);
     const duration = sanitizeDuration(template.duration, difficulty);
     const baseSuccessChance = deriveBaseSuccessChance(difficulty);
+    const pointOfInterest =
+      typeof template.pointOfInterest === 'object' && template.pointOfInterest !== null
+        ? {
+            ...template.pointOfInterest,
+            modifiers:
+              typeof template.pointOfInterest.modifiers === 'object' && template.pointOfInterest.modifiers !== null
+                ? { ...template.pointOfInterest.modifiers }
+                : undefined,
+          }
+        : null;
     const vehicleConfig =
       typeof template.vehicle === 'object' && template.vehicle !== null
         ? template.vehicle
@@ -690,6 +712,7 @@ class MissionSystem {
 
     return {
       ...template,
+      pointOfInterest,
       payout,
       basePayout: payout,
       heat,
@@ -872,6 +895,7 @@ class MissionSystem {
       description: nextEvent.description,
       triggerProgress: nextEvent.triggerProgress,
       triggeredAt: Date.now(),
+      poiContext: nextEvent.poiContext ?? null,
       choices: nextEvent.choices.map((choice) => ({
         id: choice.id,
         label: choice.label,
