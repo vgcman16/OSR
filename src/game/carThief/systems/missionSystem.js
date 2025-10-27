@@ -865,7 +865,18 @@ class MissionSystem {
       return;
     }
 
-    mission.eventDeck = buildMissionEventDeck(mission);
+    const fallbackCrackdownTier =
+      this.currentCrackdownTier ??
+      (this.heatSystem && typeof this.heatSystem.getCurrentTier === 'function'
+        ? this.heatSystem.getCurrentTier()
+        : null);
+    const crackdownTier = mission.crackdownTier ?? mission.activeCrackdownTier ?? fallbackCrackdownTier;
+
+    if (crackdownTier) {
+      mission.crackdownTier = crackdownTier;
+    }
+
+    mission.eventDeck = buildMissionEventDeck({ ...mission, crackdownTier });
     mission.eventHistory = [];
     mission.pendingDecision = null;
   }
