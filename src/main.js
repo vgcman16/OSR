@@ -3673,6 +3673,41 @@ const updateVehicleSelectionOptions = () => {
   }
 };
 
+const formatCrackdownTierLabel = (tierName) => {
+  if (!tierName) {
+    return {
+      id: 'calm',
+      label: 'Calm',
+    };
+  }
+
+  const normalized = `${tierName}`.toLowerCase();
+  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return { id: normalized, label };
+};
+
+const describeCrackdownOperationContext = (mission, crackdownInfo) => {
+  const tierName = mission?.crackdownTier ?? crackdownInfo?.tierName ?? 'calm';
+  const { id, label } = formatCrackdownTierLabel(tierName);
+
+  let contextMessage;
+  if (id === 'calm') {
+    contextMessage = 'Calm crackdown — keep patrols complacent with a soft-touch op.';
+  } else if (id === 'alert') {
+    contextMessage = 'Alert crackdown — strike to peel back the dragnet.';
+  } else if (id === 'lockdown') {
+    contextMessage = 'Lockdown crackdown — high-risk push to pry open the city.';
+  } else {
+    contextMessage = `Eligible under the ${label.toLowerCase()} crackdown.`;
+  }
+
+  return {
+    tierId: id,
+    tierLabel: label,
+    contextMessage,
+  };
+};
+
 const describeCrackdownPolicy = () => {
   const missionSystem = getMissionSystem();
   const heatSystem = getHeatSystem();
@@ -3684,7 +3719,7 @@ const describeCrackdownPolicy = () => {
   const policy = missionSystem?.getCurrentCrackdownPolicy?.();
   const tierName = missionSystem?.currentCrackdownTier ?? heatSystem?.getCurrentTier?.();
 
-  const label = policy?.label ?? (tierName ? tierName.charAt(0).toUpperCase() + tierName.slice(1) : 'Calm');
+  const { id: tierId, label } = formatCrackdownTierLabel(tierName ?? policy?.label);
   let impact;
 
   if (!policy || !Number.isFinite(policy.maxMissionHeat)) {
@@ -3694,7 +3729,7 @@ const describeCrackdownPolicy = () => {
   }
 
   return {
-    tierName: tierName ?? 'calm',
+    tierName: tierName ?? tierId ?? 'calm',
     label,
     impact,
   };
@@ -4110,11 +4145,21 @@ const updateMissionControls = () => {
       ? formatAdjustedValue(baseSuccess, successValue, formatPercent, formatPercent, 0.005)
       : formatPercent(successValue);
     const crackdownInfo = describeCrackdownPolicy();
-    let restrictionMessage = selectedMission.restricted
-      ? selectedMission.restrictionReason ?? 'This contract is locked by the current crackdown.'
-      : crackdownInfo
-        ? `Eligible under the ${crackdownInfo.label.toLowerCase()} crackdown.`
-        : 'All contracts are open.';
+    const crackdownContext =
+      selectedMission.category === 'crackdown-operation'
+        ? describeCrackdownOperationContext(selectedMission, crackdownInfo)
+        : null;
+    let restrictionMessage;
+    if (selectedMission.restricted) {
+      restrictionMessage =
+        selectedMission.restrictionReason ?? 'This contract is locked by the current crackdown.';
+    } else if (crackdownContext) {
+      restrictionMessage = crackdownContext.contextMessage;
+    } else if (crackdownInfo) {
+      restrictionMessage = `Eligible under the ${crackdownInfo.label.toLowerCase()} crackdown.`;
+    } else {
+      restrictionMessage = 'All contracts are open.';
+    }
 
     const crewImpactSummary = (() => {
       if (selectedMission.status === 'available') {
@@ -4240,6 +4285,7 @@ const updateMissionSelect = () => {
 
   const previousSelection = select.value;
   const missions = missionSystem.availableMissions ?? [];
+  const crackdownInfo = describeCrackdownPolicy();
   const selectionStillValid = missions.some((mission) => mission.id === previousSelection);
 
   select.innerHTML = '';
@@ -4273,7 +4319,10 @@ const updateMissionSelect = () => {
       : `$${Math.max(0, payoutValue).toLocaleString()}`;
     let categoryLabel = null;
     if (mission.category === 'crackdown-operation') {
-      categoryLabel = 'CRACKDOWN';
+      const crackdownContext = describeCrackdownOperationContext(mission, crackdownInfo);
+      categoryLabel = crackdownContext
+        ? `CRACKDOWN: ${crackdownContext.tierLabel.toUpperCase()}`
+        : 'CRACKDOWN';
     } else if (mission.category === 'crew-loyalty') {
       categoryLabel = 'LOYALTY';
     } else if (mission.falloutRecovery) {

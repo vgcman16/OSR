@@ -1,4 +1,32 @@
 const CRACKDOWN_OPERATION_DEFINITIONS = {
+  calm: [
+    {
+      id: 'calm-sabotage-sensor-net',
+      name: 'Spoof the Sensor Net',
+      difficulty: 1,
+      payout: 9000,
+      heat: 1,
+      duration: 30,
+      description: 'Feed false patrol data into enforcement systems to keep them complacent.',
+      crackdownEffects: {
+        heatReduction: 0.9,
+        heatPenaltyOnFailure: 0.45,
+      },
+    },
+    {
+      id: 'calm-disable-rapid-response',
+      name: 'Ghost the Rapid Response Wing',
+      difficulty: 2,
+      payout: 12000,
+      heat: 1,
+      duration: 36,
+      description: 'Stage a quiet raid that sidelines crackdown responders before they mobilize.',
+      crackdownEffects: {
+        heatReduction: 1.1,
+        heatPenaltyOnFailure: 0.55,
+      },
+    },
+  ],
   alert: [
     {
       id: 'alert-sabotage-dragnet',
