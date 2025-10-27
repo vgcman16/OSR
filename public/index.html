@@ -74,6 +74,33 @@
             </div>
           </dl>
         </section>
+        <section class="mission-events" aria-labelledby="mission-events-title">
+          <h3 id="mission-events-title" class="mission-details__title">Mission Events</h3>
+          <p class="mission-details__hint">
+            Mid-run complications and opportunities will appear here for your decision.
+          </p>
+          <p id="mission-event-prompt" class="mission-events__prompt">No active mission. Event feed idle.</p>
+          <div
+            id="mission-event-choices"
+            class="mission-events__choices"
+            role="group"
+            aria-live="polite"
+          ></div>
+          <p
+            id="mission-event-status"
+            class="control-panel__status mission-events__status"
+            role="status"
+            aria-live="polite"
+          ></p>
+          <h4 class="mission-events__history-title">Recent Decisions</h4>
+          <ul
+            id="mission-event-history"
+            class="mission-details__list mission-events__history"
+            aria-live="polite"
+          >
+            <li>No event history yet.</li>
+          </ul>
+        </section>
         <section class="mission-crew" aria-labelledby="mission-crew-title">
           <h3 id="mission-crew-title" class="mission-details__title">Assign Crew</h3>
           <p id="mission-crew-hint" class="mission-details__hint">
