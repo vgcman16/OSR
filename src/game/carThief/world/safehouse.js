@@ -35,11 +35,16 @@ class Safehouse {
     tiers = [],
     tierIndex = 0,
     startingTier = 0,
+    purchaseCost = 0,
+    owned = false,
   } = {}) {
     this.id = id ?? `safehouse-${getRandomId()}`;
     this.name = name;
     this.location = location;
     this.description = description;
+    const normalizedPurchaseCost = Number.isFinite(purchaseCost) ? purchaseCost : 0;
+    this.purchaseCost = Math.max(0, normalizedPurchaseCost);
+    this.owned = Boolean(owned);
 
     const normalizedTiers = Array.isArray(tiers) ? tiers.map(normalizeTier) : [];
     this.tiers = normalizedTiers.length ? normalizedTiers : [normalizeTier({}, 0)];
@@ -56,6 +61,8 @@ class Safehouse {
       description: this.description,
       tiers: this.tiers.map((tier) => ({ ...tier })),
       tierIndex: this.tierIndex,
+      purchaseCost: this.purchaseCost,
+      owned: this.owned,
     });
   }
 
@@ -110,6 +117,18 @@ class Safehouse {
     return Number.isFinite(tier?.overheadModifier) ? tier.overheadModifier : 0;
   }
 
+  getPurchaseCost() {
+    return Number.isFinite(this.purchaseCost) ? this.purchaseCost : 0;
+  }
+
+  isOwned() {
+    return Boolean(this.owned);
+  }
+
+  setOwned(value = true) {
+    this.owned = Boolean(value);
+  }
+
   toJSON() {
     return {
       id: this.id,
@@ -118,6 +137,8 @@ class Safehouse {
       description: this.description,
       tiers: this.tiers.map((tier) => ({ ...tier })),
       tierIndex: this.tierIndex,
+      purchaseCost: this.purchaseCost,
+      owned: this.owned,
     };
   }
 }
@@ -133,21 +154,48 @@ class SafehouseCollection {
       return;
     }
 
+    const isSerializedCollection =
+      !Array.isArray(entries) && typeof entries === 'object' && Array.isArray(entries?.safehouses);
+
     const rawEntries = Array.isArray(entries)
       ? entries
-      : entries && typeof entries === 'object' && Array.isArray(entries.safehouses)
+      : isSerializedCollection
         ? entries.safehouses
         : [];
 
+    const providedDefaultId = isSerializedCollection ? entries.defaultSafehouseId ?? null : null;
+
     rawEntries.forEach((entry, index) => {
       const safehouse = this.add(entry);
-      if (!this.defaultSafehouseId || index === 0) {
+      if (!this.defaultSafehouseId && providedDefaultId && safehouse.id === providedDefaultId) {
+        this.defaultSafehouseId = safehouse.id;
+      }
+      if (!this.defaultSafehouseId && index === 0) {
         this.defaultSafehouseId = safehouse.id;
       }
     });
 
+    const hasOwnedSafehouse = Array.from(this.safehouses.values()).some(
+      (safehouse) => safehouse?.isOwned?.() || safehouse?.owned,
+    );
+    if (!hasOwnedSafehouse) {
+      const firstSafehouse = this.safehouses.values().next().value;
+      if (firstSafehouse) {
+        if (typeof firstSafehouse.setOwned === 'function') {
+          firstSafehouse.setOwned(true);
+        } else {
+          firstSafehouse.owned = true;
+        }
+      }
+    }
+
     if (!this.defaultSafehouseId && this.safehouses.size) {
-      this.defaultSafehouseId = this.safehouses.values().next().value.id;
+      const ownedSafehouse = this.getFirstOwnedSafehouse();
+      if (ownedSafehouse) {
+        this.defaultSafehouseId = ownedSafehouse.id;
+      } else {
+        this.defaultSafehouseId = this.safehouses.values().next().value.id;
+      }
     }
   }
 
@@ -175,6 +223,39 @@ class SafehouseCollection {
     }
   }
 
+  markOwned(id, value = true) {
+    const safehouse = this.getById(id);
+    if (!safehouse) {
+      return null;
+    }
+
+    if (typeof safehouse.setOwned === 'function') {
+      safehouse.setOwned(value);
+    } else {
+      safehouse.owned = Boolean(value);
+    }
+
+    if (value && !this.defaultSafehouseId) {
+      this.defaultSafehouseId = safehouse.id;
+    }
+
+    return safehouse;
+  }
+
+  isOwned(id) {
+    const safehouse = this.getById(id);
+    return safehouse ? Boolean(safehouse.isOwned?.() ?? safehouse.owned) : false;
+  }
+
+  getFirstOwnedSafehouse() {
+    for (const safehouse of this.safehouses.values()) {
+      if (safehouse?.isOwned?.() || safehouse?.owned) {
+        return safehouse;
+      }
+    }
+    return null;
+  }
+
   toArray() {
     return Array.from(this.safehouses.values());
   }
@@ -193,6 +274,8 @@ const DEFAULT_SAFEHOUSES = [
     name: 'Dockside Warehouse',
     location: 'East Docks',
     description: 'An abandoned freight warehouse with hidden access to the river.',
+    purchaseCost: 0,
+    owned: true,
     tiers: [
       {
         level: 0,
@@ -241,6 +324,7 @@ const DEFAULT_SAFEHOUSES = [
     name: 'Uptown Penthouse',
     location: 'Crown Heights',
     description: 'A faux consulting firm occupying a high-rise penthouse.',
+    purchaseCost: 42000,
     tiers: [
       {
         level: 0,
@@ -301,10 +385,27 @@ const getActiveSafehouseFromState = (state) => {
     state.safehouses = collection;
   }
 
-  const safehouseId = state.player?.safehouseId ?? collection.defaultSafehouseId;
-  const safehouse = collection.getById(safehouseId ?? collection.defaultSafehouseId);
+  const player = state.player ?? null;
+  const desiredSafehouseId = player?.safehouseId ?? collection.defaultSafehouseId;
 
-  return safehouse ?? collection.getDefault();
+  let safehouse = desiredSafehouseId ? collection.getById(desiredSafehouseId) : null;
+  if (safehouse && !collection.isOwned(safehouse.id)) {
+    safehouse = null;
+  }
+
+  if (!safehouse) {
+    const fallback = collection.getFirstOwnedSafehouse() ?? collection.getDefault();
+    if (fallback && player) {
+      if (typeof player.assignSafehouse === 'function') {
+        player.assignSafehouse(fallback.id);
+      } else {
+        player.safehouseId = fallback.id;
+      }
+    }
+    safehouse = fallback;
+  }
+
+  return safehouse;
 };
 
 export {
