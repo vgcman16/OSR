@@ -118,6 +118,10 @@ class MissionSystem {
 
     this.currentCrackdownTier = this.heatSystem.getCurrentTier();
 
+    if (!Array.isArray(this.state.missionLog)) {
+      this.state.missionLog = [];
+    }
+
     this.refreshContractPoolFromCity();
     this.applyHeatRestrictions();
   }
@@ -180,6 +184,10 @@ class MissionSystem {
       startedAt: null,
       completedAt: null,
       outcome: null,
+      resolutionRoll: null,
+      resolutionChance: null,
+      pendingResolution: null,
+      resolutionDetails: null,
       assignedCrewIds: [],
       assignedCrewImpact: null,
       crewEffectSummary: [],
@@ -262,6 +270,101 @@ class MissionSystem {
     }
 
     return mission;
+  }
+
+  normalizeSuccessChance(mission) {
+    if (!mission) {
+      return 0;
+    }
+
+    const candidate = Number(mission.successChance);
+    if (Number.isFinite(candidate)) {
+      return Math.max(0, Math.min(1, candidate));
+    }
+
+    const fallback = Number.isFinite(mission.baseSuccessChance)
+      ? mission.baseSuccessChance
+      : deriveBaseSuccessChance(mission.difficulty);
+    return Math.max(0, Math.min(1, fallback));
+  }
+
+  prepareAutomaticResolution(mission) {
+    const successChance = this.normalizeSuccessChance(mission);
+    const roll = Math.random();
+    const outcome = roll <= successChance ? 'success' : 'failure';
+
+    mission.resolutionRoll = roll;
+    mission.resolutionChance = successChance;
+    mission.pendingResolution = {
+      roll,
+      successChance,
+      resolvedAutomatically: true,
+      evaluatedAt: Date.now(),
+    };
+
+    return { outcome, roll, successChance };
+  }
+
+  recordMissionTelemetry(mission, outcome) {
+    if (!mission) {
+      return null;
+    }
+
+    const pending = mission.pendingResolution ?? null;
+    const successChance = Number.isFinite(pending?.successChance)
+      ? pending.successChance
+      : this.normalizeSuccessChance(mission);
+    const roll = Number.isFinite(pending?.roll) ? pending.roll : null;
+    const automatic = Boolean(pending?.resolvedAutomatically);
+    const timestamp = Date.now();
+
+    const outcomeLabel = outcome === 'success' ? 'Success' : 'Failure';
+    const chancePercent = Number.isFinite(successChance)
+      ? Math.round(successChance * 100)
+      : null;
+    const rollPercent = Number.isFinite(roll) ? Math.round(roll * 100) : null;
+
+    let summary = `${mission.name} — ${outcomeLabel}`;
+    if (rollPercent !== null && chancePercent !== null) {
+      summary = `${summary} (rolled ${rollPercent}% vs ${chancePercent}% odds)`;
+    }
+    if (!automatic) {
+      summary = `${summary} (manual resolution)`;
+    }
+
+    mission.resolutionDetails = {
+      outcome,
+      roll,
+      successChance,
+      automatic,
+      timestamp,
+    };
+    mission.pendingResolution = null;
+    mission.resolutionRoll = roll;
+    mission.resolutionChance = successChance;
+
+    if (!Array.isArray(this.state.missionLog)) {
+      this.state.missionLog = [];
+    }
+
+    const entry = {
+      id: `${mission.id}-${timestamp}`,
+      missionId: mission.id,
+      missionName: mission.name,
+      outcome,
+      roll,
+      successChance,
+      automatic,
+      timestamp,
+      summary,
+    };
+
+    this.state.missionLog.unshift(entry);
+    if (this.state.missionLog.length > 20) {
+      this.state.missionLog.length = 20;
+    }
+
+    return entry;
   }
 
   computeCrewImpact(mission, crewMembers = []) {
@@ -432,6 +535,10 @@ class MissionSystem {
       }
     });
 
+    mission.resolutionRoll = null;
+    mission.resolutionChance = null;
+    mission.pendingResolution = null;
+    mission.resolutionDetails = null;
     mission.status = 'in-progress';
     mission.startedAt = Date.now();
     mission.elapsedTime = 0;
@@ -507,6 +614,8 @@ class MissionSystem {
       }
     });
 
+    this.recordMissionTelemetry(mission, outcome);
+
     mission.assignedCrewIds = [];
     mission.assignedCrewImpact = null;
     mission.crewEffectSummary = [];
@@ -532,8 +641,15 @@ class MissionSystem {
     mission.progress = Math.min(mission.elapsedTime / duration, 1);
 
     if (mission.progress >= 1) {
-      mission.status = 'awaiting-resolution';
-      mission.completedAt = mission.completedAt ?? Date.now();
+      mission.progress = 1;
+      mission.elapsedTime = duration;
+
+      if (mission.status !== 'completed') {
+        mission.status = 'awaiting-resolution';
+        mission.completedAt = mission.completedAt ?? Date.now();
+        const { outcome } = this.prepareAutomaticResolution(mission);
+        this.resolveMission(mission.id, outcome);
+      }
     }
   }
 }

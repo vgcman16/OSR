@@ -10,6 +10,7 @@ const createState = () => ({
   garage: [],
   activeMission: null,
   heatTier: 'calm',
+  missionLog: [],
 });
 
 test('MissionSystem lifecycle from contract to resolution', (t) => {
@@ -27,8 +28,10 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
   assert.ok(secondMission, 'default missions include a second contract');
 
   const originalDateNow = Date.now;
+  const originalRandom = Math.random;
   t.after(() => {
     Date.now = originalDateNow;
+    Math.random = originalRandom;
   });
 
   Date.now = () => 1_000_000;
@@ -43,19 +46,18 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
   const missionDuration = firstMission.duration;
   assert.ok(missionDuration > 0, 'mission has a positive duration');
 
-  missionSystem.update(missionDuration);
-  assert.equal(firstMission.status, 'awaiting-resolution', 'mission waits for an outcome when complete');
-  assert.equal(firstMission.progress, 1, 'mission progress reaches 100% when duration elapses');
-
   const fundsBeforeResolution = state.funds;
   const heatBeforeResolution = state.heat;
   const garageBeforeResolution = state.garage.length;
 
   Date.now = () => 1_200_000;
-  const resolvedMission = missionSystem.resolveMission(firstMission.id, 'success');
-  assert.equal(resolvedMission, firstMission, 'resolveMission returns the mission instance');
-  assert.equal(firstMission.status, 'completed', 'mission status becomes completed after resolution');
-  assert.equal(state.activeMission, null, 'active mission clears from the game state');
+  Math.random = () => 0.1;
+
+  missionSystem.update(missionDuration);
+  assert.equal(firstMission.status, 'completed', 'mission automatically resolves once complete');
+  assert.equal(firstMission.outcome, 'success', 'mission outcome is determined by the success roll');
+  assert.equal(state.activeMission, null, 'active mission clears from the game state after auto resolution');
+  assert.equal(firstMission.progress, 1, 'mission progress reaches 100% when duration elapses');
   assert.equal(
     state.funds,
     fundsBeforeResolution + firstMission.payout,
@@ -71,6 +73,13 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
     garageBeforeResolution + 1,
     'successful missions add the reward vehicle to the garage',
   );
+
+  assert.ok(state.missionLog.length > 0, 'mission telemetry is recorded after resolution');
+  const latestLogEntry = state.missionLog[0];
+  assert.equal(latestLogEntry.missionId, firstMission.id, 'mission log references the resolved contract');
+  assert.equal(latestLogEntry.outcome, 'success', 'mission log records the outcome');
+  assert.equal(latestLogEntry.automatic, true, 'mission log flags automatic resolution');
+  assert.match(latestLogEntry.summary, /rolled/i, 'mission log summary references the success roll');
 
   const refreshedMission = missionSystem.availableMissions.find(
     (mission) => mission.id === firstMission.id,
@@ -98,8 +107,10 @@ test('MissionSystem resolves failures from in-progress and awaiting-resolution s
     const mission = missionSystem.availableMissions[0];
 
     const originalDateNow = Date.now;
+    const originalRandom = Math.random;
     t.after(() => {
       Date.now = originalDateNow;
+      Math.random = originalRandom;
     });
 
     Date.now = () => 500_000;
@@ -137,7 +148,7 @@ test('MissionSystem resolves failures from in-progress and awaiting-resolution s
     );
   });
 
-  await t.test('resolving failure after mission awaits resolution', async (t) => {
+  await t.test('automatically resolves failure when success roll misses', async (t) => {
     const state = createState();
     const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
 
@@ -155,26 +166,26 @@ test('MissionSystem resolves failures from in-progress and awaiting-resolution s
     const fundsBefore = state.funds;
     const heatBefore = state.heat;
 
-    missionSystem.update(mission.duration);
-    assert.equal(
-      mission.status,
-      'awaiting-resolution',
-      'mission transitions to awaiting-resolution after the duration elapses',
-    );
-
     Date.now = () => 800_000;
-    const resolvedMission = missionSystem.resolveMission(mission.id, 'failure');
+    Math.random = () => 0.99;
 
-    assert.equal(resolvedMission, mission, 'resolveMission returns the mission instance on failure');
-    assert.equal(resolvedMission.status, 'completed', 'mission transitions to completed on failure');
-    assert.equal(resolvedMission.outcome, 'failure', 'mission outcome is recorded as failure');
-    assert.equal(state.activeMission, null, 'active mission clears after a failure resolution');
+    missionSystem.update(mission.duration);
+
+    assert.equal(mission.status, 'completed', 'mission automatically resolves to completed on failure');
+    assert.equal(mission.outcome, 'failure', 'mission outcome is recorded as failure');
+    assert.equal(state.activeMission, null, 'active mission clears after automatic failure');
     assert.equal(state.funds, fundsBefore, 'failure does not change funds');
     assert.equal(
       state.heat,
       Math.min(10, heatBefore + mission.heat * 2),
       'failure increases heat by twice the mission heat value',
     );
+
+    assert.ok(state.missionLog.length > 0, 'mission log captures automatic failure');
+    const latestLogEntry = state.missionLog[0];
+    assert.equal(latestLogEntry.outcome, 'failure', 'mission log records the failed outcome');
+    assert.equal(latestLogEntry.automatic, true, 'mission log notes automatic resolution');
+    assert.match(latestLogEntry.summary, /rolled/i, 'mission log summary references the failure roll');
 
     const refreshedMission = missionSystem.availableMissions.find(
       (entry) => entry.id === mission.id,
@@ -226,8 +237,8 @@ test('MissionSystem sanitizes invalid mission durations', () => {
 
   assert.equal(
     mission.status,
-    'awaiting-resolution',
-    'mission reaches awaiting-resolution even when template duration is invalid',
+    'completed',
+    'mission resolves automatically even when template duration is invalid',
   );
   assert.equal(mission.progress, 1, 'mission progress caps at completion');
   assert.ok(Number.isFinite(mission.progress), 'mission progress remains finite after update');
@@ -288,31 +299,42 @@ test('MissionSystem sanitizes numeric rewards for templates missing payout or he
   assert.ok(createdMission, 'mission is created from a template missing payout and heat');
   missionSystem.availableMissions.push(createdMission);
 
-  const fundsBefore = state.funds;
-  const heatBefore = state.heat;
+  const originalRandom = Math.random;
+  Math.random = () => 0.2;
 
-  const startedMission = missionSystem.startMission(createdMission.id);
-  assert.equal(startedMission, createdMission, 'mission can be started after sanitizing values');
+  try {
+    const fundsBefore = state.funds;
+    const heatBefore = state.heat;
 
-  missionSystem.update(createdMission.duration);
-  assert.equal(
-    createdMission.status,
-    'awaiting-resolution',
-    'mission transitions to awaiting-resolution after its duration elapses',
-  );
+    const startedMission = missionSystem.startMission(createdMission.id);
+    assert.equal(startedMission, createdMission, 'mission can be started after sanitizing values');
 
-  assert.equal(createdMission.payout, 0, 'missing payout defaults to 0');
-  assert.equal(createdMission.heat, 0, 'missing heat defaults to 0');
-  assert.ok(Number.isFinite(createdMission.payout), 'mission payout is coerced to a finite number');
-  assert.doesNotThrow(() => {
-    `${createdMission.name} — $${createdMission.payout.toLocaleString()} (available)`;
-  }, 'UI formatting helpers can safely format sanitized mission payouts');
+    missionSystem.update(createdMission.duration);
+    assert.equal(
+      createdMission.status,
+      'completed',
+      'mission resolves automatically after its duration elapses',
+    );
 
-  const resolvedMission = missionSystem.resolveMission(createdMission.id, 'success');
-  assert.equal(resolvedMission, createdMission, 'mission resolves successfully after sanitization');
-  assert.equal(state.funds, fundsBefore + createdMission.payout, 'funds remain numeric after resolution');
-  assert.ok(Number.isFinite(state.funds), 'state funds stay a finite number after resolution');
-  assert.equal(state.heat, heatBefore + createdMission.heat, 'heat increases by the sanitized mission heat');
+    assert.equal(createdMission.outcome, 'success', 'sanitized mission resolves successfully');
+    assert.equal(createdMission.payout, 0, 'missing payout defaults to 0');
+    assert.equal(createdMission.heat, 0, 'missing heat defaults to 0');
+    assert.ok(Number.isFinite(createdMission.payout), 'mission payout is coerced to a finite number');
+    assert.doesNotThrow(() => {
+      `${createdMission.name} — $${createdMission.payout.toLocaleString()} (available)`;
+    }, 'UI formatting helpers can safely format sanitized mission payouts');
+
+    assert.equal(state.funds, fundsBefore + createdMission.payout, 'funds remain numeric after resolution');
+    assert.ok(Number.isFinite(state.funds), 'state funds stay a finite number after resolution');
+    assert.equal(state.heat, heatBefore + createdMission.heat, 'heat increases by the sanitized mission heat');
+
+    assert.ok(state.missionLog.length > 0, 'mission log captures sanitized mission outcome');
+    const latestLogEntry = state.missionLog[0];
+    assert.equal(latestLogEntry.outcome, 'success', 'mission log records the sanitized mission outcome');
+    assert.equal(latestLogEntry.missionId, createdMission.id, 'mission log references the sanitized mission');
+  } finally {
+    Math.random = originalRandom;
+  }
 });
 
 test('missions above the crackdown cap are restricted and reopen when heat cools', () => {

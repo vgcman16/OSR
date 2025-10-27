@@ -14,6 +14,7 @@ class GameState {
     garage = [],
     city = new CityMap(),
     activeMission = null,
+    missionLog = [],
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -24,6 +25,7 @@ class GameState {
     this.garage = garage;
     this.city = city;
     this.activeMission = activeMission;
+    this.missionLog = Array.isArray(missionLog) ? missionLog : [];
   }
 }
 
