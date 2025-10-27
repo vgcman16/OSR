@@ -6,6 +6,29 @@ const getRandomId = () => {
   return Math.random().toString(36).slice(2);
 };
 
+const normalizeFacility = (entry, fallbackId, defaultName) => {
+  if (!entry || typeof entry !== 'object') {
+    return {
+      id: fallbackId,
+      name: defaultName,
+      summary: '',
+      status: 'planned',
+    };
+  }
+
+  const id = entry.id ?? fallbackId;
+  const name = entry.name ?? defaultName;
+  const summary = entry.summary ?? entry.description ?? '';
+  const status = entry.status ?? entry.state ?? null;
+
+  return {
+    id,
+    name,
+    summary,
+    status: status ?? 'planned',
+  };
+};
+
 const normalizeTier = (tier, index) => {
   const level = Number.isFinite(tier?.level) ? tier.level : index;
   const upgradeCost = Number.isFinite(tier?.upgradeCost) ? tier.upgradeCost : 0;
@@ -13,6 +36,24 @@ const normalizeTier = (tier, index) => {
   const heatReduction = Number.isFinite(tier?.heatReduction) ? tier.heatReduction : 0;
   const storageCapacity = Number.isFinite(tier?.storageCapacity) ? tier.storageCapacity : 0;
   const overheadModifier = Number.isFinite(tier?.overheadModifier) ? tier.overheadModifier : 0;
+  const amenities = Array.isArray(tier?.amenities)
+    ? tier.amenities.map((amenity, amenityIndex) =>
+        normalizeFacility(
+          amenity,
+          `${tier?.id ?? `tier-${level}`}-amenity-${amenityIndex}`,
+          `Amenity ${amenityIndex + 1}`,
+        ),
+      )
+    : [];
+  const projects = Array.isArray(tier?.projects)
+    ? tier.projects.map((project, projectIndex) =>
+        normalizeFacility(
+          project,
+          `${tier?.id ?? `tier-${level}`}-project-${projectIndex}`,
+          `Project ${projectIndex + 1}`,
+        ),
+      )
+    : [];
 
   return {
     level,
@@ -23,6 +64,8 @@ const normalizeTier = (tier, index) => {
     storageCapacity,
     overheadModifier,
     upgradeCost,
+    amenities,
+    projects,
   };
 };
 
@@ -115,6 +158,36 @@ class Safehouse {
   getOverheadModifier() {
     const tier = this.getCurrentTier();
     return Number.isFinite(tier?.overheadModifier) ? tier.overheadModifier : 0;
+  }
+
+  getAmenitiesForTier(level = this.tierIndex) {
+    const tier = this.getTier(level);
+    return Array.isArray(tier?.amenities) ? tier.amenities.map((amenity) => ({ ...amenity })) : [];
+  }
+
+  getUnlockedAmenities() {
+    const amenities = [];
+    for (let index = 0; index <= this.tierIndex && index < this.tiers.length; index += 1) {
+      amenities.push(...this.getAmenitiesForTier(index));
+    }
+    return amenities;
+  }
+
+  getProjectsForTier(level = this.tierIndex) {
+    const tier = this.getTier(level);
+    return Array.isArray(tier?.projects) ? tier.projects.map((project) => ({ ...project })) : [];
+  }
+
+  getActiveProjects() {
+    return this.getProjectsForTier(this.tierIndex);
+  }
+
+  getUpcomingProjects() {
+    const projects = [];
+    for (let index = this.tierIndex + 1; index < this.tiers.length; index += 1) {
+      projects.push(...this.getProjectsForTier(index));
+    }
+    return projects;
   }
 
   getPurchaseCost() {
@@ -286,6 +359,28 @@ const DEFAULT_SAFEHOUSES = [
         storageCapacity: 4,
         overheadModifier: 0,
         upgradeCost: 0,
+        amenities: [
+          {
+            id: 'crash-cots',
+            name: 'Crash Cots',
+            summary: 'Improvised bunks speed up fatigue recovery for resting crew.',
+            status: 'active',
+          },
+          {
+            id: 'river-cache',
+            name: 'River Cache',
+            summary: 'Hidden lockers along the docks trickle bonus contraband for sale.',
+            status: 'active',
+          },
+        ],
+        projects: [
+          {
+            id: 'reinforce-loading-bay',
+            name: 'Reinforce Loading Bay',
+            summary: 'Materials staged to expand the bay once crews secure more funding.',
+            status: 'queued',
+          },
+        ],
       },
       {
         level: 1,
@@ -296,6 +391,28 @@ const DEFAULT_SAFEHOUSES = [
         storageCapacity: 6,
         overheadModifier: -150,
         upgradeCost: 12000,
+        amenities: [
+          {
+            id: 'workshop-bays',
+            name: 'Workshop Bays',
+            summary: 'Dedicated work areas unlock faster vehicle tuning and mod prep.',
+            status: 'active',
+          },
+          {
+            id: 'dead-drop-network',
+            name: 'Dead Drop Network',
+            summary: 'Courier caches shave a bit of heat off successful jobs.',
+            status: 'active',
+          },
+        ],
+        projects: [
+          {
+            id: 'operations-floor-plans',
+            name: 'Operations Floor Plans',
+            summary: 'Blueprints drafted for a command mezzanine to coordinate crews.',
+            status: 'in-design',
+          },
+        ],
       },
       {
         level: 2,
@@ -306,6 +423,28 @@ const DEFAULT_SAFEHOUSES = [
         storageCapacity: 9,
         overheadModifier: -260,
         upgradeCost: 24000,
+        amenities: [
+          {
+            id: 'ops-briefing-theater',
+            name: 'Ops Briefing Theater',
+            summary: 'Pre-run briefings grant crews sharper success odds.',
+            status: 'active',
+          },
+          {
+            id: 'rapid-response-shed',
+            name: 'Rapid Response Shed',
+            summary: 'Staged getaway rigs reduce downtime after heat spikes.',
+            status: 'active',
+          },
+        ],
+        projects: [
+          {
+            id: 'ghost-terminal-core',
+            name: 'Ghost Terminal Core',
+            summary: 'Shell companies assemble a laundering terminal for the final tier.',
+            status: 'fabricating',
+          },
+        ],
       },
       {
         level: 3,
@@ -316,6 +455,21 @@ const DEFAULT_SAFEHOUSES = [
         storageCapacity: 12,
         overheadModifier: -420,
         upgradeCost: 36000,
+        amenities: [
+          {
+            id: 'ghost-terminal',
+            name: 'Ghost Terminal',
+            summary: 'Automated laundering knocks citywide heat down each day.',
+            status: 'active',
+          },
+          {
+            id: 'shell-company-hub',
+            name: 'Shell Company Hub',
+            summary: 'Paper fronts open doors to lucrative syndicate contracts.',
+            status: 'active',
+          },
+        ],
+        projects: [],
       },
     ],
   },
@@ -335,6 +489,28 @@ const DEFAULT_SAFEHOUSES = [
         storageCapacity: 3,
         overheadModifier: 120,
         upgradeCost: 8000,
+        amenities: [
+          {
+            id: 'executive-front-desk',
+            name: 'Executive Front Desk',
+            summary: 'Concierge cover services deflect casual surveillance.',
+            status: 'active',
+          },
+          {
+            id: 'rooftop-pad',
+            name: 'Rooftop Landing Pad',
+            summary: 'Couriers can hot-drop gear to cut mission prep time.',
+            status: 'active',
+          },
+        ],
+        projects: [
+          {
+            id: 'private-elevator-upfit',
+            name: 'Private Elevator Upfit',
+            summary: 'Security upgrades queued to harden access control.',
+            status: 'queued',
+          },
+        ],
       },
       {
         level: 1,
@@ -345,6 +521,28 @@ const DEFAULT_SAFEHOUSES = [
         storageCapacity: 5,
         overheadModifier: -60,
         upgradeCost: 20000,
+        amenities: [
+          {
+            id: 'executive-war-room',
+            name: 'Executive War Room',
+            summary: 'Deal rooms unlock negotiation prep that bumps payouts.',
+            status: 'active',
+          },
+          {
+            id: 'quiet-network',
+            name: 'Quiet Network',
+            summary: 'An insider call tree trims crackdown patrol response.',
+            status: 'active',
+          },
+        ],
+        projects: [
+          {
+            id: 'shadow-boardroom-designs',
+            name: 'Shadow Boardroom Designs',
+            summary: 'Architects draft secret boardrooms to steer city movers.',
+            status: 'in-design',
+          },
+        ],
       },
       {
         level: 2,
@@ -355,6 +553,28 @@ const DEFAULT_SAFEHOUSES = [
         storageCapacity: 8,
         overheadModifier: -220,
         upgradeCost: 34000,
+        amenities: [
+          {
+            id: 'shadow-boardroom',
+            name: 'Shadow Boardroom',
+            summary: 'Influence ops grant small success bonuses on high-end targets.',
+            status: 'active',
+          },
+          {
+            id: 'shell-finance-desk',
+            name: 'Shell Finance Desk',
+            summary: 'Pop-up financiers underwrite expensive crew loyalty jobs.',
+            status: 'active',
+          },
+        ],
+        projects: [
+          {
+            id: 'phantom-syndicate-expansion',
+            name: 'Phantom Syndicate Expansion',
+            summary: 'Lays groundwork for a whisper-network to erase crackdown traces.',
+            status: 'fabricating',
+          },
+        ],
       },
       {
         level: 3,
@@ -365,6 +585,21 @@ const DEFAULT_SAFEHOUSES = [
         storageCapacity: 10,
         overheadModifier: -380,
         upgradeCost: 52000,
+        amenities: [
+          {
+            id: 'phantom-syndicate-suite',
+            name: 'Phantom Syndicate Suite',
+            summary: 'Counter-intel rig shaves an extra chunk of heat after every score.',
+            status: 'active',
+          },
+          {
+            id: 'vip-concierge-ring',
+            name: 'VIP Concierge Ring',
+            summary: 'High-roller clients open premium contracts when morale is high.',
+            status: 'active',
+          },
+        ],
+        projects: [],
       },
     ],
   },

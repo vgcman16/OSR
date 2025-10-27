@@ -124,6 +124,20 @@ const normalizeRestPlan = (plan) => {
   };
 };
 
+const normalizeStoryProgress = (progress) => {
+  if (!progress || typeof progress !== 'object') {
+    return { completedSteps: [] };
+  }
+
+  const completed = Array.isArray(progress.completedSteps)
+    ? progress.completedSteps
+        .map((step) => (step ? String(step) : null))
+        .filter((step, index, array) => step && array.indexOf(step) === index)
+    : [];
+
+  return { completedSteps: completed };
+};
+
 const SPECIALTY_TRAIT_PROFILE = {
   wheelman: { driving: 3, tactics: 2, stealth: 1 },
   hacker: { tech: 3, stealth: 2, tactics: 1 },
@@ -314,6 +328,7 @@ const createCrewTemplate = ({
   background = null,
   backgroundId = null,
   perks = null,
+  storyProgress = null,
 } = {}) => {
   const resolvedSpecialty = specialty ?? 'wheelman';
   const resolvedBackground = background
@@ -335,8 +350,9 @@ const createCrewTemplate = ({
   const resolvedPerks = Array.isArray(perks)
     ? [...perks]
     : resolvedBackground?.perkLabel
-    ? [resolvedBackground.perkLabel]
-    : [];
+      ? [resolvedBackground.perkLabel]
+      : [];
+  const resolvedStoryProgress = normalizeStoryProgress(storyProgress ?? {});
 
   return {
     id: id ?? generateId(),
@@ -347,6 +363,7 @@ const createCrewTemplate = ({
     traits: resolvedTraits,
     background: resolvedBackground,
     perks: resolvedPerks,
+    storyProgress: resolvedStoryProgress,
   };
 };
 
@@ -361,6 +378,7 @@ class CrewMember {
     this.traits = template.traits;
     this.background = template.background;
     this.perks = template.perks;
+    this.storyProgress = normalizeStoryProgress(options.storyProgress ?? template.storyProgress ?? {});
     this.status = 'idle';
     this.falloutStatus = options.falloutStatus ?? null;
     this.falloutDetails =
@@ -487,6 +505,57 @@ class CrewMember {
     } else {
       this.setStatus('idle');
     }
+  }
+
+  getCompletedStorySteps() {
+    return Array.isArray(this.storyProgress?.completedSteps)
+      ? [...this.storyProgress.completedSteps]
+      : [];
+  }
+
+  hasCompletedStoryStep(stepId) {
+    if (!stepId) {
+      return false;
+    }
+    const normalizedId = String(stepId);
+    return this.getCompletedStorySteps().includes(normalizedId);
+  }
+
+  markStoryStepComplete(stepId) {
+    if (!stepId) {
+      return this.getStoryProgressSnapshot();
+    }
+
+    const normalizedId = String(stepId);
+    const completed = new Set(this.getCompletedStorySteps());
+    completed.add(normalizedId);
+    this.storyProgress = {
+      completedSteps: Array.from(completed),
+    };
+    return this.getStoryProgressSnapshot();
+  }
+
+  getStoryProgressSnapshot() {
+    return {
+      completedSteps: this.getCompletedStorySteps(),
+    };
+  }
+
+  addPerk(perk) {
+    if (!perk) {
+      return Array.isArray(this.perks) ? this.perks.slice() : [];
+    }
+
+    const normalizedPerk = String(perk);
+    if (!Array.isArray(this.perks)) {
+      this.perks = [];
+    }
+
+    if (!this.perks.includes(normalizedPerk)) {
+      this.perks.push(normalizedPerk);
+    }
+
+    return this.perks.slice();
   }
 
   applyRestRecovery(days = 1) {
@@ -687,6 +756,31 @@ class CrewMember {
     const maxLevel = Number.isFinite(config.maxLevel) ? config.maxLevel : 6;
     const updatedValue = Math.max(0, Math.min(maxLevel, currentValue + delta));
     this.traits[traitKey] = Math.round(updatedValue);
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      name: this.name,
+      specialty: this.specialty,
+      upkeep: this.upkeep,
+      loyalty: this.loyalty,
+      traits: { ...this.traits },
+      background: this.background ? { ...this.background } : null,
+      perks: Array.isArray(this.perks) ? [...this.perks] : [],
+      status: this.status,
+      falloutStatus: this.falloutStatus,
+      falloutDetails:
+        typeof this.falloutDetails === 'object' && this.falloutDetails !== null
+          ? { ...this.falloutDetails }
+          : null,
+      fatigue: this.fatigue,
+      fatigueRecoveryPerDay: this.fatigueRecoveryPerDay,
+      lastRestedAt: this.lastRestedAt,
+      lastMissionCompletedAt: this.lastMissionCompletedAt,
+      restPlan: this.restPlan ? { ...this.restPlan } : null,
+      storyProgress: this.getStoryProgressSnapshot(),
+    };
   }
 }
 

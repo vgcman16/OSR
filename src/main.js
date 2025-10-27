@@ -317,6 +317,43 @@ const describeSafehouseTierEffects = (tier, safehouse = null) => {
     );
   }
 
+  const amenities = safehouse?.getUnlockedAmenities?.()
+    ? safehouse.getUnlockedAmenities()
+    : Array.isArray(tier?.amenities)
+      ? tier.amenities
+      : [];
+  if (amenities.length) {
+    amenities.forEach((amenity) => {
+      const summary = amenity.summary ? ` — ${amenity.summary}` : '';
+      effectLines.push(`Amenity: ${amenity.name ?? 'Facility'}${summary}`);
+    });
+  } else {
+    effectLines.push('No safehouse amenities installed yet.');
+  }
+
+  const activeProjects = safehouse?.getActiveProjects?.()
+    ? safehouse.getActiveProjects()
+    : Array.isArray(tier?.projects)
+      ? tier.projects
+      : [];
+  if (activeProjects.length) {
+    activeProjects.forEach((project) => {
+      const summary = project.summary ? ` — ${project.summary}` : '';
+      effectLines.push(`Project: ${project.name ?? 'Facility upgrade'}${summary}`);
+    });
+  }
+
+  const upcomingProjects = safehouse?.getUpcomingProjects?.()
+    ? safehouse.getUpcomingProjects()
+    : [];
+  if (upcomingProjects.length) {
+    const preview = upcomingProjects
+      .slice(0, 2)
+      .map((project) => project.name ?? 'Facility upgrade')
+      .join(', ');
+    effectLines.push(`Upcoming unlocks: ${preview}.`);
+  }
+
   if (tier?.description) {
     effectLines.push(tier.description);
   }
@@ -4088,11 +4125,14 @@ const updateMissionSelect = () => {
     const payoutLabel = isSupportOperation
       ? 'Support'
       : `$${Math.max(0, payoutValue).toLocaleString()}`;
-    const categoryLabel = mission.falloutRecovery
-      ? mission.falloutRecovery.type === 'medical'
-        ? 'MEDICAL'
-        : 'RESCUE'
-      : null;
+    let categoryLabel = null;
+    if (mission.category === 'crackdown-operation') {
+      categoryLabel = 'CRACKDOWN';
+    } else if (mission.category === 'crew-loyalty') {
+      categoryLabel = 'LOYALTY';
+    } else if (mission.falloutRecovery) {
+      categoryLabel = mission.falloutRecovery.type === 'medical' ? 'MEDICAL' : 'RESCUE';
+    }
     const prefix = categoryLabel ? `[${categoryLabel}] ` : '';
     option.textContent = `${prefix}${mission.name} — ${payoutLabel} (${statusLabel})${restrictionLabel}`;
     option.selected = selectionStillValid && mission.id === previousSelection;
