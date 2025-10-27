@@ -802,6 +802,29 @@ test('restricted missions cannot be started during a crackdown', () => {
   assert.equal(attemptStart, null, 'restricted missions cannot be started');
 });
 
+test('calm-tier crackdown operations populate the contract list at calm heat', () => {
+  const state = createState();
+  state.heat = 0.2;
+  const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
+
+  missionSystem.generateInitialContracts();
+
+  const crackdownContracts = missionSystem.availableMissions.filter(
+    (mission) => mission.category === 'crackdown-operation',
+  );
+
+  assert.ok(crackdownContracts.length > 0, 'calm crackdown operations are available at calm tier');
+  assert.ok(
+    crackdownContracts.some((mission) => mission.crackdownTier === 'calm'),
+    'calm crackdown operations carry the calm tier tag',
+  );
+  assert.ok(
+    crackdownContracts.every((mission) => !mission.restricted),
+    'calm crackdown operations are not auto-restricted',
+  );
+});
+
 test('failure heat penalty scales with the crackdown tier', (t) => {
   const state = createState();
   state.heat = 7.2;
