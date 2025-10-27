@@ -33,7 +33,41 @@ const createCarThiefGame = ({ canvas, context }) => {
       context.fillText(`- ${member.name} (${member.specialty})`, 48, 212 + index * 26);
     });
 
-    const missionInfoX = 420;
+    const garageLabelY = 212 + state.crew.length * 26 + 40;
+    context.fillText('Garage:', 32, garageLabelY);
+
+    const garage = Array.isArray(state.garage) ? state.garage : [];
+    const garageStartY = garageLabelY + 30;
+    const garageColumnWidth = 200;
+    const garageRowHeight = 60;
+    const maxGarageColumns = Math.max(1, Math.min(3, Math.floor((canvas.width - 64) / garageColumnWidth)));
+    const maxGarageRows = 3;
+    const maxVehiclesVisible = maxGarageColumns * maxGarageRows;
+    const vehiclesToDisplay = garage.slice(0, maxVehiclesVisible);
+
+    vehiclesToDisplay.forEach((vehicle, index) => {
+      const columnIndex = index % maxGarageColumns;
+      const rowIndex = Math.floor(index / maxGarageColumns);
+      const vehicleX = 32 + columnIndex * garageColumnWidth;
+      const vehicleY = garageStartY + rowIndex * garageRowHeight;
+
+      const condition = typeof vehicle.condition === 'number' ? Math.round(vehicle.condition) : 'N/A';
+      const heat = typeof vehicle.heat === 'number' ? vehicle.heat.toFixed(1) : 'N/A';
+
+      context.fillText(vehicle.model ?? 'Unknown vehicle', vehicleX, vehicleY);
+      context.fillText(`Condition: ${condition}%`, vehicleX, vehicleY + 20);
+      context.fillText(`Heat: ${heat}`, vehicleX, vehicleY + 40);
+    });
+
+    if (garage.length > vehiclesToDisplay.length) {
+      const remaining = garage.length - vehiclesToDisplay.length;
+      const infoY =
+        garageStartY + maxGarageRows * garageRowHeight - 10;
+      context.fillText(`+${remaining} more in garage`, 32, infoY);
+    }
+
+    const garageColumnsUsed = Math.min(garage.length, maxGarageColumns);
+    const missionInfoX = Math.max(420, 32 + garageColumnsUsed * garageColumnWidth + 48);
     let missionInfoY = 48;
     context.fillText('Mission Status:', missionInfoX, missionInfoY);
 
