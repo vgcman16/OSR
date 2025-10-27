@@ -1083,14 +1083,14 @@ const updateVehicleSelectionOptions = () => {
     const isOperational = Number.isFinite(conditionValue) ? conditionValue > 0.05 : true;
     const statusLabel = (vehicle.status ?? '').toLowerCase();
     const isInMission = Boolean(vehicle.inUse) || statusLabel === 'in-mission' || activeMissionVehicleId === vehicle.id;
-    const disabled = !isOperational || isInMission;
+    const unavailableForMission = !isOperational || isInMission;
 
-    if (!disabled) {
+    if (!unavailableForMission) {
       hasSelectableOption = true;
     }
 
     radio.checked = missionControls.selectedVehicleId === vehicle.id;
-    radio.disabled = disabled;
+    radio.disabled = unavailableForMission;
 
     radio.addEventListener('change', () => {
       missionControls.selectedVehicleId = radio.checked ? vehicle.id : null;
@@ -1126,9 +1126,10 @@ const updateVehicleSelectionOptions = () => {
     sellButton.className = 'mission-vehicle__action mission-vehicle__action--sell';
     const saleValue = Number.isFinite(disposition?.saleValue) ? disposition.saleValue : 0;
     sellButton.textContent = saleValue > 0 ? `Sell (${formatCurrency(saleValue)})` : 'Sell';
-    sellButton.disabled = disabled || saleValue <= 0;
-    if (disabled) {
-      sellButton.title = 'Vehicle unavailable while in use or inoperable.';
+    const sellDisabled = isInMission || saleValue <= 0;
+    sellButton.disabled = sellDisabled;
+    if (isInMission) {
+      sellButton.title = 'Vehicle unavailable while in use.';
     } else if (saleValue <= 0) {
       sellButton.title = 'No resale value detected.';
     }
@@ -1171,9 +1172,10 @@ const updateVehicleSelectionOptions = () => {
       scrapValue > 0
         ? `Scrap for parts (${formatCurrency(scrapValue)})`
         : 'Scrap for parts';
-    scrapButton.disabled = disabled || (scrapValue <= 0 && partsRecovered <= 0);
-    if (disabled) {
-      scrapButton.title = 'Vehicle unavailable while in use or inoperable.';
+    const scrapDisabled = isInMission || (scrapValue <= 0 && partsRecovered <= 0);
+    scrapButton.disabled = scrapDisabled;
+    if (isInMission) {
+      scrapButton.title = 'Vehicle unavailable while in use.';
     } else if (partsRecovered > 0) {
       scrapButton.title = `Recover approximately ${partsRecovered} parts.`;
     } else if (scrapValue <= 0) {
