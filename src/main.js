@@ -159,9 +159,17 @@ const resetMissionDetails = (descriptionText) => {
 
 const formatMissionStatusMessage = (mission) => {
   if (!mission) {
-    const latestLogEntry = getMissionSystem()?.state?.missionLog?.[0];
+    const missionSystem = getMissionSystem();
+    const latestLogEntry = missionSystem?.state?.missionLog?.[0];
+    const vehicleSummary = describeVehicleReportOutcome(missionSystem?.state?.lastVehicleReport);
+
     if (latestLogEntry) {
-      return `No active mission. Last result: ${latestLogEntry.summary}`;
+      const baseMessage = `No active mission. Last result: ${latestLogEntry.summary}`;
+      return vehicleSummary ? `${baseMessage} — Garage: ${vehicleSummary}` : baseMessage;
+    }
+
+    if (vehicleSummary) {
+      return `No active mission. ${vehicleSummary}`;
     }
 
     return 'No active mission.';
@@ -234,6 +242,66 @@ const formatAdjustedValue = (
   const delta = adjusted - base;
   const sign = delta >= 0 ? '+' : '-';
   return `${formatValue(base)} → ${formatValue(adjusted)} (${sign}${formatDelta(Math.abs(delta))})`;
+};
+
+const describeVehicleReportOutcome = (report) => {
+  if (!report) {
+    return '';
+  }
+
+  const modelLabel = report.vehicleModel ?? 'Vehicle';
+  const summarizeFunds = (value) => {
+    if (!Number.isFinite(value)) {
+      return '';
+    }
+
+    return formatCurrency(value);
+  };
+
+  if (report.outcome === 'sale') {
+    const fundsLabel = summarizeFunds(report.fundsDelta ?? report.salePrice);
+    return fundsLabel ? `${modelLabel} sold for ${fundsLabel}.` : `${modelLabel} sold.`;
+  }
+
+  if (report.outcome === 'scrap') {
+    const fundsLabel = summarizeFunds(report.fundsDelta ?? report.scrapValue);
+    const partsCount = Number.isFinite(report.partsRecovered) ? report.partsRecovered : 0;
+    const partsLabel = partsCount > 0 ? `${partsCount} parts recovered` : '';
+    const segments = [`${modelLabel} scrapped.`];
+    if (partsLabel) {
+      segments.push(partsLabel);
+    }
+    if (fundsLabel) {
+      segments.push(`Worth ${fundsLabel}.`);
+    }
+    return segments.join(' ').trim();
+  }
+
+  if (report.outcome === 'maintenance') {
+    if (report.maintenanceType === 'repair') {
+      const deltaPercent = Number.isFinite(report.conditionDelta)
+        ? Math.round(report.conditionDelta * 100)
+        : null;
+      const deltaLabel = deltaPercent && deltaPercent > 0 ? `+${deltaPercent}% condition.` : '';
+      return `${modelLabel} serviced — repairs complete.${deltaLabel ? ` ${deltaLabel}` : ''}`.trim();
+    }
+    if (report.maintenanceType === 'heat') {
+      const heatDrop = Number.isFinite(report.heatDelta) ? -report.heatDelta : null;
+      const heatLabel = heatDrop && heatDrop > 0 ? `${heatDrop.toFixed(1)} heat purged.` : '';
+      return `${modelLabel} heat purge complete.${heatLabel ? ` ${heatLabel}` : ''}`.trim();
+    }
+    return `${modelLabel} maintenance complete.`;
+  }
+
+  if (typeof report.summary === 'string' && report.summary.trim()) {
+    return report.summary.trim();
+  }
+
+  if (report.outcome) {
+    return `${modelLabel} update: ${report.outcome}.`;
+  }
+
+  return `${modelLabel} update recorded.`;
 };
 
 const setRecruitStatus = (message) => {
@@ -396,6 +464,18 @@ const updateMaintenancePanel = () => {
     )} for up to ${repairPercent}% restoration; heat purges cost ${formatCurrency(
       heatCost,
     )} to lower heat by ${heatLabel}.${affordabilityMessage}`;
+  }
+
+  if (systemsReady && hasSelection) {
+    const disposition = missionSystem?.estimateVehicleDisposition?.(selectedVehicle) ?? null;
+    if (disposition?.saleValue || disposition?.scrapValue) {
+      const saleLabel = formatCurrency(disposition.saleValue ?? 0);
+      const scrapLabel = formatCurrency(disposition.scrapValue ?? 0);
+      const partsLabel = Number.isFinite(disposition?.partsRecovered) && disposition.partsRecovered > 0
+        ? `${disposition.partsRecovered} parts`
+        : 'no usable parts';
+      summaryMessage = `${summaryMessage} Disposition: Sell for ${saleLabel} or scrap for ${scrapLabel} (${partsLabel}).`;
+    }
   }
 
   const detail = missionControls.maintenanceStatusDetail?.trim();
@@ -985,6 +1065,9 @@ const updateVehicleSelectionOptions = () => {
       return;
     }
 
+    const entry = document.createElement('div');
+    entry.className = 'mission-vehicle__entry';
+
     const optionLabel = document.createElement('label');
     optionLabel.className = 'mission-crew__option mission-vehicle__option';
 
@@ -1032,7 +1115,106 @@ const updateVehicleSelectionOptions = () => {
 
     optionLabel.appendChild(radio);
     optionLabel.appendChild(descriptor);
-    vehicleContainer.appendChild(optionLabel);
+    entry.appendChild(optionLabel);
+
+    const disposition = missionSystem?.estimateVehicleDisposition?.(vehicle) ?? null;
+    const actionBar = document.createElement('div');
+    actionBar.className = 'mission-vehicle__actions';
+
+    const sellButton = document.createElement('button');
+    sellButton.type = 'button';
+    sellButton.className = 'mission-vehicle__action mission-vehicle__action--sell';
+    const saleValue = Number.isFinite(disposition?.saleValue) ? disposition.saleValue : 0;
+    sellButton.textContent = saleValue > 0 ? `Sell (${formatCurrency(saleValue)})` : 'Sell';
+    sellButton.disabled = disabled || saleValue <= 0;
+    if (disabled) {
+      sellButton.title = 'Vehicle unavailable while in use or inoperable.';
+    } else if (saleValue <= 0) {
+      sellButton.title = 'No resale value detected.';
+    }
+    sellButton.addEventListener('click', () => {
+      if (!missionSystem) {
+        missionControls.maintenanceStatusDetail = 'Garage systems offline.';
+        updateMaintenancePanel();
+        return;
+      }
+
+      const result = missionSystem.sellVehicle(vehicle.id);
+      if (!result?.success) {
+        const failureMessage = result?.reason === 'vehicle-in-use'
+          ? 'Vehicle cannot be sold while committed to a mission.'
+          : 'Unable to sell vehicle.';
+        missionControls.maintenanceStatusDetail = failureMessage;
+        updateMaintenancePanel();
+        return;
+      }
+
+      const saleLabel = formatCurrency(result.salePrice ?? result.fundsDelta ?? 0);
+      missionControls.maintenanceStatusDetail = `Sold ${
+        result.vehicleModel ?? 'vehicle'
+      } for ${saleLabel}.`;
+      if (missionControls.selectedVehicleId === vehicle.id) {
+        missionControls.selectedVehicleId = null;
+      }
+      updateMissionControls();
+      triggerHudRender();
+    });
+
+    const scrapButton = document.createElement('button');
+    scrapButton.type = 'button';
+    scrapButton.className = 'mission-vehicle__action mission-vehicle__action--scrap';
+    const scrapValue = Number.isFinite(disposition?.scrapValue) ? disposition.scrapValue : 0;
+    const partsRecovered = Number.isFinite(disposition?.partsRecovered)
+      ? disposition.partsRecovered
+      : 0;
+    scrapButton.textContent =
+      scrapValue > 0
+        ? `Scrap for parts (${formatCurrency(scrapValue)})`
+        : 'Scrap for parts';
+    scrapButton.disabled = disabled || (scrapValue <= 0 && partsRecovered <= 0);
+    if (disabled) {
+      scrapButton.title = 'Vehicle unavailable while in use or inoperable.';
+    } else if (partsRecovered > 0) {
+      scrapButton.title = `Recover approximately ${partsRecovered} parts.`;
+    } else if (scrapValue <= 0) {
+      scrapButton.title = 'Limited salvage available.';
+    }
+    scrapButton.addEventListener('click', () => {
+      if (!missionSystem) {
+        missionControls.maintenanceStatusDetail = 'Garage systems offline.';
+        updateMaintenancePanel();
+        return;
+      }
+
+      const result = missionSystem.dismantleVehicle(vehicle.id);
+      if (!result?.success) {
+        const failureMessage = result?.reason === 'vehicle-in-use'
+          ? 'Vehicle cannot be dismantled while committed to a mission.'
+          : 'Unable to dismantle vehicle.';
+        missionControls.maintenanceStatusDetail = failureMessage;
+        updateMaintenancePanel();
+        return;
+      }
+
+      const fundsLabel = formatCurrency(result.scrapValue ?? result.fundsDelta ?? 0);
+      const partsLabel = Number.isFinite(result.partsRecovered) && result.partsRecovered > 0
+        ? `${result.partsRecovered} parts recovered.`
+        : 'Minimal salvage recovered.';
+      missionControls.maintenanceStatusDetail = `Scrapped ${
+        result.vehicleModel ?? 'vehicle'
+      } for ${fundsLabel}. ${partsLabel}`;
+      if (missionControls.selectedVehicleId === vehicle.id) {
+        missionControls.selectedVehicleId = null;
+      }
+      updateMissionControls();
+      triggerHudRender();
+    });
+
+    actionBar.appendChild(sellButton);
+    actionBar.appendChild(scrapButton);
+    entry.appendChild(actionBar);
+
+    vehicleContainer.appendChild(entry);
   });
 
   if (!hasSelectableOption) {
