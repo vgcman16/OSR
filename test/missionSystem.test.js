@@ -16,6 +16,20 @@ const createState = () => ({
   missionLog: [],
 });
 
+const resolvePendingDecisions = (missionSystem, mission) => {
+  if (!missionSystem || !mission) {
+    return;
+  }
+
+  while (mission.pendingDecision) {
+    const decision = mission.pendingDecision;
+    assert.ok(decision.choices?.length, 'mission event provides choices to resolve');
+    const choice = decision.choices[0];
+    missionSystem.chooseMissionEventOption(decision.eventId, choice.id);
+    missionSystem.advanceMissionEvents(mission);
+  }
+};
+
 test('Garage maintenance repairs restore condition when funds allow', (t) => {
   const state = createState();
   state.funds = 20_000;
@@ -142,6 +156,8 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
   Math.random = () => 0.1;
 
   missionSystem.update(missionDuration);
+  resolvePendingDecisions(missionSystem, firstMission);
+  missionSystem.update(0);
   assert.equal(firstMission.status, 'completed', 'mission automatically resolves once complete');
   assert.equal(firstMission.outcome, 'success', 'mission outcome is determined by the success roll');
   assert.equal(state.activeMission, null, 'active mission clears from the game state after auto resolution');
@@ -184,6 +200,101 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
   assert.equal(refreshedMission.startedAt, null, 'respawned mission clears start timestamp');
   assert.equal(refreshedMission.completedAt, null, 'respawned mission clears completion timestamp');
   assert.equal(refreshedMission.outcome, null, 'respawned mission clears prior outcome');
+});
+
+test('mission event deck filters by risk tier and crackdown context', () => {
+  const state = createState();
+  const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
+
+  const template = {
+    id: 'lockdown-deck-check',
+    name: 'Lockdown Deck Check',
+    difficulty: 5,
+    payout: 18_000,
+    heat: 2,
+    duration: 45,
+    riskTier: 'high',
+    pointOfInterest: { id: 'south-impound', name: 'South Impound', type: 'impound-lot' },
+  };
+
+  const mission = missionSystem.createMissionFromTemplate(template);
+  assert.ok(mission, 'mission template is converted into a mission instance');
+
+  mission.crackdownTier = 'lockdown';
+
+  missionSystem.initializeMissionEvents(mission);
+  const deck = mission.eventDeck;
+
+  assert.ok(deck.length > 0, 'event deck generates entries for high-risk missions');
+  assert.ok(deck.length <= 5, 'high difficulty missions cap the deck to five entries');
+
+  assert.ok(
+    deck.every((event) => !event.riskTiers || event.riskTiers.includes('high')),
+    'deck excludes events that do not support the mission risk tier',
+  );
+
+  assert.ok(
+    deck.some((event) => Array.isArray(event.crackdownTiers) && event.crackdownTiers.includes('lockdown')),
+    'deck includes lockdown-aware events when crackdown tier is lockdown',
+  );
+
+  const poiEvent = deck.find((event) => event.poiContext?.id === template.pointOfInterest.id);
+  assert.ok(poiEvent, 'point-of-interest specific event is present in the deck');
+  assert.ok(
+    (poiEvent.selectionWeight ?? 0) > poiEvent.baseWeight,
+    'point-of-interest event weight scales under lockdown crackdown pressure',
+  );
+
+  for (let index = 1; index < deck.length; index += 1) {
+    assert.ok(
+      deck[index].triggerProgress >= deck[index - 1].triggerProgress,
+      'deck preserves trigger order after weighting',
+    );
+  }
+
+  assert.ok(
+    !deck.some((event) => event.id === 'street-intel'),
+    'low-risk street intel events are omitted from high-risk missions',
+  );
+});
+
+test('mission event deck favors low-risk events for easier contracts', () => {
+  const state = createState();
+  const missionSystem = new MissionSystem(state, { heatSystem: new HeatSystem(state) });
+
+  const template = {
+    id: 'low-risk-deck-check',
+    name: 'Low Risk Deck Check',
+    difficulty: 1,
+    payout: 6_000,
+    heat: 1,
+    duration: 28,
+    riskTier: 'low',
+    pointOfInterest: { id: 'inner-market', name: 'Inner Market', type: 'smuggling-cache' },
+  };
+
+  const mission = missionSystem.createMissionFromTemplate(template);
+  assert.ok(mission, 'low risk template converts to mission instance');
+
+  mission.crackdownTier = 'calm';
+
+  missionSystem.initializeMissionEvents(mission);
+  const deck = mission.eventDeck;
+
+  assert.ok(deck.length > 0, 'deck contains entries for low-risk missions');
+  assert.ok(deck.length <= 3, 'low difficulty missions restrict the deck to three entries');
+
+  assert.ok(
+    deck.some((event) => event.id === 'street-intel' || event.id === 'black-market-favor'),
+    'low-risk tuned events appear in the deck',
+  );
+
+  assert.ok(!deck.some((event) => event.id === 'armored-response'), 'high-risk events are filtered out');
+
+  const weightedEntry = deck.find((event) => event.id === 'street-intel');
+  if (weightedEntry) {
+    assert.ok(weightedEntry.selectionWeight > 1, 'low-risk event gains weight for matching context');
+  }
 });
 
 test('Successful missions block reward vehicles when garage capacity is full', (t) => {
@@ -314,6 +425,8 @@ test('MissionSystem resolves failures from in-progress and awaiting-resolution s
     Math.random = () => 0.99;
 
     missionSystem.update(mission.duration);
+    resolvePendingDecisions(missionSystem, mission);
+    missionSystem.update(0);
 
     assert.equal(mission.status, 'completed', 'mission automatically resolves to completed on failure');
     assert.equal(mission.outcome, 'failure', 'mission outcome is recorded as failure');
@@ -378,6 +491,8 @@ test('MissionSystem sanitizes invalid mission durations', () => {
 
   missionSystem.startMission(mission.id);
   missionSystem.update(mission.duration * 2);
+  resolvePendingDecisions(missionSystem, mission);
+  missionSystem.update(0);
 
   assert.equal(
     mission.status,
@@ -454,6 +569,8 @@ test('MissionSystem sanitizes numeric rewards for templates missing payout or he
     assert.equal(startedMission, createdMission, 'mission can be started after sanitizing values');
 
     missionSystem.update(createdMission.duration);
+    resolvePendingDecisions(missionSystem, createdMission);
+    missionSystem.update(0);
     assert.equal(
       createdMission.status,
       'completed',
