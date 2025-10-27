@@ -876,6 +876,10 @@ class MissionSystem {
         label: choice.label,
         description: choice.description,
         narrative: choice.narrative ?? null,
+        effects:
+          typeof choice.effects === 'object' && choice.effects !== null
+            ? { ...choice.effects }
+            : {},
       })),
     };
 
@@ -1054,10 +1058,16 @@ class MissionSystem {
       eventLabel: eventEntry.label,
       choiceId: choice.id,
       choiceLabel: choice.label,
+      choiceNarrative: choice.narrative ?? null,
       triggeredAt: pending.triggeredAt ?? Date.now(),
       resolvedAt: Date.now(),
       progressAt: pending.triggerProgress ?? mission.progress,
       summary: eventSummary,
+      effectSummary: deltaParts.length ? deltaParts.join(', ') : null,
+      effects:
+        typeof choice.effects === 'object' && choice.effects !== null
+          ? { ...choice.effects }
+          : {},
       deltas: {
         payout: payoutDelta,
         heat: heatDelta,
@@ -1150,6 +1160,8 @@ class MissionSystem {
         eventLabel: entry?.eventLabel ?? null,
         choiceId: entry?.choiceId ?? null,
         choiceLabel: entry?.choiceLabel ?? null,
+        choiceNarrative: entry?.choiceNarrative ?? null,
+        effectSummary: entry?.effectSummary ?? null,
         summary: entry?.summary ?? null,
         resolvedAt: entry?.resolvedAt ?? null,
       })),

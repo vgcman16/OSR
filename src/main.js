@@ -504,6 +504,59 @@ const setMissionEventStatus = (message) => {
   eventStatus.textContent = detail;
 };
 
+const formatEventEffectSummary = (effects) => {
+  if (!effects || typeof effects !== 'object') {
+    return '';
+  }
+
+  const parts = [];
+
+  const payoutMultiplier = Number(effects.payoutMultiplier);
+  if (Number.isFinite(payoutMultiplier) && Math.abs(payoutMultiplier - 1) >= 0.01) {
+    parts.push(`Payout x${payoutMultiplier.toFixed(2)}`);
+  }
+
+  const payoutDelta = Number(effects.payoutDelta);
+  if (Number.isFinite(payoutDelta) && Math.round(payoutDelta) !== 0) {
+    const amount = Math.abs(Math.round(payoutDelta));
+    parts.push(`Payout ${payoutDelta > 0 ? '+' : '-'}$${amount.toLocaleString()}`);
+  }
+
+  const heatMultiplier = Number(effects.heatMultiplier);
+  if (Number.isFinite(heatMultiplier) && Math.abs(heatMultiplier - 1) >= 0.01) {
+    parts.push(`Heat x${heatMultiplier.toFixed(2)}`);
+  }
+
+  const heatDelta = Number(effects.heatDelta);
+  if (Number.isFinite(heatDelta) && Math.abs(heatDelta) >= 0.05) {
+    parts.push(`Heat ${heatDelta > 0 ? '+' : ''}${heatDelta.toFixed(1)}`);
+  }
+
+  const successDelta = Number(effects.successDelta);
+  if (Number.isFinite(successDelta) && Math.abs(successDelta) >= 0.005) {
+    const percent = Math.round(successDelta * 100);
+    parts.push(`Success ${successDelta > 0 ? '+' : ''}${percent}%`);
+  }
+
+  const durationMultiplier = Number(effects.durationMultiplier);
+  if (Number.isFinite(durationMultiplier) && Math.abs(durationMultiplier - 1) >= 0.01) {
+    const deltaPercent = Math.round((durationMultiplier - 1) * 100);
+    parts.push(`Duration ${deltaPercent > 0 ? '+' : ''}${deltaPercent}%`);
+  }
+
+  const durationDelta = Number(effects.durationDelta);
+  if (Number.isFinite(durationDelta) && Math.abs(durationDelta) >= 1) {
+    parts.push(`Duration ${durationDelta > 0 ? '+' : ''}${Math.round(durationDelta)}s`);
+  }
+
+  const loyaltyDelta = Number(effects.crewLoyaltyDelta);
+  if (Number.isFinite(loyaltyDelta) && loyaltyDelta !== 0) {
+    parts.push(`Crew loyalty ${loyaltyDelta > 0 ? '+' : ''}${loyaltyDelta}`);
+  }
+
+  return parts.join(', ');
+};
+
 const updateSafehousePanel = () => {
   const {
     safehouseName,
@@ -2314,6 +2367,7 @@ const renderMissionEvents = () => {
         id: choice.id,
         label: choice.label,
         description: choice.description,
+        effects: choice.effects,
       }))
       .forEach((choice) => {
         const option = document.createElement('div');
@@ -2332,6 +2386,14 @@ const renderMissionEvents = () => {
           blurb.className = 'mission-event__option-desc';
           blurb.textContent = choice.description;
           option.appendChild(blurb);
+        }
+
+        const effectSummary = formatEventEffectSummary(choice.effects);
+        if (effectSummary) {
+          const effectLine = document.createElement('p');
+          effectLine.className = 'mission-event__option-desc';
+          effectLine.textContent = `Effects: ${effectSummary}`;
+          option.appendChild(effectLine);
         }
 
         eventChoices.appendChild(option);
@@ -2369,7 +2431,9 @@ const renderMissionEvents = () => {
       ? `[${Math.round(entry.progressAt * 100)}%] `
       : '';
     const summary = entry?.summary ?? `${entry?.eventLabel ?? 'Event'} resolved.`;
-    item.textContent = `${progressPercent}${summary}`;
+    const effectSummary = typeof entry?.effectSummary === 'string' ? entry.effectSummary.trim() : '';
+    const detail = effectSummary ? ` (${effectSummary})` : '';
+    item.textContent = `${progressPercent}${summary}${detail}`;
     eventHistory.appendChild(item);
   });
 };
