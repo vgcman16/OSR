@@ -15,6 +15,7 @@ class GameState {
     city = new CityMap(),
     activeMission = null,
     missionLog = [],
+    lastVehicleReport = null,
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -26,6 +27,7 @@ class GameState {
     this.city = city;
     this.activeMission = activeMission;
     this.missionLog = Array.isArray(missionLog) ? missionLog : [];
+    this.lastVehicleReport = lastVehicleReport;
   }
 }
 
@@ -38,6 +40,7 @@ const createInitialGameState = () =>
     garage: [
       new Vehicle({ model: 'Safehouse Van', topSpeed: 95, handling: 4 }),
     ],
+    lastVehicleReport: null,
   });
 
 export { GameState, createInitialGameState };

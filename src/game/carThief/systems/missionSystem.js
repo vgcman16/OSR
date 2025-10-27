@@ -7,6 +7,22 @@ const coerceFiniteNumber = (value, fallback = 0) => {
   return Number.isFinite(numeric) ? numeric : fallback;
 };
 
+const clamp = (value, min, max) => {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  if (value < min) {
+    return min;
+  }
+
+  if (value > max) {
+    return max;
+  }
+
+  return value;
+};
+
 const REQUIRED_TEMPLATE_FIELDS = ['id', 'name'];
 
 const sanitizeDuration = (durationValue, difficultyValue) => {
@@ -170,6 +186,7 @@ class MissionSystem {
       payout,
       basePayout: payout,
       heat,
+      baseHeat: heat,
       difficulty,
       vehicle: new Vehicle(vehicleConfig),
       status: 'available',
@@ -191,6 +208,10 @@ class MissionSystem {
       assignedCrewIds: [],
       assignedCrewImpact: null,
       crewEffectSummary: [],
+      assignedVehicleId: null,
+      assignedVehicleImpact: null,
+      assignedVehicleSnapshot: null,
+      assignedVehicleLabel: null,
     };
   }
 
@@ -367,7 +388,7 @@ class MissionSystem {
     return entry;
   }
 
-  computeCrewImpact(mission, crewMembers = []) {
+  computeCrewImpact(mission, crewMembers = [], vehicle = null) {
     if (!mission) {
       return null;
     }
@@ -377,6 +398,9 @@ class MissionSystem {
     const baseSuccessChance = Number.isFinite(mission.baseSuccessChance)
       ? mission.baseSuccessChance
       : deriveBaseSuccessChance(mission.difficulty);
+    const baseHeat = Number.isFinite(mission.baseHeat)
+      ? mission.baseHeat
+      : coerceFiniteNumber(mission.heat, 0);
 
     let durationMultiplier = 1;
     let payoutMultiplier = 1;
@@ -440,6 +464,99 @@ class MissionSystem {
     durationMultiplier = Math.max(0.5, durationMultiplier);
     payoutMultiplier = Math.max(0.5, payoutMultiplier);
 
+    let heatAdjustment = 0;
+    let adjustedHeat = baseHeat;
+    let vehicleImpact = null;
+
+    if (vehicle) {
+      const safeSpeed = Math.max(60, coerceFiniteNumber(vehicle.topSpeed, 120));
+      const safeAcceleration = Math.max(1, coerceFiniteNumber(vehicle.acceleration, 5));
+      const safeHandling = Math.max(1, coerceFiniteNumber(vehicle.handling, 5));
+      const rawCondition = Number(vehicle.condition);
+      const safeCondition = Number.isFinite(rawCondition) ? clamp(rawCondition, 0, 1) : 1;
+      const rawHeat = Number(vehicle.heat);
+      const safeHeatRating = Number.isFinite(rawHeat) ? Math.max(0, rawHeat) : 0;
+
+      const speedRatio = clamp(safeSpeed / 120, 0.5, 1.8);
+      const accelerationRatio = clamp(safeAcceleration / 5, 0.5, 1.6);
+      const handlingRatio = clamp(safeHandling / 5, 0.5, 1.6);
+      const agilityScore = clamp(speedRatio * 0.6 + accelerationRatio * 0.4, 0.4, 2);
+      const conditionPenalty = clamp(1 + (1 - safeCondition) * 0.6, 0.7, 1.6);
+      const vehicleDurationMultiplier = clamp((1 / agilityScore) * conditionPenalty, 0.6, 1.4);
+
+      durationMultiplier *= vehicleDurationMultiplier;
+      durationMultiplier = Math.max(0.35, durationMultiplier);
+
+      const handlingBonus = (handlingRatio - 1) * 0.12;
+      const conditionBonus = (safeCondition - 0.6) * 0.08;
+      successBonus += handlingBonus + conditionBonus;
+
+      const difficulty = coerceFiniteNumber(mission.difficulty, 1);
+      const conditionHeat = Math.max(0, (1 - safeCondition) * (0.8 + 0.2 * difficulty));
+      const maneuverMitigation = Math.max(0, handlingRatio - 1) * 0.15;
+      heatAdjustment = safeHeatRating * 0.3 + conditionHeat - maneuverMitigation;
+      adjustedHeat = Math.max(0, baseHeat + heatAdjustment);
+
+      const wearBaseline = 0.07 + 0.025 * difficulty;
+      const wearModifier = clamp(
+        1.1 - (handlingRatio - 1) * 0.35 - (safeCondition - 0.7) * 0.45,
+        0.5,
+        1.6,
+      );
+      const wearOnSuccess = clamp(wearBaseline * wearModifier, 0.02, 0.5);
+      const wearOnFailure = clamp(wearOnSuccess * 1.35 + 0.05, 0.04, 0.7);
+
+      const heatGainBase = Math.max(0, 0.12 * difficulty + safeHeatRating * 0.1);
+      const heatGainMitigation = Math.max(0, (handlingRatio - 1) * 0.08);
+      const heatGainOnSuccess = Math.max(0, heatGainBase + conditionHeat * 0.15 - heatGainMitigation);
+      const heatGainOnFailure = heatGainOnSuccess + 0.15;
+
+      const durationDeltaPercent = Math.round((1 - vehicleDurationMultiplier) * 100);
+      const successDeltaPercent = Math.round((handlingBonus + conditionBonus) * 100);
+      const heatDeltaLabel = Math.abs(heatAdjustment) >= 0.05
+        ? `${heatAdjustment > 0 ? '+' : '-'}${Math.abs(heatAdjustment).toFixed(1)} heat`
+        : null;
+
+      const vehicleSummaryParts = [];
+      if (Math.abs(durationDeltaPercent) >= 1) {
+        vehicleSummaryParts.push(
+          `${Math.abs(durationDeltaPercent)}% ${durationDeltaPercent > 0 ? 'faster' : 'slower'}`,
+        );
+      }
+      if (Math.abs(successDeltaPercent) >= 1) {
+        vehicleSummaryParts.push(
+          `${successDeltaPercent > 0 ? '+' : ''}${successDeltaPercent}% success`,
+        );
+      }
+      if (heatDeltaLabel) {
+        vehicleSummaryParts.push(heatDeltaLabel);
+      }
+      if (!vehicleSummaryParts.length) {
+        vehicleSummaryParts.push('steady performance');
+      }
+      summary.push(
+        `Vehicle (${vehicle.model ?? 'Crew wheels'}): ${vehicleSummaryParts.join(', ')}.`,
+      );
+
+      vehicleImpact = {
+        vehicleId: vehicle.id,
+        model: vehicle.model,
+        durationMultiplier: vehicleDurationMultiplier,
+        successContribution: handlingBonus + conditionBonus,
+        heatAdjustment,
+        wearOnSuccess,
+        wearOnFailure,
+        heatGainOnSuccess,
+        heatGainOnFailure,
+        conditionBefore: safeCondition,
+        heatBefore: safeHeatRating,
+      };
+    } else {
+      summary.push('Vehicle: No assignment selected.');
+      adjustedHeat = Math.max(0, baseHeat);
+      heatAdjustment = 0;
+    }
+
     const adjustedDuration = Math.max(5, Math.round(baseDuration * durationMultiplier));
     const adjustedPayout = Math.round(basePayout * payoutMultiplier);
     const adjustedSuccessChance = Math.max(0.05, Math.min(0.98, baseSuccessChance + successBonus));
@@ -451,14 +568,18 @@ class MissionSystem {
       adjustedPayout,
       baseSuccessChance,
       adjustedSuccessChance,
+      baseHeat,
+      adjustedHeat,
+      heatAdjustment,
       summary,
       durationMultiplier,
       payoutMultiplier,
       successBonus,
+      vehicleImpact,
     };
   }
 
-  previewCrewAssignment(missionId, crewIds = []) {
+  previewCrewAssignment(missionId, crewIds = [], vehicleId = null) {
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
     if (!mission) {
       return null;
@@ -466,7 +587,9 @@ class MissionSystem {
 
     const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
     const crewMembers = crewPool.filter((member) => crewIds.includes(member.id));
-    return this.computeCrewImpact(mission, crewMembers) ?? null;
+    const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
+    const vehicle = vehicleId ? garage.find((entry) => entry?.id === vehicleId) ?? null : null;
+    return this.computeCrewImpact(mission, crewMembers, vehicle) ?? null;
   }
 
   generateInitialContracts() {
@@ -488,12 +611,13 @@ class MissionSystem {
     this.applyHeatRestrictions();
   }
 
-  startMission(missionId, crewIds = []) {
+  startMission(missionId, crewIds = [], vehicleId = null) {
     if (this.state.activeMission && this.state.activeMission.status !== 'completed') {
       return null;
     }
 
     this.syncHeatTier();
+    this.state.lastVehicleReport = null;
 
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
     if (!mission || mission.status !== 'available' || mission.restricted) {
@@ -509,12 +633,51 @@ class MissionSystem {
       return null;
     }
 
-    const crewImpact = this.computeCrewImpact(mission, assignedCrew);
+    const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
+    let assignedVehicle = null;
+
+    if (vehicleId) {
+      assignedVehicle = garage.find((entry) => entry?.id === vehicleId) ?? null;
+      if (!assignedVehicle) {
+        return null;
+      }
+    } else {
+      assignedVehicle = garage.find((vehicle) => {
+        if (!vehicle) {
+          return false;
+        }
+
+        const statusLabel = (vehicle.status ?? 'idle').toLowerCase();
+        const inUse = Boolean(vehicle.inUse) || statusLabel === 'in-mission';
+        const conditionValue = Number(vehicle.condition);
+        const operational = !Number.isFinite(conditionValue) || conditionValue > 0.05;
+        return operational && !inUse;
+      }) ?? null;
+    }
+
+    if (assignedVehicle) {
+      const vehicleStatus = (assignedVehicle.status ?? 'idle').toLowerCase();
+      const vehicleInUse = Boolean(assignedVehicle.inUse) || vehicleStatus === 'in-mission';
+      const conditionValue = Number(assignedVehicle.condition);
+      const vehicleOperational = !Number.isFinite(conditionValue) || conditionValue > 0.05;
+
+      if (vehicleInUse || !vehicleOperational) {
+        if (vehicleId) {
+          return null;
+        }
+
+        assignedVehicle = null;
+      }
+    }
+
+    const crewImpact = this.computeCrewImpact(mission, assignedCrew, assignedVehicle ?? null);
     if (crewImpact) {
       mission.duration = crewImpact.adjustedDuration;
       mission.payout = crewImpact.adjustedPayout;
       mission.successChance = crewImpact.adjustedSuccessChance;
       mission.assignedCrewImpact = crewImpact;
+      mission.heat = crewImpact.adjustedHeat;
+      mission.assignedVehicleImpact = assignedVehicle ? crewImpact.vehicleImpact : null;
     } else {
       mission.duration = sanitizeDuration(mission.baseDuration ?? mission.duration, mission.difficulty);
       mission.payout = coerceFiniteNumber(mission.basePayout ?? mission.payout, 0);
@@ -522,10 +685,22 @@ class MissionSystem {
         ? mission.baseSuccessChance
         : deriveBaseSuccessChance(mission.difficulty);
       mission.assignedCrewImpact = null;
+      mission.heat = Number.isFinite(mission.baseHeat)
+        ? mission.baseHeat
+        : coerceFiniteNumber(mission.heat, 0);
+      mission.assignedVehicleImpact = null;
     }
 
     mission.assignedCrewIds = assignedCrew.map((member) => member.id);
     mission.crewEffectSummary = crewImpact?.summary ?? [];
+    mission.assignedVehicleId = assignedVehicle ? assignedVehicle.id : null;
+    mission.assignedVehicleSnapshot = assignedVehicle
+      ? {
+          condition: Number.isFinite(assignedVehicle.condition) ? assignedVehicle.condition : null,
+          heat: Number.isFinite(assignedVehicle.heat) ? assignedVehicle.heat : null,
+        }
+      : null;
+    mission.assignedVehicleLabel = assignedVehicle ? assignedVehicle.model ?? 'Assigned vehicle' : null;
 
     assignedCrew.forEach((member) => {
       if (typeof member.setStatus === 'function') {
@@ -534,6 +709,15 @@ class MissionSystem {
         member.status = 'on-mission';
       }
     });
+
+    if (assignedVehicle) {
+      if (typeof assignedVehicle.setStatus === 'function') {
+        assignedVehicle.setStatus('in-mission');
+      } else {
+        assignedVehicle.status = 'in-mission';
+        assignedVehicle.inUse = true;
+      }
+    }
 
     mission.resolutionRoll = null;
     mission.resolutionChance = null;
@@ -575,6 +759,23 @@ class MissionSystem {
 
     const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
     const assignedCrew = crewPool.filter((member) => mission.assignedCrewIds?.includes(member.id));
+    const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
+    const assignedVehicleId = mission.assignedVehicleId ?? null;
+    const assignedVehicle = assignedVehicleId
+      ? garage.find((vehicle) => vehicle?.id === assignedVehicleId) ?? null
+      : null;
+    const vehicleImpact = mission.assignedCrewImpact?.vehicleImpact ?? mission.assignedVehicleImpact ?? null;
+    const snapshot = mission.assignedVehicleSnapshot ?? {};
+    const preMissionCondition = Number.isFinite(snapshot.condition)
+      ? clamp(snapshot.condition, 0, 1)
+      : Number.isFinite(assignedVehicle?.condition)
+        ? clamp(assignedVehicle.condition, 0, 1)
+        : null;
+    const preMissionHeat = Number.isFinite(snapshot.heat)
+      ? snapshot.heat
+      : Number.isFinite(assignedVehicle?.heat)
+        ? assignedVehicle.heat
+        : null;
 
     if (outcome === 'success') {
       this.state.funds += mission.payout;
@@ -595,6 +796,15 @@ class MissionSystem {
         const wearAmount = Math.max(0.05, 0.18 - wearReduction);
         mission.vehicle.applyWear(wearAmount);
       }
+      if (mission.vehicle && typeof mission.vehicle.setStatus === 'function') {
+        mission.vehicle.setStatus('idle');
+      } else if (mission.vehicle) {
+        mission.vehicle.status = 'idle';
+        mission.vehicle.inUse = false;
+      }
+      if (typeof mission.vehicle?.markStolen === 'function') {
+        mission.vehicle.markStolen();
+      }
     } else if (outcome === 'failure') {
       const multiplier = crackdownPolicy.failureHeatMultiplier ?? 2;
       this.heatSystem.increase(mission.heat * multiplier);
@@ -604,6 +814,79 @@ class MissionSystem {
           member.adjustLoyalty(-1);
         }
       });
+    }
+
+    let vehicleReport = null;
+    if (assignedVehicle) {
+      const wearAmount = (() => {
+        const value = Number.isFinite(
+          outcome === 'success' ? vehicleImpact?.wearOnSuccess : vehicleImpact?.wearOnFailure,
+        )
+          ? outcome === 'success'
+            ? vehicleImpact.wearOnSuccess
+            : vehicleImpact.wearOnFailure
+          : 0.12;
+        return Math.max(0, value);
+      })();
+
+      const heatGainAmount = (() => {
+        const value = Number.isFinite(
+          outcome === 'success' ? vehicleImpact?.heatGainOnSuccess : vehicleImpact?.heatGainOnFailure,
+        )
+          ? outcome === 'success'
+            ? vehicleImpact.heatGainOnSuccess
+            : vehicleImpact.heatGainOnFailure
+          : 0.2;
+        return Math.max(0, value);
+      })();
+
+      const originalCondition = Number.isFinite(assignedVehicle.condition)
+        ? clamp(assignedVehicle.condition, 0, 1)
+        : null;
+      const originalHeat = Number.isFinite(assignedVehicle.heat) ? assignedVehicle.heat : null;
+
+      if (typeof assignedVehicle.applyWear === 'function') {
+        assignedVehicle.applyWear(wearAmount);
+      } else if (Number.isFinite(assignedVehicle.condition)) {
+        assignedVehicle.condition = clamp(assignedVehicle.condition - wearAmount, 0, 1);
+      }
+
+      if (typeof assignedVehicle.modifyHeat === 'function') {
+        assignedVehicle.modifyHeat(heatGainAmount);
+      } else if (Number.isFinite(assignedVehicle.heat)) {
+        assignedVehicle.heat = Math.max(0, assignedVehicle.heat + heatGainAmount);
+      }
+
+      if (typeof assignedVehicle.setStatus === 'function') {
+        assignedVehicle.setStatus('idle');
+      } else {
+        assignedVehicle.status = 'idle';
+        assignedVehicle.inUse = false;
+      }
+
+      const finalCondition = Number.isFinite(assignedVehicle.condition)
+        ? clamp(assignedVehicle.condition, 0, 1)
+        : null;
+      const finalHeat = Number.isFinite(assignedVehicle.heat) ? assignedVehicle.heat : null;
+
+      vehicleReport = {
+        vehicleId: assignedVehicle.id,
+        vehicleModel: assignedVehicle.model,
+        missionName: mission.name,
+        outcome,
+        conditionBefore: preMissionCondition ?? originalCondition,
+        conditionAfter: finalCondition,
+        conditionDelta:
+          finalCondition !== null && (preMissionCondition ?? originalCondition) !== null
+            ? finalCondition - (preMissionCondition ?? originalCondition)
+            : null,
+        heatBefore: preMissionHeat ?? originalHeat,
+        heatAfter: finalHeat,
+        heatDelta:
+          finalHeat !== null && (preMissionHeat ?? originalHeat) !== null
+            ? finalHeat - (preMissionHeat ?? originalHeat)
+            : null,
+      };
     }
 
     assignedCrew.forEach((member) => {
@@ -619,6 +902,12 @@ class MissionSystem {
     mission.assignedCrewIds = [];
     mission.assignedCrewImpact = null;
     mission.crewEffectSummary = [];
+    mission.assignedVehicleId = null;
+    mission.assignedVehicleImpact = null;
+    mission.assignedVehicleSnapshot = null;
+    mission.assignedVehicleLabel = null;
+
+    this.state.lastVehicleReport = vehicleReport;
 
     this.respawnMissionTemplate(mission.id);
     this.drawContractFromPool();

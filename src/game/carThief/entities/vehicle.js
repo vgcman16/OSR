@@ -8,10 +8,14 @@ class Vehicle {
     this.heat = heat;
     this.condition = 1;
     this.isStolen = false;
+    this.status = 'idle';
+    this.inUse = false;
   }
 
   markStolen() {
     this.isStolen = true;
+    this.status = 'idle';
+    this.inUse = false;
   }
 
   applyWear(amount) {
@@ -20,6 +24,11 @@ class Vehicle {
 
   modifyHeat(amount) {
     this.heat = Math.max(0, this.heat + amount);
+  }
+
+  setStatus(status) {
+    this.status = status;
+    this.inUse = status === 'in-mission';
   }
 }
 
