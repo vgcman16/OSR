@@ -133,6 +133,13 @@ body {
   color: rgba(209, 234, 255, 0.85);
 }
 
+.control-panel__status--tier {
+  min-height: auto;
+  line-height: 1.4;
+  font-size: 0.95rem;
+  color: rgba(255, 196, 120, 0.9);
+}
+
 .mission-details {
   padding: 1rem;
   border-radius: 14px;

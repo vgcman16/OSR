@@ -21,6 +21,24 @@ const sanitizeDuration = (durationValue, difficultyValue) => {
   return fallback;
 };
 
+const crackdownPolicies = {
+  calm: {
+    label: 'Calm',
+    maxMissionHeat: Infinity,
+    failureHeatMultiplier: 2,
+  },
+  alert: {
+    label: 'Alert',
+    maxMissionHeat: 2,
+    failureHeatMultiplier: 3,
+  },
+  lockdown: {
+    label: 'Lockdown',
+    maxMissionHeat: 1,
+    failureHeatMultiplier: 4,
+  },
+};
+
 const defaultMissionTemplates = [
   {
     id: 'showroom-heist',
@@ -71,7 +89,10 @@ class MissionSystem {
     this.contractPool = contractPool.map((template) => ({ ...template }));
     this.contractFactory = contractFactory;
 
+    this.currentCrackdownTier = this.heatSystem.getCurrentTier();
+
     this.refreshContractPoolFromCity();
+    this.applyHeatRestrictions();
   }
 
   registerTemplate(template) {
@@ -96,10 +117,9 @@ class MissionSystem {
     );
 
     if (missingFields.length) {
+      const formattedMissingFields = missingFields.join(', ');
       console.warn(
-        `Mission template "${template.id ?? '<unknown>'}" missing required fields: ${missingFields.join(
-          ', ',
-        )}`,
+        `Mission template "${template.id ?? '<unknown>'}" missing required fields: ${formattedMissingFields}`,
       );
       return null;
     }
@@ -120,6 +140,8 @@ class MissionSystem {
       difficulty,
       vehicle: new Vehicle(vehicleConfig),
       status: 'available',
+      restricted: false,
+      restrictionReason: null,
       elapsedTime: 0,
       progress: 0,
       duration,
@@ -172,6 +194,7 @@ class MissionSystem {
     const refreshedMission = this.createMissionFromTemplate(template);
     if (refreshedMission) {
       this.availableMissions.splice(missionIndex, 1, refreshedMission);
+      this.applyHeatRestrictions();
     }
   }
 
@@ -200,6 +223,7 @@ class MissionSystem {
       } else {
         this.availableMissions.splice(existingIndex, 1, mission);
       }
+      this.applyHeatRestrictions();
     }
 
     return mission;
@@ -220,6 +244,8 @@ class MissionSystem {
         break;
       }
     }
+
+    this.applyHeatRestrictions();
   }
 
   startMission(missionId) {
@@ -227,8 +253,10 @@ class MissionSystem {
       return null;
     }
 
+    this.syncHeatTier();
+
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
-    if (!mission || mission.status !== 'available') {
+    if (!mission || mission.status !== 'available' || mission.restricted) {
       return null;
     }
 
@@ -241,6 +269,8 @@ class MissionSystem {
   }
 
   resolveMission(missionId, outcome) {
+    this.syncHeatTier();
+
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
     if (!mission || mission.status === 'available' || mission.status === 'completed') {
       return null;
@@ -262,21 +292,27 @@ class MissionSystem {
     mission.elapsedTime = mission.duration;
     this.state.activeMission = null;
 
+    const crackdownPolicy = this.getCurrentCrackdownPolicy();
+
     if (outcome === 'success') {
       this.state.funds += mission.payout;
       this.heatSystem.increase(mission.heat);
       this.state.garage.push(mission.vehicle);
     } else if (outcome === 'failure') {
-      this.heatSystem.increase(mission.heat * 2);
+      const multiplier = crackdownPolicy.failureHeatMultiplier ?? 2;
+      this.heatSystem.increase(mission.heat * multiplier);
     }
 
     this.respawnMissionTemplate(mission.id);
     this.drawContractFromPool();
+    this.applyHeatRestrictions();
 
     return mission;
   }
 
   update(delta) {
+    this.syncHeatTier();
+
     const mission = this.state.activeMission;
     if (!mission || mission.status !== 'in-progress') {
       return;
@@ -293,5 +329,39 @@ class MissionSystem {
     }
   }
 }
+
+MissionSystem.prototype.getCurrentCrackdownPolicy = function getCurrentCrackdownPolicy() {
+  const tier = this.currentCrackdownTier ?? this.heatSystem.getCurrentTier();
+  return crackdownPolicies[tier] ?? crackdownPolicies.calm;
+};
+
+MissionSystem.prototype.syncHeatTier = function syncHeatTier() {
+  const latestTier = this.heatSystem.getCurrentTier();
+  if (this.currentCrackdownTier !== latestTier) {
+    this.currentCrackdownTier = latestTier;
+    this.applyHeatRestrictions();
+  }
+};
+
+MissionSystem.prototype.applyHeatRestrictions = function applyHeatRestrictions() {
+  const policy = this.getCurrentCrackdownPolicy();
+  const maxHeat = policy.maxMissionHeat ?? Infinity;
+
+  this.availableMissions.forEach((mission) => {
+    if (!mission || mission.status !== 'available') {
+      mission.restricted = false;
+      mission.restrictionReason = null;
+      return;
+    }
+
+    if (mission.heat > maxHeat) {
+      mission.restricted = true;
+      mission.restrictionReason = `Unavailable during ${policy.label.toLowerCase()} crackdown`;
+    } else {
+      mission.restricted = false;
+      mission.restrictionReason = null;
+    }
+  });
+};
 
 export { MissionSystem };

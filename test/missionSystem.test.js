@@ -9,6 +9,7 @@ const createState = () => ({
   heat: 0,
   garage: [],
   activeMission: null,
+  heatTier: 'calm',
 });
 
 test('MissionSystem lifecycle from contract to resolution', (t) => {
@@ -312,4 +313,74 @@ test('MissionSystem sanitizes numeric rewards for templates missing payout or he
   assert.equal(state.funds, fundsBefore + createdMission.payout, 'funds remain numeric after resolution');
   assert.ok(Number.isFinite(state.funds), 'state funds stay a finite number after resolution');
   assert.equal(state.heat, heatBefore + createdMission.heat, 'heat increases by the sanitized mission heat');
+});
+
+test('missions above the crackdown cap are restricted and reopen when heat cools', () => {
+  const state = createState();
+  state.heat = 3.4;
+  const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
+
+  missionSystem.generateInitialContracts();
+
+  const highHeatMission = missionSystem.availableMissions.find((mission) => mission.heat >= 3);
+  assert.ok(highHeatMission, 'default missions include a high-heat contract for restriction testing');
+  assert.equal(missionSystem.currentCrackdownTier, 'alert', 'alert crackdown triggered at elevated heat');
+  assert.equal(highHeatMission.restricted, true, 'high heat mission is locked during alert crackdown');
+  assert.ok(
+    highHeatMission.restrictionReason?.toLowerCase().includes('alert'),
+    'restriction reason references the active crackdown tier',
+  );
+
+  heatSystem.update(200);
+  missionSystem.syncHeatTier();
+
+  assert.equal(state.heatTier, 'calm', 'heat tier returns to calm after decay');
+  assert.equal(highHeatMission.restricted, false, 'mission becomes available once crackdown lifts');
+});
+
+test('restricted missions cannot be started during a crackdown', () => {
+  const state = createState();
+  state.heat = 3.6;
+  const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
+
+  missionSystem.generateInitialContracts();
+  const restrictedMission = missionSystem.availableMissions.find((mission) => mission.heat > 2);
+  assert.ok(restrictedMission?.restricted, 'mission is flagged as restricted under alert crackdown');
+
+  const attemptStart = missionSystem.startMission(restrictedMission.id);
+  assert.equal(attemptStart, null, 'restricted missions cannot be started');
+});
+
+test('failure heat penalty scales with the crackdown tier', (t) => {
+  const state = createState();
+  state.heat = 7.2;
+  const heatSystem = new HeatSystem(state);
+  const missionSystem = new MissionSystem(state, { heatSystem });
+
+  missionSystem.generateInitialContracts();
+
+  const mission = missionSystem.availableMissions.find((entry) => entry.heat === 1);
+  assert.ok(mission, 'a low-heat mission is available even during lockdown');
+  assert.equal(mission.restricted, false, 'low-heat mission stays available during lockdown');
+
+  const originalDateNow = Date.now;
+  t.after(() => {
+    Date.now = originalDateNow;
+  });
+
+  Date.now = () => 900_000;
+  missionSystem.startMission(mission.id);
+
+  const heatBefore = state.heat;
+  missionSystem.resolveMission(mission.id, 'failure');
+
+  const expectedHeat = Math.min(10, heatBefore + mission.heat * 4);
+  assert.equal(state.heat, expectedHeat, 'lockdown crackdown applies the higher failure multiplier');
+  assert.equal(
+    missionSystem.currentCrackdownTier,
+    'lockdown',
+    'crackdown tier persists after mission resolution under high heat',
+  );
 });

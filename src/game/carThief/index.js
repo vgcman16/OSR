@@ -15,6 +15,9 @@ const createCarThiefGame = ({ canvas, context }) => {
       return;
     }
 
+    const crackdownTier = heatSystem.getCurrentTierConfig();
+    const crackdownLabel = crackdownTier?.label ?? 'Unknown';
+
     context.fillStyle = '#121822';
     context.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -25,15 +28,17 @@ const createCarThiefGame = ({ canvas, context }) => {
     context.fillText(`Day ${state.day}`, 32, 78);
     context.fillText(`Funds: $${state.funds.toLocaleString()}`, 32, 108);
     context.fillText(`Heat: ${state.heat.toFixed(2)}`, 32, 138);
+    context.fillText(`Crackdown: ${crackdownLabel}`, 32, 168);
 
     context.fillStyle = '#d1eaff';
     context.font = '16px "Segoe UI", sans-serif';
-    context.fillText('Crew:', 32, 182);
+    context.fillText('Crew:', 32, 212);
     state.crew.forEach((member, index) => {
-      context.fillText(`- ${member.name} (${member.specialty})`, 48, 212 + index * 26);
+      context.fillText(`- ${member.name} (${member.specialty})`, 48, 242 + index * 26);
     });
 
-    const garageLabelY = 212 + state.crew.length * 26 + 40;
+    const crewSectionBottom = 242 + state.crew.length * 26;
+    const garageLabelY = crewSectionBottom + 40;
     context.fillText('Garage:', 32, garageLabelY);
 
     const garage = Array.isArray(state.garage) ? state.garage : [];
@@ -66,7 +71,7 @@ const createCarThiefGame = ({ canvas, context }) => {
       context.fillText(`+${remaining} more in garage`, 32, infoY);
     }
 
-    const garageColumnsUsed = Math.min(garage.length, maxGarageColumns);
+    const garageColumnsUsed = Math.min(Math.max(garage.length, 1), maxGarageColumns);
     const missionInfoX = Math.max(420, 32 + garageColumnsUsed * garageColumnWidth + 48);
     let missionInfoY = 48;
     context.fillText('Mission Status:', missionInfoX, missionInfoY);
@@ -137,6 +142,7 @@ const createCarThiefGame = ({ canvas, context }) => {
       const metadataSegments = [
         mission.districtName ? `@ ${mission.districtName}` : null,
         mission.riskTier ? `risk: ${mission.riskTier}` : null,
+        mission.restricted ? 'LOCKED' : null,
       ].filter(Boolean);
       const metadataLabel = metadataSegments.length ? ` — ${metadataSegments.join(' • ')}` : '';
 
@@ -145,6 +151,9 @@ const createCarThiefGame = ({ canvas, context }) => {
         missionInfoX,
         baseY,
       );
+      if (mission.restricted && mission.restrictionReason) {
+        context.fillText(`   ⛔ ${mission.restrictionReason}`, missionInfoX, baseY + 18);
+      }
     });
   };
 
