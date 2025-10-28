@@ -1158,6 +1158,11 @@ class MissionSystem {
       ? cloneVehicleRewardProfile(reference.vehicleReward)
       : undefined;
 
+    const campaignMilestone =
+      typeof reference.campaignMilestone === 'object' && reference.campaignMilestone !== null
+        ? { ...reference.campaignMilestone }
+        : undefined;
+
     const districtIntel = this.getDistrictIntelSnapshot(reference);
 
     return {
@@ -1168,7 +1173,41 @@ class MissionSystem {
       falloutRecovery,
       vehicleReward,
       districtIntel,
+      campaignMilestone,
     };
+  }
+
+  purgeCampaignMilestoneTemplates(milestoneId) {
+    if (!milestoneId) {
+      return;
+    }
+
+    for (let index = this.availableMissions.length - 1; index >= 0; index -= 1) {
+      const mission = this.availableMissions[index];
+      if (mission?.campaignMilestone?.milestoneId === milestoneId) {
+        this.availableMissions.splice(index, 1);
+      }
+    }
+
+    for (let index = this.contractPool.length - 1; index >= 0; index -= 1) {
+      const template = this.contractPool[index];
+      if (template?.campaignMilestone?.milestoneId === milestoneId) {
+        this.contractPool.splice(index, 1);
+      }
+    }
+
+    for (let index = this.missionTemplates.length - 1; index >= 0; index -= 1) {
+      const template = this.missionTemplates[index];
+      if (template?.campaignMilestone?.milestoneId === milestoneId) {
+        this.missionTemplates.splice(index, 1);
+      }
+    }
+
+    for (const [key, template] of this.templateMap.entries()) {
+      if (template?.campaignMilestone?.milestoneId === milestoneId) {
+        this.templateMap.delete(key);
+      }
+    }
   }
 
   updateCachedDistrictIntel(districtId, snapshot) {
@@ -1253,6 +1292,9 @@ class MissionSystem {
       }
       if (template.crackdownTier) {
         storedTemplate.crackdownTier = template.crackdownTier;
+      }
+      if (template.campaignMilestone) {
+        storedTemplate.campaignMilestone = { ...template.campaignMilestone };
       }
       const districtIntel = this.getDistrictIntelSnapshot(template);
       if (districtIntel) {
@@ -1343,6 +1385,10 @@ class MissionSystem {
     }
 
     const districtIntel = this.getDistrictIntelSnapshot(template);
+    const campaignMilestone =
+      typeof template.campaignMilestone === 'object' && template.campaignMilestone !== null
+        ? { ...template.campaignMilestone }
+        : null;
 
     return {
       ...template,
@@ -1350,6 +1396,7 @@ class MissionSystem {
       falloutRecovery,
       storyline,
       crackdownEffects,
+      campaignMilestone,
       payout,
       basePayout,
       heat,
@@ -1402,15 +1449,41 @@ class MissionSystem {
     };
   }
 
-  refreshContractPoolFromCity() {
+  refreshContractPoolFromCity(options = {}) {
     if (typeof this.contractFactory !== 'function') {
       return;
     }
 
+    const { resolvedMission = null } = options ?? {};
     const districts = this.state?.city?.districts ?? [];
     if (!Array.isArray(districts) || !districts.length) {
       return;
     }
+
+    if (resolvedMission?.campaignMilestone) {
+      const missionDistrict = this.getMissionDistrict(resolvedMission);
+      if (missionDistrict) {
+        if (resolvedMission.outcome === 'success') {
+          if (typeof missionDistrict.completeCampaignMilestone === 'function') {
+            const completed = missionDistrict.completeCampaignMilestone(
+              resolvedMission.campaignMilestone.milestoneId,
+              { outcome: resolvedMission.outcome },
+            );
+            if (completed && typeof missionDistrict.getCampaignSnapshot === 'function') {
+              missionDistrict.getCampaignSnapshot();
+            }
+          }
+        } else if (typeof missionDistrict.getCampaignSnapshot === 'function') {
+          missionDistrict.getCampaignSnapshot();
+        }
+      }
+    }
+
+    districts.forEach((district) => {
+      if (district && typeof district.getCampaignSnapshot === 'function') {
+        district.getCampaignSnapshot();
+      }
+    });
 
     const generatedContracts = this.contractFactory(districts);
     generatedContracts.forEach((template) => {
@@ -3522,7 +3595,14 @@ class MissionSystem {
       this.state.lastVehicleReport = storageBlockedReport;
     }
 
-    this.respawnMissionTemplate(mission.id);
+    const isCampaignMilestoneMission = Boolean(mission.campaignMilestone?.milestoneId);
+    if (isCampaignMilestoneMission && mission.outcome === 'success') {
+      this.purgeCampaignMilestoneTemplates(mission.campaignMilestone.milestoneId);
+    } else {
+      this.respawnMissionTemplate(mission.id);
+    }
+
+    this.refreshContractPoolFromCity({ resolvedMission: mission });
     this.ensureCrewStorylineContracts();
     this.ensureCrackdownOperations(this.currentCrackdownTier);
     this.drawContractFromPool();
