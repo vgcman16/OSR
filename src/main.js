@@ -2362,7 +2362,21 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
   }
 
   const districtLabel = assignment.districtName ?? 'District';
-  if (assignment.status === 'completed') {
+  const statusLabel = (assignment.status ?? '').toLowerCase();
+  if (statusLabel === 'failed') {
+    const summaryLabel = assignment.resultSummary ?? 'Recon failed.';
+    const timestamp = Number.isFinite(assignment.completedAt)
+      ? assignment.completedAt
+      : Number.isFinite(assignment.failedAt)
+        ? assignment.failedAt
+        : null;
+    const timeLabel = Number.isFinite(timestamp)
+      ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : null;
+    return timeLabel ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}` : `${districtLabel} — ${summaryLabel}`;
+  }
+
+  if (statusLabel === 'completed') {
     const summaryLabel = assignment.resultSummary ?? 'Recon completed.';
     const timeLabel = Number.isFinite(assignment.completedAt)
       ? new Date(assignment.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -2370,7 +2384,7 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
     return timeLabel ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}` : `${districtLabel} — ${summaryLabel}`;
   }
 
-  if (assignment.status === 'cancelled') {
+  if (statusLabel === 'cancelled') {
     const progressPercent = Math.round((assignment.progress ?? 0) * 100);
     const remainingSeconds = Number.isFinite(assignment.remainingSeconds)
       ? Math.ceil(Math.max(0, assignment.remainingSeconds))
@@ -2401,6 +2415,115 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
 
   const crewSegment = crewNames.length ? `Crew: ${crewNames.join(', ')}` : null;
   return [districtLabel, ...statusSegments, crewSegment].filter(Boolean).join(' — ');
+};
+
+const buildReconAssignmentBadges = (assignment) => {
+  if (!assignment) {
+    return [];
+  }
+
+  const badges = [];
+  const statusLabel = (assignment.status ?? '').toLowerCase();
+  if (statusLabel === 'failed') {
+    badges.push({ type: 'failed', icon: '⚠️', label: 'Failed' });
+  } else if (statusLabel === 'completed') {
+    badges.push({ type: 'success', icon: '✅', label: 'Complete' });
+  } else if (statusLabel === 'in-progress') {
+    badges.push({ type: 'active', icon: '🛰️', label: 'In Progress' });
+  } else if (statusLabel === 'cancelled') {
+    badges.push({ type: 'cancelled', icon: '⏹️', label: 'Cancelled' });
+  }
+
+  const result = assignment.result ?? {};
+  const setbacks = result.setbacks ?? {};
+  const failureStates = Array.isArray(assignment.failureStates)
+    ? assignment.failureStates.map((state) => (typeof state === 'string' ? state.toLowerCase() : String(state)))
+    : [];
+
+  const intelLost = setbacks.intelCompromised || failureStates.includes('intel-compromised');
+  if (intelLost) {
+    badges.push({ type: 'intel', icon: '📉', label: 'Intel Lost' });
+  }
+
+  const injuredIds = Array.isArray(setbacks.injuredCrewIds) ? setbacks.injuredCrewIds.filter(Boolean) : [];
+  const capturedIds = Array.isArray(setbacks.capturedCrewIds) ? setbacks.capturedCrewIds.filter(Boolean) : [];
+
+  if (injuredIds.length) {
+    badges.push({
+      type: 'injury',
+      icon: '🩸',
+      label: injuredIds.length > 1 ? `${injuredIds.length} Injured` : 'Crew Injured',
+    });
+  }
+
+  if (capturedIds.length) {
+    badges.push({
+      type: 'capture',
+      icon: '🚔',
+      label: capturedIds.length > 1 ? `${capturedIds.length} Captured` : 'Crew Captured',
+    });
+  }
+
+  const crackdownDelta = Number.isFinite(result.crackdownDelta) ? Number(result.crackdownDelta) : null;
+  if (Number.isFinite(crackdownDelta) && crackdownDelta > 0) {
+    badges.push({ type: 'heat', icon: '🔥', label: `Crackdown +${Math.round(crackdownDelta)}` });
+  }
+
+  if (!intelLost && !injuredIds.length && !capturedIds.length && setbacks.triggered) {
+    badges.push({ type: 'warning', icon: '⚠️', label: 'Setback' });
+  }
+
+  return badges;
+};
+
+const buildReconCrewNotes = (assignment, crewById) => {
+  if (!assignment) {
+    return [];
+  }
+
+  const crewEffects = Array.isArray(assignment.result?.crewEffects)
+    ? assignment.result.crewEffects
+    : [];
+
+  if (!crewEffects.length) {
+    return [];
+  }
+
+  const notes = crewEffects
+    .map((effect) => {
+      if (!effect || typeof effect !== 'object') {
+        return null;
+      }
+
+      const crewId = effect.id ?? null;
+      const crewMember = crewId ? crewById.get(crewId) : null;
+      const name = crewMember?.name ?? effect.name ?? 'Crew Member';
+
+      const segments = [];
+      if (Number.isFinite(effect.fatigueDelta) && effect.fatigueDelta !== 0) {
+        const prefix = effect.fatigueDelta > 0 ? '+' : '';
+        segments.push(`Fatigue ${prefix}${effect.fatigueDelta}`);
+      }
+      if (effect.fallout === 'injured') {
+        segments.push('Injured');
+      }
+      if (effect.fallout === 'captured') {
+        segments.push('Captured');
+      }
+      const statusLabel = typeof effect.status === 'string' ? effect.status.toLowerCase() : '';
+      if (!effect.fallout && statusLabel === 'needs-rest') {
+        segments.push('Needs rest');
+      }
+
+      if (!segments.length) {
+        return null;
+      }
+
+      return `${name} — ${segments.join(', ')}`;
+    })
+    .filter(Boolean);
+
+  return notes.filter((note, index) => notes.indexOf(note) === index);
 };
 
 const updateReconPanel = () => {
@@ -2566,11 +2689,16 @@ const updateReconPanel = () => {
       }
 
       const item = document.createElement('li');
-      item.textContent = buildReconAssignmentLabel(assignment, crewById);
+      item.className = 'mission-recon__item';
 
-      if (assignment.status === 'completed' && assignment.resultSummary) {
-        item.title = assignment.resultSummary;
-      }
+      const summaryLabel = buildReconAssignmentLabel(assignment, crewById);
+      const header = document.createElement('div');
+      header.className = 'mission-recon__header';
+
+      const summarySpan = document.createElement('span');
+      summarySpan.className = 'mission-recon__summary';
+      summarySpan.textContent = summaryLabel;
+      header.appendChild(summarySpan);
 
       if (assignment.status === 'in-progress') {
         const cancelButton = document.createElement('button');
@@ -2579,25 +2707,88 @@ const updateReconPanel = () => {
         cancelButton.dataset.reconCancel = assignment.id;
         cancelButton.textContent = 'Cancel';
         cancelButton.title = `Abort recon in ${assignment.districtName ?? 'district'}`;
-        item.appendChild(document.createTextNode(' '));
-        item.appendChild(cancelButton);
+        header.appendChild(cancelButton);
+      }
+
+      item.appendChild(header);
+
+      if (assignment.resultSummary && assignment.status !== 'in-progress') {
+        item.title = assignment.resultSummary;
+      } else {
+        item.removeAttribute('title');
+      }
+
+      const badges = buildReconAssignmentBadges(assignment);
+      if (badges.length) {
+        const badgeRow = document.createElement('div');
+        badgeRow.className = 'mission-recon__badges';
+        badges.forEach((badge) => {
+          if (!badge) {
+            return;
+          }
+
+          const badgeEl = document.createElement('span');
+          badgeEl.className = 'mission-recon__badge';
+          if (badge.type) {
+            badgeEl.classList.add(`mission-recon__badge--${badge.type}`);
+          }
+          const icon = typeof badge.icon === 'string' && badge.icon.trim() ? badge.icon.trim() : '';
+          const label = typeof badge.label === 'string' && badge.label.trim() ? badge.label.trim() : '';
+          badgeEl.textContent = icon && label ? `${icon} ${label}` : label || icon;
+          badgeRow.appendChild(badgeEl);
+        });
+        if (badgeRow.childNodes.length) {
+          item.appendChild(badgeRow);
+        }
+      }
+
+      const crewNotes = buildReconCrewNotes(assignment, crewById);
+      if (crewNotes.length) {
+        const notesList = document.createElement('ul');
+        notesList.className = 'mission-recon__crew-notes';
+        crewNotes.forEach((note) => {
+          if (!note) {
+            return;
+          }
+          const noteItem = document.createElement('li');
+          noteItem.textContent = note;
+          notesList.appendChild(noteItem);
+        });
+        if (notesList.childNodes.length) {
+          item.appendChild(notesList);
+        }
       }
 
       reconList.appendChild(item);
     });
   }
 
-  const latestCompleted = Array.isArray(reconAssignments)
+  const latestResolved = Array.isArray(reconAssignments)
     ? reconAssignments
-        .filter((assignment) => assignment?.status === 'completed')
-        .sort((a, b) => (b?.completedAt ?? 0) - (a?.completedAt ?? 0))[0]
+        .filter((assignment) => ['completed', 'failed'].includes((assignment?.status ?? '').toLowerCase()))
+        .sort((a, b) => {
+          const timeA = a?.completedAt ?? a?.failedAt ?? a?.updatedAt ?? 0;
+          const timeB = b?.completedAt ?? b?.failedAt ?? b?.updatedAt ?? 0;
+          return (timeB ?? 0) - (timeA ?? 0);
+        })[0]
     : null;
-  const completionKey = latestCompleted ? `${latestCompleted.id}-${latestCompleted.completedAt ?? 0}` : null;
+  const completionKey = latestResolved
+    ? `${latestResolved.id}-${(latestResolved.status ?? '').toLowerCase()}-${latestResolved.completedAt ?? latestResolved.failedAt ?? latestResolved.updatedAt ?? 0}`
+    : null;
 
   if (completionKey && completionKey !== missionControls.lastReconCompletionKey) {
-    const summaryLabel = latestCompleted.resultSummary ?? 'Recon completed.';
-    const districtLabel = latestCompleted.districtName ?? 'District';
-    setReconStatus(`Recon in ${districtLabel} complete — ${summaryLabel}.`);
+    const summaryLabel = latestResolved.resultSummary
+      ?? ((latestResolved.status ?? '').toLowerCase() === 'failed' ? 'Recon failed.' : 'Recon completed.');
+    const districtLabel = latestResolved.districtName ?? 'District';
+    const statusWord = (latestResolved.status ?? '').toLowerCase() === 'failed' ? 'failed' : 'completed';
+    const trimmedSummary = typeof summaryLabel === 'string'
+      ? summaryLabel.trim().replace(/[.]+$/, '')
+      : summaryLabel;
+    const displaySummary = trimmedSummary || ((latestResolved.status ?? '').toLowerCase() === 'failed'
+      ? 'Recon failed'
+      : 'Recon completed');
+    const message = `Recon in ${districtLabel} ${statusWord} — ${displaySummary}.`;
+    setReconStatus(message);
     missionControls.lastReconCompletionKey = completionKey;
   } else if (!completionKey) {
     missionControls.lastReconCompletionKey = null;

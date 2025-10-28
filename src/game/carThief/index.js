@@ -1042,17 +1042,30 @@ const createCarThiefGame = ({ canvas, context }) => {
       });
     } else {
       const latestRecon = reconAssignments
-        .filter((assignment) => assignment?.status === 'completed')
-        .sort((a, b) => (b?.completedAt ?? 0) - (a?.completedAt ?? 0))[0];
+        .filter((assignment) => ['completed', 'failed'].includes((assignment?.status ?? '').toLowerCase()))
+        .sort((a, b) => {
+          const timeA = a?.completedAt ?? a?.failedAt ?? 0;
+          const timeB = b?.completedAt ?? b?.failedAt ?? 0;
+          return (timeB ?? 0) - (timeA ?? 0);
+        })[0];
 
       if (latestRecon) {
-        const timeLabel = Number.isFinite(latestRecon.completedAt)
-          ? new Date(latestRecon.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const timestamp = Number.isFinite(latestRecon.completedAt)
+          ? latestRecon.completedAt
+          : Number.isFinite(latestRecon.failedAt)
+            ? latestRecon.failedAt
+            : null;
+        const timeLabel = Number.isFinite(timestamp)
+          ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           : null;
-        const summaryLabel = latestRecon.resultSummary ?? 'Recon completed.';
+        const summaryLabel = latestRecon.resultSummary
+          ?? ((latestRecon.status ?? '').toLowerCase() === 'failed' ? 'Recon failed.' : 'Recon completed.');
+        const trimmedSummary = typeof summaryLabel === 'string'
+          ? summaryLabel.trim().replace(/[.]+$/, '')
+          : summaryLabel;
         const reconLabel = timeLabel
-          ? `${latestRecon.districtName ?? 'District'} — ${summaryLabel} @ ${timeLabel}`
-          : `${latestRecon.districtName ?? 'District'} — ${summaryLabel}`;
+          ? `${latestRecon.districtName ?? 'District'} — ${trimmedSummary} @ ${timeLabel}`
+          : `${latestRecon.districtName ?? 'District'} — ${trimmedSummary}`;
         context.fillText(`Last recon: ${reconLabel}`, missionInfoX, missionInfoY);
         missionInfoY += 24;
       } else {
@@ -1063,16 +1076,29 @@ const createCarThiefGame = ({ canvas, context }) => {
 
     if (activeRecon.length) {
       const latestRecon = reconAssignments
-        .filter((assignment) => assignment?.status === 'completed')
-        .sort((a, b) => (b?.completedAt ?? 0) - (a?.completedAt ?? 0))[0];
+        .filter((assignment) => ['completed', 'failed'].includes((assignment?.status ?? '').toLowerCase()))
+        .sort((a, b) => {
+          const timeA = a?.completedAt ?? a?.failedAt ?? 0;
+          const timeB = b?.completedAt ?? b?.failedAt ?? 0;
+          return (timeB ?? 0) - (timeA ?? 0);
+        })[0];
       if (latestRecon) {
-        const timeLabel = Number.isFinite(latestRecon.completedAt)
-          ? new Date(latestRecon.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const timestamp = Number.isFinite(latestRecon.completedAt)
+          ? latestRecon.completedAt
+          : Number.isFinite(latestRecon.failedAt)
+            ? latestRecon.failedAt
+            : null;
+        const timeLabel = Number.isFinite(timestamp)
+          ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           : null;
-        const summaryLabel = latestRecon.resultSummary ?? 'Recon completed.';
+        const summaryLabel = latestRecon.resultSummary
+          ?? ((latestRecon.status ?? '').toLowerCase() === 'failed' ? 'Recon failed.' : 'Recon completed.');
+        const trimmedSummary = typeof summaryLabel === 'string'
+          ? summaryLabel.trim().replace(/[.]+$/, '')
+          : summaryLabel;
         const reconLabel = timeLabel
-          ? `${latestRecon.districtName ?? 'District'} — ${summaryLabel} @ ${timeLabel}`
-          : `${latestRecon.districtName ?? 'District'} — ${summaryLabel}`;
+          ? `${latestRecon.districtName ?? 'District'} — ${trimmedSummary} @ ${timeLabel}`
+          : `${latestRecon.districtName ?? 'District'} — ${trimmedSummary}`;
         context.fillStyle = '#9ac7ff';
         context.fillText(`Last recon: ${reconLabel}`, missionInfoX, missionInfoY);
         missionInfoY += 20;
