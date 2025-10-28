@@ -105,6 +105,7 @@ const missionControls = {
   safehouseTier: null,
   safehouseEffects: null,
   safehouseList: null,
+  safehouseProjects: null,
   safehouseUpgradeButton: null,
   safehouseProjectButton: null,
   safehouseRushButton: null,
@@ -113,6 +114,7 @@ const missionControls = {
   safehouseAlertPrompt: null,
   safehouseAlertsList: null,
   safehouseAlertStatus: null,
+  safehouseSelectedProjectId: null,
   selectedCrewIds: [],
   selectedVehicleId: null,
   lastGarageStatusTimestamp: 0,
@@ -1547,6 +1549,7 @@ const updateSafehousePanel = () => {
     safehouseTier,
     safehouseEffects,
     safehouseList,
+    safehouseProjects,
     safehouseUpgradeButton,
     safehouseProjectButton,
     safehouseRushButton,
@@ -1561,6 +1564,7 @@ const updateSafehousePanel = () => {
     !safehouseTier ||
     !safehouseEffects ||
     !safehouseList ||
+    !safehouseProjects ||
     !safehouseUpgradeButton ||
     !safehouseStatus ||
     !safehouseAlertPrompt ||
@@ -1773,6 +1777,120 @@ const updateSafehousePanel = () => {
     });
   };
 
+  const renderSafehouseProjects = (
+    entries,
+    { selectedId = null, emptyMessage = 'No safehouse projects available.' } = {},
+  ) => {
+    safehouseProjects.innerHTML = '';
+
+    const projects = Array.isArray(entries) ? entries.filter((entry) => entry && entry.id) : [];
+    if (!projects.length) {
+      missionControls.safehouseSelectedProjectId = null;
+      safehouseProjects.dataset.selectedProjectId = '';
+      const placeholder = document.createElement('p');
+      placeholder.className = 'mission-safehouse__projects-empty';
+      placeholder.textContent = emptyMessage;
+      safehouseProjects.appendChild(placeholder);
+      return { selectedProject: null, otherProjects: [] };
+    }
+
+    let activeId = selectedId && projects.some((project) => project.id === selectedId) ? selectedId : null;
+    if (!activeId) {
+      const fundingCandidate = projects.find(
+        (project) => Number.isFinite(project?.fundingRemaining) && project.fundingRemaining > 0,
+      );
+      const timeCandidate = projects.find(
+        (project) =>
+          Number.isFinite(project?.timeRemaining) &&
+          project.timeRemaining > 0 &&
+          (!Number.isFinite(project?.fundingRemaining) || project.fundingRemaining <= 0),
+      );
+      activeId = fundingCandidate?.id ?? timeCandidate?.id ?? projects[0]?.id ?? null;
+    }
+
+    missionControls.safehouseSelectedProjectId = activeId ?? null;
+    safehouseProjects.dataset.selectedProjectId = activeId ?? '';
+
+    const table = document.createElement('table');
+    table.className = 'mission-safehouse__projects-table';
+
+    const head = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    ['Project', 'Funding Remaining', 'Days Left', 'Facility Perk'].forEach((label) => {
+      const cell = document.createElement('th');
+      cell.textContent = label;
+      headerRow.appendChild(cell);
+    });
+    head.appendChild(headerRow);
+    table.appendChild(head);
+
+    const body = document.createElement('tbody');
+    projects.forEach((project) => {
+      const row = document.createElement('tr');
+      row.className = 'mission-safehouse__projects-row';
+      row.dataset.projectId = project.id ?? '';
+      const isSelected = project.id === activeId;
+      row.setAttribute('tabindex', '0');
+      row.setAttribute('data-selected', isSelected ? 'true' : 'false');
+      row.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      if (isSelected) {
+        row.classList.add('mission-safehouse__projects-row--selected');
+      }
+
+      const nameCell = document.createElement('th');
+      nameCell.scope = 'row';
+      nameCell.className = 'mission-safehouse__projects-name';
+      nameCell.textContent = project.name ?? 'Project';
+      if (project.summary) {
+        const summary = document.createElement('div');
+        summary.className = 'mission-safehouse__projects-summary';
+        summary.textContent = project.summary;
+        nameCell.appendChild(summary);
+      }
+      row.appendChild(nameCell);
+
+      const remainingCost = Number.isFinite(project?.fundingRemaining)
+        ? Math.max(0, project.fundingRemaining)
+        : null;
+      const fundingCell = document.createElement('td');
+      fundingCell.className = 'mission-safehouse__projects-funding';
+      fundingCell.textContent =
+        remainingCost === null ? '—' : remainingCost > 0 ? formatCurrency(remainingCost) : 'Funded';
+      row.appendChild(fundingCell);
+
+      const remainingTime = Number.isFinite(project?.timeRemaining)
+        ? Math.max(0, project.timeRemaining)
+        : null;
+      const daysCell = document.createElement('td');
+      daysCell.className = 'mission-safehouse__projects-time';
+      if (remainingTime === null) {
+        daysCell.textContent = '—';
+      } else if (remainingTime <= 0) {
+        daysCell.textContent = 'Ready';
+      } else {
+        const daysLabel = Math.ceil(remainingTime);
+        daysCell.textContent = `${daysLabel} day${daysLabel === 1 ? '' : 's'}`;
+      }
+      row.appendChild(daysCell);
+
+      const perkCell = document.createElement('td');
+      perkCell.className = 'mission-safehouse__projects-perk';
+      const facility = getFacilityEffectConfig(project.id);
+      const perkSummary = facility?.summary ?? project.summary ?? 'Perk details pending.';
+      perkCell.textContent = facility?.name ? `${facility.name} — ${perkSummary}` : perkSummary;
+      row.appendChild(perkCell);
+
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    safehouseProjects.appendChild(table);
+
+    const selectedProject = projects.find((project) => project.id === activeId) ?? null;
+    const otherProjects = projects.filter((project) => project.id !== activeId);
+
+    return { selectedProject, otherProjects };
+  };
+
   const setProjectButtonState = (button, {
     text,
     title,
@@ -1793,6 +1911,48 @@ const updateSafehousePanel = () => {
     if (button.dataset) {
       button.dataset.projectId = projectId ?? '';
     }
+  };
+
+  const summarizeOtherProjects = (projects) => {
+    if (!Array.isArray(projects) || !projects.length) {
+      return '';
+    }
+
+    const counts = { funding: 0, building: 0, ready: 0 };
+    projects.forEach((project) => {
+      const remainingCost = Number.isFinite(project?.fundingRemaining)
+        ? Math.max(0, project.fundingRemaining)
+        : 0;
+      const remainingTime = Number.isFinite(project?.timeRemaining)
+        ? Math.max(0, project.timeRemaining)
+        : 0;
+
+      if (remainingCost > 0) {
+        counts.funding += 1;
+      } else if (remainingTime > 0) {
+        counts.building += 1;
+      } else {
+        counts.ready += 1;
+      }
+    });
+
+    const segments = [];
+    const formatCount = (count, phrase) => `${count} project${count === 1 ? '' : 's'} ${phrase}`;
+    if (counts.funding) {
+      segments.push(formatCount(counts.funding, 'awaiting funding'));
+    }
+    if (counts.building) {
+      segments.push(formatCount(counts.building, 'under construction'));
+    }
+    if (counts.ready) {
+      segments.push(formatCount(counts.ready, 'ready to activate'));
+    }
+
+    if (!segments.length) {
+      return '';
+    }
+
+    return `Other projects: ${segments.join(', ')}.`;
   };
 
   if (!state) {
@@ -1831,6 +1991,7 @@ const updateSafehousePanel = () => {
   }
 
   const safehouse = getActiveSafehouseFromState(state);
+  const safehouseOwned = safehouse?.isOwned?.() ?? safehouse?.owned ?? false;
   const tier = safehouse?.getCurrentTier?.() ?? null;
 
   const dayValue = Number.isFinite(state.day) ? state.day : null;
@@ -1861,22 +2022,55 @@ const updateSafehousePanel = () => {
 
   const nextTier = safehouse?.getNextTier?.() ?? null;
   let summaryMessage;
-  let projectSummaryLine = '';
+  let selectedProjectSummaryLine = '';
+  let otherProjectsSummaryLine = '';
 
   const projectSummaries = safehouse?.getActiveProjectSummaries?.()
     ? safehouse.getActiveProjectSummaries()
     : [];
-  const fundingTarget = projectSummaries.find(
-    (project) => Number.isFinite(project?.fundingRemaining) && project.fundingRemaining > 0,
-  );
-  const rushTarget = projectSummaries.find(
-    (project) =>
-      Number.isFinite(project?.timeRemaining) &&
-      project.timeRemaining > 0 &&
-      (!Number.isFinite(project?.fundingRemaining) || project.fundingRemaining <= 0),
-  );
+  const emptyProjectsMessage = !safehouse
+    ? 'Assign a safehouse to unlock facility projects.'
+    : !safehouseOwned
+      ? 'Purchase this safehouse to activate facility projects.'
+      : 'No safehouse projects available at this tier.';
 
-  if (!economySystem || !safehouse || !(safehouse.isOwned?.() ?? safehouse.owned ?? false)) {
+  const projectRenderResult = renderSafehouseProjects(projectSummaries, {
+    selectedId: missionControls.safehouseSelectedProjectId,
+    emptyMessage: emptyProjectsMessage,
+  });
+  const selectedProject = projectRenderResult.selectedProject;
+  const otherProjects = projectRenderResult.otherProjects;
+  otherProjectsSummaryLine = summarizeOtherProjects(otherProjects);
+
+  if (selectedProject) {
+    const remainingCost = Number.isFinite(selectedProject?.fundingRemaining)
+      ? Math.max(0, selectedProject.fundingRemaining)
+      : null;
+    const remainingTime = Number.isFinite(selectedProject?.timeRemaining)
+      ? Math.max(0, selectedProject.timeRemaining)
+      : null;
+    const facilityConfig = getFacilityEffectConfig(selectedProject.id);
+    const perkDescription = facilityConfig?.summary ?? selectedProject.summary ?? '';
+
+    if (remainingCost !== null && remainingCost > 0) {
+      selectedProjectSummaryLine = `${selectedProject.name ?? 'Project'} needs ${formatCurrency(remainingCost)} in funding.`;
+    } else if (remainingTime !== null && remainingTime > 0) {
+      const daysLabel = Math.ceil(remainingTime);
+      selectedProjectSummaryLine = `${selectedProject.name ?? 'Project'} finishes in ${
+        daysLabel === 1 ? '1 day' : `${daysLabel} days`
+      }.`;
+    } else {
+      selectedProjectSummaryLine = `${selectedProject.name ?? 'Project'} complete.`;
+    }
+
+    if (perkDescription) {
+      selectedProjectSummaryLine = selectedProjectSummaryLine
+        ? `${selectedProjectSummaryLine} Perk: ${perkDescription}`
+        : `Perk: ${perkDescription}`;
+    }
+  }
+
+  if (!economySystem || !safehouse || !safehouseOwned) {
     const baseTitle = !economySystem
       ? 'Economy systems offline.'
       : !safehouse
@@ -1886,81 +2080,104 @@ const updateSafehousePanel = () => {
       text: 'Fund Project',
       title: baseTitle,
       disabled: true,
+      projectId: selectedProject?.id ?? '',
     });
     setProjectButtonState(safehouseRushButton, {
       text: 'Rush Project',
       title: baseTitle,
       disabled: true,
+      projectId: selectedProject?.id ?? '',
     });
-  } else if (!projectSummaries.length) {
+  } else if (!projectSummaries.length || !selectedProject) {
     setProjectButtonState(safehouseProjectButton, {
       text: 'Fund Project',
       title: 'No safehouse projects available at this tier.',
       disabled: true,
+      projectId: selectedProject?.id ?? '',
     });
     setProjectButtonState(safehouseRushButton, {
       text: 'Rush Project',
       title: 'No safehouse projects available at this tier.',
       disabled: true,
+      projectId: selectedProject?.id ?? '',
     });
   } else {
-    if (fundingTarget) {
-      const remainingCost = Math.max(0, fundingTarget.fundingRemaining);
+    const remainingCost = Number.isFinite(selectedProject.fundingRemaining)
+      ? Math.max(0, selectedProject.fundingRemaining)
+      : null;
+    if (remainingCost !== null && remainingCost > 0) {
       const canInvest = funds > 0;
       const title = canInvest
-        ? `${fundingTarget.name ?? 'Project'} requires ${formatCurrency(remainingCost)}.`
-        : `${fundingTarget.name ?? 'Project'} needs ${formatCurrency(remainingCost)} in funding.`;
+        ? `${selectedProject.name ?? 'Project'} requires ${formatCurrency(remainingCost)}.`
+        : `${selectedProject.name ?? 'Project'} needs ${formatCurrency(remainingCost)} in funding.`;
       setProjectButtonState(safehouseProjectButton, {
-        text: `Fund ${fundingTarget.name ?? 'Project'} (${formatCurrency(remainingCost)})`,
+        text: `Fund ${selectedProject.name ?? 'Project'} (${formatCurrency(remainingCost)})`,
         title,
         disabled: !canInvest,
-        projectId: fundingTarget.id ?? '',
+        projectId: selectedProject.id ?? '',
       });
-      projectSummaryLine = `${fundingTarget.name ?? 'Project'} awaiting ${formatCurrency(remainingCost)} in funding.`;
+    } else if (remainingCost !== null) {
+      setProjectButtonState(safehouseProjectButton, {
+        text: 'Fund Project',
+        title: 'All funding applied to the selected project.',
+        disabled: true,
+        projectId: selectedProject.id ?? '',
+      });
     } else {
       setProjectButtonState(safehouseProjectButton, {
         text: 'Fund Project',
-        title: 'All projects fully funded.',
+        title: 'Funding data unavailable.',
         disabled: true,
+        projectId: selectedProject.id ?? '',
       });
     }
 
-    if (rushTarget) {
-      const rushQuote = safehouse.getProjectRushQuote?.(rushTarget.id) ?? null;
-      const rushCostPerDay = Number.isFinite(rushQuote?.rushCostPerDay) ? rushQuote.rushCostPerDay : null;
-      const timeRemaining = Number.isFinite(rushTarget.timeRemaining)
-        ? Math.max(0, rushTarget.timeRemaining)
-        : 0;
-      const costLabel = rushCostPerDay ? formatCurrency(rushCostPerDay) : null;
-      const canRush = rushCostPerDay && funds >= rushCostPerDay;
-      const rushTitle = rushCostPerDay
-        ? canRush
-          ? `${rushTarget.name ?? 'Project'} has ${Math.ceil(timeRemaining)} days remaining.`
-          : `Requires ${formatCurrency(rushCostPerDay)} to accelerate a day — available ${formatCurrency(funds)}.`
-        : `${rushTarget.name ?? 'Project'} cannot be rushed further.`;
+    const remainingTime = Number.isFinite(selectedProject.timeRemaining)
+      ? Math.max(0, selectedProject.timeRemaining)
+      : null;
+    if (remainingCost !== null && remainingCost > 0) {
       setProjectButtonState(safehouseRushButton, {
-        text: costLabel
-          ? `Rush ${rushTarget.name ?? 'Project'} (${costLabel}/day)`
-          : `Rush ${rushTarget.name ?? 'Project'}`,
-        title: rushTitle,
-        disabled: !canRush,
-        projectId: rushTarget.id ?? '',
+        text: 'Rush Project',
+        title: `Fund ${selectedProject.name ?? 'the project'} before rushing construction.`,
+        disabled: true,
+        projectId: selectedProject.id ?? '',
       });
-      if (!projectSummaryLine) {
-        const daysRemainingLabel = Math.ceil(timeRemaining);
-        const progressLabel =
-          daysRemainingLabel === 1 ? 'finishes in 1 day.' : `has ${daysRemainingLabel} days remaining.`;
-        projectSummaryLine = `${rushTarget.name ?? 'Project'} ${progressLabel}`;
+    } else if (remainingTime !== null && remainingTime > 0) {
+      const rushQuote = safehouse.getProjectRushQuote?.(selectedProject.id) ?? null;
+      const rushCostPerDay = Number.isFinite(rushQuote?.rushCostPerDay) ? rushQuote.rushCostPerDay : null;
+      if (rushCostPerDay && rushCostPerDay > 0) {
+        const canRush = funds >= rushCostPerDay;
+        const rushTitle = canRush
+          ? `${selectedProject.name ?? 'Project'} has ${Math.ceil(remainingTime)} days remaining.`
+          : `Requires ${formatCurrency(rushCostPerDay)} to accelerate a day — available ${formatCurrency(funds)}.`;
+        setProjectButtonState(safehouseRushButton, {
+          text: `Rush ${selectedProject.name ?? 'Project'} (${formatCurrency(rushCostPerDay)}/day)`,
+          title: rushTitle,
+          disabled: !canRush,
+          projectId: selectedProject.id ?? '',
+        });
+      } else {
+        setProjectButtonState(safehouseRushButton, {
+          text: 'Rush Project',
+          title: `${selectedProject.name ?? 'Project'} cannot be rushed further.`,
+          disabled: true,
+          projectId: selectedProject.id ?? '',
+        });
       }
+    } else if (remainingTime === 0) {
+      setProjectButtonState(safehouseRushButton, {
+        text: 'Rush Project',
+        title: `${selectedProject.name ?? 'Project'} already complete.`,
+        disabled: true,
+        projectId: selectedProject.id ?? '',
+      });
     } else {
       setProjectButtonState(safehouseRushButton, {
         text: 'Rush Project',
-        title: fundingTarget ? 'Fund the next project before rushing construction.' : 'All projects complete.',
+        title: 'Rush cost data unavailable.',
         disabled: true,
+        projectId: selectedProject.id ?? '',
       });
-      if (!projectSummaryLine && projectSummaries.length) {
-        projectSummaryLine = 'All safehouse projects installed.';
-      }
     }
   }
 
@@ -1974,7 +2191,7 @@ const updateSafehousePanel = () => {
     safehouseUpgradeButton.title = 'Assign a safehouse to unlock bonuses.';
     safehouseUpgradeButton.textContent = 'Upgrade Safehouse';
     summaryMessage = 'Assign a safehouse to unlock bonuses.';
-  } else if (!(safehouse.isOwned?.() ?? safehouse.owned ?? false)) {
+  } else if (!safehouseOwned) {
     safehouseUpgradeButton.disabled = true;
     safehouseUpgradeButton.title = 'Secure this safehouse before upgrading.';
     safehouseUpgradeButton.textContent = 'Upgrade Safehouse';
@@ -1998,7 +2215,13 @@ const updateSafehousePanel = () => {
   }
 
   const detail = missionControls.safehouseStatusDetail?.trim();
-  safehouseStatus.textContent = [detail, alertSummaryLine, projectSummaryLine, summaryMessage]
+  safehouseStatus.textContent = [
+    detail,
+    alertSummaryLine,
+    selectedProjectSummaryLine,
+    otherProjectsSummaryLine,
+    summaryMessage,
+  ]
     .filter(Boolean)
     .join(' ');
 };
@@ -3068,7 +3291,7 @@ const handleSafehouseProjectFunding = () => {
     return;
   }
 
-  const preferredId = missionControls.safehouseProjectButton?.dataset.projectId ?? '';
+  const preferredId = missionControls.safehouseSelectedProjectId ?? '';
   let targetProject = preferredId
     ? projectSummaries.find((project) => project?.id === preferredId)
     : null;
@@ -3076,6 +3299,9 @@ const handleSafehouseProjectFunding = () => {
     targetProject = projectSummaries.find(
       (project) => Number.isFinite(project?.fundingRemaining) && project.fundingRemaining > 0,
     );
+    if (targetProject) {
+      missionControls.safehouseSelectedProjectId = targetProject.id ?? null;
+    }
   }
 
   if (!targetProject) {
@@ -3170,7 +3396,7 @@ const handleSafehouseProjectRush = () => {
     return;
   }
 
-  const preferredId = missionControls.safehouseRushButton?.dataset.projectId ?? '';
+  const preferredId = missionControls.safehouseSelectedProjectId ?? '';
   let targetProject = preferredId
     ? projectSummaries.find((project) => project?.id === preferredId)
     : null;
@@ -3181,6 +3407,9 @@ const handleSafehouseProjectRush = () => {
         project.timeRemaining > 0 &&
         (!Number.isFinite(project?.fundingRemaining) || project.fundingRemaining <= 0),
     );
+    if (targetProject) {
+      missionControls.safehouseSelectedProjectId = targetProject.id ?? null;
+    }
   }
 
   if (!targetProject) {
@@ -3254,6 +3483,48 @@ const handleSafehouseProjectRush = () => {
   missionControls.safehouseStatusDetail = statusMessage;
   updateMissionControls();
   triggerHudRender();
+};
+
+const handleSafehouseProjectSelection = (projectId) => {
+  if (!projectId || missionControls.safehouseSelectedProjectId === projectId) {
+    return;
+  }
+
+  missionControls.safehouseSelectedProjectId = projectId;
+  updateSafehousePanel();
+};
+
+const handleSafehouseProjectListClick = (event) => {
+  const target = event.target?.closest?.('[data-project-id]');
+  if (!target) {
+    return;
+  }
+
+  const projectId = target.dataset.projectId;
+  if (!projectId) {
+    return;
+  }
+
+  handleSafehouseProjectSelection(projectId);
+};
+
+const handleSafehouseProjectListKeydown = (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return;
+  }
+
+  const target = event.target?.closest?.('[data-project-id]');
+  if (!target) {
+    return;
+  }
+
+  event.preventDefault();
+  const projectId = target.dataset.projectId;
+  if (!projectId) {
+    return;
+  }
+
+  handleSafehouseProjectSelection(projectId);
 };
 
 const handleSafehousePurchase = (safehouseId) => {
@@ -5848,6 +6119,23 @@ const setupMissionControls = () => {
 
       alertsContainer.append(alertsTitle, alertsPrompt, alertsList, alertsStatus);
 
+      const projectsContainer = document.createElement('div');
+      projectsContainer.className = 'mission-safehouse__projects';
+
+      const projectsTitle = document.createElement('h4');
+      projectsTitle.className = 'mission-details__title mission-safehouse__projects-title';
+      projectsTitle.textContent = 'Facility Projects';
+
+      const projectsList = document.createElement('div');
+      projectsList.id = 'mission-safehouse-projects';
+      projectsList.className = 'mission-safehouse__projects-list';
+      const projectsPlaceholder = document.createElement('p');
+      projectsPlaceholder.className = 'mission-safehouse__projects-empty';
+      projectsPlaceholder.textContent = 'Project manifest syncing…';
+      projectsList.appendChild(projectsPlaceholder);
+
+      projectsContainer.append(projectsTitle, projectsList);
+
       const projectButton = document.createElement('button');
       projectButton.id = 'mission-safehouse-project-btn';
       projectButton.type = 'button';
@@ -5879,6 +6167,7 @@ const setupMissionControls = () => {
         grid,
         catalog,
         alertsContainer,
+        projectsContainer,
         projectButton,
         rushButton,
         upgradeButton,
@@ -5898,6 +6187,7 @@ const setupMissionControls = () => {
     missionControls.safehouseTier = safehouseSection.querySelector('#mission-safehouse-tier');
     missionControls.safehouseEffects = safehouseSection.querySelector('#mission-safehouse-effects');
     missionControls.safehouseList = safehouseSection.querySelector('#mission-safehouse-catalog');
+    missionControls.safehouseProjects = safehouseSection.querySelector('#mission-safehouse-projects');
     missionControls.safehouseProjectButton = safehouseSection.querySelector('#mission-safehouse-project-btn');
     missionControls.safehouseRushButton = safehouseSection.querySelector('#mission-safehouse-rush-btn');
     missionControls.safehouseUpgradeButton = safehouseSection.querySelector('#mission-safehouse-upgrade-btn');
@@ -6134,6 +6424,8 @@ const setupMissionControls = () => {
   maintenanceUpgradeSelect?.addEventListener('change', updateMaintenancePanel);
   heatLayLowButton.addEventListener('click', handleHeatLayLow);
   heatBribeButton.addEventListener('click', handleHeatBribe);
+  missionControls.safehouseProjects?.addEventListener('click', handleSafehouseProjectListClick);
+  missionControls.safehouseProjects?.addEventListener('keydown', handleSafehouseProjectListKeydown);
   missionControls.safehouseProjectButton?.addEventListener('click', handleSafehouseProjectFunding);
   missionControls.safehouseRushButton?.addEventListener('click', handleSafehouseProjectRush);
   missionControls.safehouseUpgradeButton?.addEventListener('click', handleSafehouseUpgrade);
