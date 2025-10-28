@@ -38,6 +38,7 @@ const missionControls = {
   detailDuration: null,
   detailSuccess: null,
   detailRestriction: null,
+  detailVehicleReward: null,
   detailCrewImpact: null,
   detailPlayerImpact: null,
   cityIntelSection: null,
@@ -566,6 +567,7 @@ const setMissionDetails = ({
   duration,
   success,
   restriction,
+  vehicleReward,
   crewImpact,
   playerImpact,
 }) => {
@@ -576,6 +578,7 @@ const setMissionDetails = ({
     detailDuration,
     detailSuccess,
     detailRestriction,
+    detailVehicleReward,
     detailCrewImpact,
     detailPlayerImpact,
   } = missionControls;
@@ -588,6 +591,7 @@ const setMissionDetails = ({
       detailDuration &&
       detailSuccess &&
       detailRestriction &&
+      detailVehicleReward &&
       detailCrewImpact &&
       detailPlayerImpact
     )
@@ -601,6 +605,9 @@ const setMissionDetails = ({
   detailDuration.textContent = duration;
   detailSuccess.textContent = success;
   detailRestriction.textContent = restriction;
+  detailVehicleReward.textContent = Array.isArray(vehicleReward)
+    ? vehicleReward.join(' ')
+    : vehicleReward ?? 'Vehicle reward intel pending.';
 
   detailCrewImpact.innerHTML = '';
   const impactItems = Array.isArray(crewImpact) ? crewImpact : [crewImpact ?? 'No crew assigned.'];
@@ -629,6 +636,7 @@ const resetMissionDetails = (descriptionText) => {
     duration: '—',
     success: '—',
     restriction: 'All contracts are currently open.',
+    vehicleReward: 'Vehicle reward intel pending.',
     crewImpact: ['No crew assigned.', 'No vehicle selected.'],
     playerImpact: ['Player expertise steady — train to unlock bonuses.'],
   });
@@ -1255,13 +1263,34 @@ const describeVehicleReportOutcome = (report) => {
     return `${modelLabel} installed ${upgradeLabel}${costLabel}.${detailLabel}`.trim();
   }
 
+  if (report.outcome === 'vehicle-acquired') {
+    const summary = typeof report.summary === 'string' ? report.summary.trim() : '';
+    if (summary) {
+      return summary;
+    }
+    const missionLabel = report.missionName ?? 'the latest mission';
+    const storageRequired = Number.isFinite(report.storageRequired)
+      ? Math.max(1, Math.round(report.storageRequired))
+      : null;
+    const storageLabel = storageRequired
+      ? ` Requires ${storageRequired === 1 ? '1 garage slot' : `${storageRequired} garage slots`}.`
+      : '';
+    return `${modelLabel} secured from ${missionLabel}.${storageLabel}`.trim();
+  }
+
   if (report.outcome === 'storage-blocked') {
     const capacity = Number.isFinite(report.storageCapacity) ? report.storageCapacity : null;
     const garageSize = Number.isFinite(report.garageSize) ? report.garageSize : null;
+    const storageRequired = Number.isFinite(report.storageRequired)
+      ? Math.max(1, Math.round(report.storageRequired))
+      : null;
+    const storageLabel = storageRequired !== null
+      ? ` Requires ${storageRequired === 1 ? '1 garage slot' : `${storageRequired} garage slots`}.`
+      : '';
     if (capacity !== null && garageSize !== null) {
-      return `${modelLabel} stalled — garage capacity ${garageSize}/${capacity}. Sell or scrap to free space.`;
+      return `${modelLabel} stalled — garage capacity ${garageSize}/${capacity}.${storageLabel} Sell or scrap to free space.`.trim();
     }
-    return `${modelLabel} stalled — garage full. Sell or scrap to free space.`;
+    return `${modelLabel} stalled — garage full.${storageLabel} Sell or scrap to free space.`.trim();
   }
 
   if (typeof report.summary === 'string' && report.summary.trim()) {
@@ -2062,7 +2091,10 @@ const updateMaintenancePanel = () => {
     capacitySegments.push(`Garage capacity telemetry unavailable — ${garageSize} vehicles stored.`);
   }
 
-  if (latestVehicleReport?.outcome === 'storage-blocked') {
+  if (
+    latestVehicleReport &&
+    (latestVehicleReport.outcome === 'storage-blocked' || latestVehicleReport.outcome === 'vehicle-acquired')
+  ) {
     const reportSummary = describeVehicleReportOutcome(latestVehicleReport);
     if (reportSummary) {
       capacitySegments.push(reportSummary);
@@ -4553,6 +4585,7 @@ const updateMissionControls = () => {
     detailDuration,
     detailSuccess,
     detailRestriction,
+    detailVehicleReward,
     detailCrewImpact,
     detailPlayerImpact,
     cityIntelDistrictName,
@@ -4613,6 +4646,7 @@ const updateMissionControls = () => {
     detailDuration,
     detailSuccess,
     detailRestriction,
+    detailVehicleReward,
     detailCrewImpact,
     detailPlayerImpact,
     cityIntelDistrictName,
@@ -4870,6 +4904,35 @@ const updateMissionControls = () => {
       }
     }
 
+    const vehicleRewardProfile = selectedMission.vehicleReward ?? null;
+    const vehicleRewardLabel = (() => {
+      if (!vehicleRewardProfile) {
+        if (selectedMission.falloutRecovery) {
+          return 'Support response — no vehicle reward.';
+        }
+        if ((selectedMission.category ?? '').toLowerCase() === 'vehicle-heist') {
+          return 'Vehicle reward intel unavailable.';
+        }
+        return 'No vehicle reward for this mission.';
+      }
+
+      const storageRequired = Number.isFinite(vehicleRewardProfile.storageRequired)
+        ? Math.max(1, Math.round(vehicleRewardProfile.storageRequired))
+        : null;
+      const storageLabel = storageRequired !== null
+        ? `requires ${storageRequired === 1 ? '1 garage slot' : `${storageRequired} garage slots`}`
+        : 'storage requirement unknown';
+      const baseLabel = vehicleRewardProfile.label ?? 'Vehicle reward';
+      const summarySegment = vehicleRewardProfile.summary ? ` — ${vehicleRewardProfile.summary}` : '';
+      let statusSegment = '';
+      if (selectedMission.vehicleRewardOutcome === 'blocked') {
+        statusSegment = ' [Blocked: garage full]';
+      } else if (selectedMission.vehicleRewardOutcome === 'acquired') {
+        statusSegment = ' [Secured]';
+      }
+      return `${baseLabel} (${storageLabel})${summarySegment}${statusSegment}`;
+    })();
+
     setMissionDetails({
       description: missionDescription,
       payout: missionPayout,
@@ -4877,6 +4940,7 @@ const updateMissionControls = () => {
       duration: missionDuration,
       success: missionSuccess,
       restriction: restrictionMessage,
+      vehicleReward: vehicleRewardLabel,
       crewImpact,
       playerImpact,
     });
@@ -5249,6 +5313,7 @@ const setupMissionControls = () => {
   missionControls.detailDuration = document.getElementById('mission-detail-duration');
   missionControls.detailSuccess = document.getElementById('mission-detail-success');
   missionControls.detailRestriction = document.getElementById('mission-detail-restriction');
+  missionControls.detailVehicleReward = document.getElementById('mission-detail-vehicle-reward');
   missionControls.detailCrewImpact = document.getElementById('mission-detail-crew-impact');
   missionControls.detailPlayerImpact = document.getElementById('mission-detail-player-impact');
   missionControls.cityIntelSection = document.querySelector('.mission-city-intel');
