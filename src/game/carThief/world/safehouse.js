@@ -848,7 +848,7 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'river-cache',
             name: 'River Cache',
-            summary: 'Hidden lockers along the docks trickle bonus contraband for sale.',
+            summary: 'Hidden lockers funnel contraband cash and quietly shed mission heat.',
             status: 'active',
           },
         ],
@@ -856,7 +856,7 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'reinforce-loading-bay',
             name: 'Reinforce Loading Bay',
-            summary: 'Materials staged to expand the bay once crews secure more funding.',
+            summary: 'Materials staged to widen the bay and vent even more mission heat.',
             status: 'queued',
             cost: 6500,
             durationDays: 3,
@@ -877,13 +877,19 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'workshop-bays',
             name: 'Workshop Bays',
-            summary: 'Dedicated work areas unlock faster vehicle tuning and mod prep.',
+            summary: 'Dedicated work areas trim overhead and shave minutes off prep.',
             status: 'active',
           },
           {
             id: 'dead-drop-network',
             name: 'Dead Drop Network',
-            summary: 'Courier caches shave a bit of heat off successful jobs.',
+            summary: 'Courier caches bleed daily heat and soften mission signatures.',
+            status: 'active',
+          },
+          {
+            id: 'ops-sim-lab',
+            name: 'Ops Sim Lab',
+            summary: 'Simulation rigs rehearse routes for tighter payouts.',
             status: 'active',
           },
         ],
@@ -891,7 +897,7 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'operations-floor-plans',
             name: 'Operations Floor Plans',
-            summary: 'Blueprints drafted for a command mezzanine to coordinate crews.',
+            summary: 'Blueprints drafted for a command mezzanine that bumps success odds.',
             status: 'in-design',
             cost: 9800,
             durationDays: 4,
@@ -912,13 +918,19 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'ops-briefing-theater',
             name: 'Ops Briefing Theater',
-            summary: 'Pre-run briefings grant crews sharper success odds.',
+            summary: 'Live briefings keep recovery tight and add +1% success.',
             status: 'active',
           },
           {
             id: 'rapid-response-shed',
             name: 'Rapid Response Shed',
-            summary: 'Staged getaway rigs reduce downtime after heat spikes.',
+            summary: 'Staged getaway rigs strip daily heat and 3% off mission timers.',
+            status: 'active',
+          },
+          {
+            id: 'escape-tunnel-grid',
+            name: 'Escape Tunnel Grid',
+            summary: 'Hidden egress tunnels carve seconds off every extraction.',
             status: 'active',
           },
         ],
@@ -926,7 +938,7 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'ghost-terminal-core',
             name: 'Ghost Terminal Core',
-            summary: 'Shell companies assemble a laundering terminal for the final tier.',
+            summary: 'Shell companies assemble a laundering core that strips mission heat.',
             status: 'fabricating',
             cost: 14200,
             durationDays: 5,
@@ -981,13 +993,13 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'executive-front-desk',
             name: 'Executive Front Desk',
-            summary: 'Concierge cover services deflect casual surveillance.',
+            summary: 'Concierge cover deflects surveillance and trims mission heat.',
             status: 'active',
           },
           {
             id: 'rooftop-pad',
             name: 'Rooftop Landing Pad',
-            summary: 'Couriers can hot-drop gear to cut mission prep time.',
+            summary: 'Couriers hot-drop gear, speeding prep and mission timers.',
             status: 'active',
           },
         ],
@@ -995,7 +1007,7 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'private-elevator-upfit',
             name: 'Private Elevator Upfit',
-            summary: 'Security upgrades queued to harden access control.',
+            summary: 'Security upgrades add private lifts that cut mission clocks.',
             status: 'queued',
             cost: 11500,
             durationDays: 3,
@@ -1016,13 +1028,13 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'executive-war-room',
             name: 'Executive War Room',
-            summary: 'Deal rooms unlock negotiation prep that bumps payouts.',
+            summary: 'Deal rooms raise payouts and add extra mission success.',
             status: 'active',
           },
           {
             id: 'quiet-network',
             name: 'Quiet Network',
-            summary: 'An insider call tree trims crackdown patrol response.',
+            summary: 'Insider call trees dampen patrol response and mission heat.',
             status: 'active',
           },
         ],
@@ -1030,7 +1042,7 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'shadow-boardroom-designs',
             name: 'Shadow Boardroom Designs',
-            summary: 'Architects draft secret boardrooms to steer city movers.',
+            summary: 'Architects draft secret boardrooms to boost success odds.',
             status: 'in-design',
             cost: 16800,
             durationDays: 4,
@@ -1051,13 +1063,19 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'shadow-boardroom',
             name: 'Shadow Boardroom',
-            summary: 'Influence ops grant small success bonuses on high-end targets.',
+            summary: 'Influence ops add notable success bonuses on premier targets.',
             status: 'active',
           },
           {
             id: 'shell-finance-desk',
             name: 'Shell Finance Desk',
-            summary: 'Pop-up financiers underwrite expensive crew loyalty jobs.',
+            summary: 'Pop-up financiers add payouts and discount heat buys.',
+            status: 'active',
+          },
+          {
+            id: 'informant-dead-drops',
+            name: 'Informant Dead Drops',
+            summary: 'Informant payouts supercharge heat-buy operations.',
             status: 'active',
           },
         ],
@@ -1065,7 +1083,7 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'phantom-syndicate-expansion',
             name: 'Phantom Syndicate Expansion',
-            summary: 'Lays groundwork for a whisper-network to erase crackdown traces.',
+            summary: 'Lays whisper-network groundwork to erase traces mid-mission.',
             status: 'fabricating',
             cost: 22800,
             durationDays: 5,
@@ -1086,13 +1104,13 @@ const DEFAULT_SAFEHOUSES = [
           {
             id: 'phantom-syndicate-suite',
             name: 'Phantom Syndicate Suite',
-            summary: 'Counter-intel rig shaves an extra chunk of heat after every score.',
+            summary: 'Counter-intel rig slashes mission heat and amplifies mitigation.',
             status: 'active',
           },
           {
             id: 'vip-concierge-ring',
             name: 'VIP Concierge Ring',
-            summary: 'High-roller clients open premium contracts when morale is high.',
+            summary: 'High-roller clients unlock premium contracts and bigger payouts.',
             status: 'active',
           },
         ],

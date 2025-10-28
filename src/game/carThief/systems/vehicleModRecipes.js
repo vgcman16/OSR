@@ -39,6 +39,40 @@ const VEHICLE_MOD_RECIPES = Object.freeze({
     fundsCost: 1750,
     availabilityNote: 'Plan around the extra fabrication time — crew downtime increases during installation.',
   },
+  'escape-vector-suite': {
+    id: 'escape-vector-suite',
+    modId: 'escape-vector-suite',
+    partsCost: 22,
+    fundsCost: 1850,
+    availabilityNote: 'Requires telemetry calibration — best paired with elite wheelmen.',
+  },
+  'ghost-cabin': {
+    id: 'ghost-cabin',
+    modId: 'ghost-cabin',
+    partsCost: 18,
+    fundsCost: 1500,
+    availabilityNote: 'Expect a day of downtime while the cabin refit cures.',
+  },
+  'decoy-flare-launcher': {
+    id: 'decoy-flare-launcher',
+    modId: 'decoy-flare-launcher',
+    partsCost: 13,
+    fundsCost: 1200,
+  },
+  'quantum-stabilizers': {
+    id: 'quantum-stabilizers',
+    modId: 'quantum-stabilizers',
+    partsCost: 21,
+    fundsCost: 1800,
+    availabilityNote: 'Requires precision alignment — schedule a full day in the bay.',
+  },
+  'specter-shielding': {
+    id: 'specter-shielding',
+    modId: 'specter-shielding',
+    partsCost: 24,
+    fundsCost: 2100,
+    availabilityNote: 'Composite shielding needs specialist installers on standby.',
+  },
 });
 
 const cloneRecipe = (recipe) => {

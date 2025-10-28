@@ -121,6 +121,74 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       successBonus: 0.015,
     },
   },
+  'escape-vector-suite': {
+    id: 'escape-vector-suite',
+    label: 'Escape Vector Suite',
+    description:
+      'Autonav thrusters plot micro-drifts that shave escape time while slipping past pursuers.',
+    summary: '+0.5 handling, -0.3 heat, -8% duration, +0.02 success.',
+    cost: 6200,
+    effects: {
+      handlingBonus: 0.5,
+      durationMultiplier: 0.92,
+      heatFlatAdjustment: -0.3,
+      successBonus: 0.02,
+    },
+  },
+  'ghost-cabin': {
+    id: 'ghost-cabin',
+    label: 'Ghost Cabin Refits',
+    description:
+      'Acoustic baffles and cooled vents drop the ride into stealth mode for the final approach.',
+    summary: '-0.4 base heat, 18% less heat gain, +0.015 success.',
+    cost: 5600,
+    effects: {
+      heatFlatAdjustment: -0.4,
+      heatGainMultiplier: 0.82,
+      successBonus: 0.015,
+    },
+  },
+  'decoy-flare-launcher': {
+    id: 'decoy-flare-launcher',
+    label: 'Decoy Flare Launcher',
+    description:
+      'Micro flare pods blind pursuit drones, softening heat spikes during extraction.',
+    summary: 'Heat gain -0.4, 18% pursuit heat reduction, +0.02 success.',
+    cost: 4700,
+    effects: {
+      heatGainFlat: -0.4,
+      heatGainMultiplier: 0.82,
+      successBonus: 0.02,
+    },
+  },
+  'quantum-stabilizers': {
+    id: 'quantum-stabilizers',
+    label: 'Quantum Stabilizers',
+    description:
+      'Phase-balanced mounts steady the chassis, cutting corner drift and heat signatures.',
+    summary: '+0.7 handling, -0.25 heat, 6% faster, +0.015 success.',
+    cost: 6100,
+    effects: {
+      handlingBonus: 0.7,
+      durationMultiplier: 0.94,
+      heatFlatAdjustment: -0.25,
+      successBonus: 0.015,
+    },
+  },
+  'specter-shielding': {
+    id: 'specter-shielding',
+    label: 'Specter Shielding',
+    description:
+      'Layered EM mesh cloaks the ride, carving mission heat and dampening pursuit telemetry.',
+    summary: '-0.6 base heat, 10% mission heat drop, 15% less pursuit heat, +0.02 success.',
+    cost: 6400,
+    effects: {
+      heatFlatAdjustment: -0.6,
+      heatMultiplier: 0.9,
+      heatGainMultiplier: 0.85,
+      successBonus: 0.02,
+    },
+  },
 });
 
 const aggregateVehicleModBonuses = (installedMods = [], catalog = VEHICLE_MOD_CATALOG) => {
