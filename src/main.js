@@ -1,4 +1,5 @@
 import { createCarThiefGame, createGameSerializer } from './game/carThief/index.js';
+import { createSoundboard } from './game/carThief/audio/soundboard.js';
 import { CrewMember, CREW_TRAIT_CONFIG, CREW_FATIGUE_CONFIG } from './game/carThief/entities/crewMember.js';
 import {
   GARAGE_MAINTENANCE_CONFIG,
@@ -16,6 +17,42 @@ import { createOnboardingTour } from './game/carThief/ui/onboarding.js';
 
 let gameInstance = null;
 let onboardingTour = null;
+
+const settingsSerializer = createGameSerializer({ key: 'osr.car-thief.settings.v1' });
+const DEFAULT_PLAYER_SETTINGS = { audio: { muted: false } };
+
+const loadPlayerSettings = () => {
+  const payload = settingsSerializer.load();
+  if (!payload || typeof payload !== 'object') {
+    return { ...DEFAULT_PLAYER_SETTINGS };
+  }
+
+  const audioSettings = payload.audio && typeof payload.audio === 'object' ? payload.audio : {};
+  const muted = Boolean(audioSettings.muted);
+
+  return {
+    ...DEFAULT_PLAYER_SETTINGS,
+    ...payload,
+    audio: { ...DEFAULT_PLAYER_SETTINGS.audio, ...audioSettings, muted },
+  };
+};
+
+let playerSettings = loadPlayerSettings();
+const soundboard = createSoundboard({ muted: playerSettings?.audio?.muted });
+
+const persistPlayerSettings = () => {
+  playerSettings = {
+    ...DEFAULT_PLAYER_SETTINGS,
+    ...playerSettings,
+    audio: {
+      ...DEFAULT_PLAYER_SETTINGS.audio,
+      ...(playerSettings?.audio ?? {}),
+      muted: Boolean(playerSettings?.audio?.muted),
+    },
+  };
+
+  settingsSerializer.save(playerSettings);
+};
 
 const teardownGame = () => {
   if (!gameInstance) {
@@ -67,6 +104,7 @@ const missionControls = {
   eventHistory: null,
   eventStatus: null,
   eventStatusDetail: '',
+  lastEventPromptId: null,
   debtList: null,
   debtStatus: null,
   debtStatusDetail: '',
@@ -102,6 +140,8 @@ const missionControls = {
   heatStatus: null,
   heatStatusDetail: '',
   heatHistoryList: null,
+  audioToggle: null,
+  lastMissionLogEntryId: null,
   safehouseSection: null,
   safehouseName: null,
   safehouseTier: null,
@@ -1470,6 +1510,32 @@ const setMissionEventStatus = (message) => {
   const detail = typeof message === 'string' ? message.trim() : '';
   missionControls.eventStatusDetail = detail;
   eventStatus.textContent = detail;
+};
+
+const updateAudioToggleLabel = () => {
+  const toggle = missionControls.audioToggle;
+  if (!toggle) {
+    return;
+  }
+
+  const muted = soundboard.isMuted();
+  toggle.textContent = muted ? 'Unmute Audio' : 'Mute Audio';
+  toggle.setAttribute('aria-pressed', muted ? 'true' : 'false');
+  toggle.dataset.muted = muted ? 'true' : 'false';
+  toggle.title = muted ? 'Sound effects muted.' : 'Sound effects enabled.';
+};
+
+const handleAudioToggle = () => {
+  const nextMuted = !soundboard.isMuted();
+  soundboard.setMuted(nextMuted);
+
+  playerSettings = {
+    ...playerSettings,
+    audio: { ...(playerSettings?.audio ?? {}), muted: nextMuted },
+  };
+
+  persistPlayerSettings();
+  updateAudioToggleLabel();
 };
 
 const formatEventEffectSummary = (effects) => {
@@ -5249,6 +5315,29 @@ const renderMissionLog = () => {
     ? missionSystem.state.missionLog
     : [];
 
+  const latestEntry = logEntries[0] ?? null;
+  const latestKey = (() => {
+    if (latestEntry?.id) {
+      return latestEntry.id;
+    }
+
+    if (Number.isFinite(latestEntry?.timestamp)) {
+      return `ts-${latestEntry.timestamp}`;
+    }
+
+    return null;
+  })();
+  const previousKey = missionControls.lastMissionLogEntryId ?? null;
+
+  if (latestKey) {
+    if (previousKey && previousKey !== latestKey) {
+      soundboard.playMissionOutcome(latestEntry?.outcome);
+    }
+    missionControls.lastMissionLogEntryId = latestKey;
+  } else if (previousKey) {
+    missionControls.lastMissionLogEntryId = null;
+  }
+
   logList.innerHTML = '';
 
   if (!logEntries.length) {
@@ -5295,6 +5384,7 @@ const renderMissionEvents = () => {
   const mission = missionSystem?.state?.activeMission ?? null;
 
   if (!mission || mission.status === 'completed') {
+    missionControls.lastEventPromptId = null;
     const placeholder = document.createElement('li');
     placeholder.textContent = 'No event history yet.';
     eventHistory.appendChild(placeholder);
@@ -5303,6 +5393,14 @@ const renderMissionEvents = () => {
 
   const pending = mission.pendingDecision ?? null;
   if (pending) {
+    const pendingId = pending.eventId ?? null;
+    if (pendingId && missionControls.lastEventPromptId !== pendingId) {
+      missionControls.lastEventPromptId = pendingId;
+      soundboard.playEventPrompt();
+    } else if (!pendingId) {
+      missionControls.lastEventPromptId = null;
+    }
+
     const description = pending.description ? ` — ${pending.description}` : '';
     const progressPercent = Number.isFinite(pending.triggerProgress)
       ? ` (${Math.round(pending.triggerProgress * 100)}%)`
@@ -5367,6 +5465,7 @@ const renderMissionEvents = () => {
         eventChoices.appendChild(option);
       });
   } else {
+    missionControls.lastEventPromptId = null;
     const statusLabel = (() => {
       switch (mission.status) {
         case 'awaiting-resolution':
@@ -5970,8 +6069,10 @@ const handleMissionStart = () => {
 
   missionControls.selectedCrewIds = [];
   missionControls.selectedVehicleId = null;
+  missionControls.lastEventPromptId = null;
   clearMaintenanceStatusDetail();
   setMissionEventStatus('Crew standing by for mid-run updates.');
+  soundboard.playMissionStart();
   economySystem.payCrew();
   updateMissionSelect();
   updateMissionControls();
@@ -6031,6 +6132,39 @@ const setupMissionControls = () => {
 
   const controlPanel = document.querySelector('.control-panel');
   if (controlPanel) {
+    let audioControls = controlPanel.querySelector('.mission-audio');
+    if (!audioControls) {
+      audioControls = document.createElement('div');
+      audioControls.className = 'mission-audio';
+
+      const toggle = document.createElement('button');
+      toggle.id = 'mission-audio-toggle';
+      toggle.type = 'button';
+      toggle.className = 'button button--secondary mission-audio__toggle';
+      audioControls.appendChild(toggle);
+
+      const referenceNode = controlPanel.firstElementChild ?? controlPanel.firstChild;
+      if (referenceNode) {
+        controlPanel.insertBefore(audioControls, referenceNode);
+      } else {
+        controlPanel.appendChild(audioControls);
+      }
+    }
+
+    const toggleButton = audioControls.querySelector('#mission-audio-toggle');
+    if (toggleButton) {
+      if (missionControls.audioToggle && missionControls.audioToggle !== toggleButton) {
+        missionControls.audioToggle.removeEventListener('click', handleAudioToggle);
+      }
+
+      missionControls.audioToggle = toggleButton;
+      if (!toggleButton.dataset.audioBound) {
+        toggleButton.addEventListener('click', handleAudioToggle);
+        toggleButton.dataset.audioBound = 'true';
+      }
+      updateAudioToggleLabel();
+    }
+
     let safehouseSection = controlPanel.querySelector('.mission-safehouse');
     if (!safehouseSection) {
       safehouseSection = document.createElement('section');
