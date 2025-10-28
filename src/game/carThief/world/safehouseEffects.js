@@ -197,6 +197,16 @@ const collectFacilities = (safehouse) => {
   if (typeof safehouse.getActiveProjects === 'function') {
     facilities.push(...safehouse.getActiveProjects());
   }
+
+  if (typeof safehouse.getDisabledFacilityIds === 'function') {
+    const disabled = new Set(safehouse.getDisabledFacilityIds());
+    if (disabled.size) {
+      return facilities.filter((facility) => facility?.id && !disabled.has(facility.id));
+    }
+  } else if (typeof safehouse.isFacilityDisabled === 'function') {
+    return facilities.filter((facility) => !safehouse.isFacilityDisabled(facility?.id));
+  }
+
   return facilities;
 };
 

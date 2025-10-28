@@ -6,7 +6,11 @@ import { buildMissionEventDeck } from './missionEvents.js';
 import { buildSafehouseIncursionEvents } from './safehouseIncursionEvents.js';
 import { getAvailableCrewStorylineMissions, applyCrewStorylineOutcome } from './crewStorylines.js';
 import { getCrackdownOperationTemplates } from './crackdownOperations.js';
-import { getActiveStorageCapacityFromState, getActiveSafehouseFromState } from '../world/safehouse.js';
+import {
+  SafehouseCollection,
+  getActiveStorageCapacityFromState,
+  getActiveSafehouseFromState,
+} from '../world/safehouse.js';
 import { computeSafehouseFacilityBonuses } from '../world/safehouseEffects.js';
 import { getCrewPerkEffect } from './crewPerks.js';
 import { getCrewGearEffect } from './crewGear.js';
@@ -31,6 +35,88 @@ const clamp = (value, min, max) => {
   }
 
   return value;
+};
+
+const normalizeTextArray = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => (typeof entry === 'string' ? entry.trim() : '')).filter(Boolean);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return [value.trim()];
+  }
+
+  return [];
+};
+
+const sanitizeFacilityDowntime = (
+  downtime,
+  { facilityId = null, label = null, currentDay = null } = {},
+) => {
+  if (!downtime || typeof downtime !== 'object') {
+    return null;
+  }
+
+  const resolvedFacilityId =
+    typeof downtime.facilityId === 'string' && downtime.facilityId.trim()
+      ? downtime.facilityId.trim()
+      : typeof facilityId === 'string' && facilityId.trim()
+        ? facilityId.trim()
+        : null;
+
+  if (!resolvedFacilityId) {
+    return null;
+  }
+
+  const penalties = normalizeTextArray(downtime.penalties ?? downtime.impact ?? downtime.effects);
+  const penaltySummary =
+    typeof downtime.penaltySummary === 'string' && downtime.penaltySummary.trim()
+      ? downtime.penaltySummary.trim()
+      : null;
+  if (penaltySummary && !penalties.length) {
+    penalties.push(penaltySummary);
+  }
+
+  const durationDays = Number.isFinite(downtime.durationDays)
+    ? Math.max(0, Math.round(downtime.durationDays))
+    : Number.isFinite(downtime.cooldownDays)
+      ? Math.max(0, Math.round(downtime.cooldownDays))
+      : null;
+  const cooldownDays = Number.isFinite(downtime.cooldownDays)
+    ? Math.max(0, Math.round(downtime.cooldownDays))
+    : durationDays;
+
+  let cooldownEndsOnDay = Number.isFinite(downtime.cooldownEndsOnDay)
+    ? Math.round(downtime.cooldownEndsOnDay)
+    : null;
+  if (cooldownEndsOnDay === null && Number.isFinite(currentDay) && cooldownDays !== null) {
+    cooldownEndsOnDay = currentDay + cooldownDays;
+  }
+
+  const startedAt = Number.isFinite(downtime.startedAt) ? downtime.startedAt : null;
+  const summary =
+    typeof downtime.summary === 'string' && downtime.summary.trim() ? downtime.summary.trim() : null;
+  const resolvedLabel =
+    typeof downtime.label === 'string' && downtime.label.trim()
+      ? downtime.label.trim()
+      : typeof label === 'string' && label.trim()
+        ? label.trim()
+        : null;
+  const alertId =
+    typeof downtime.alertId === 'string' && downtime.alertId.trim() ? downtime.alertId.trim() : null;
+
+  return {
+    facilityId: resolvedFacilityId,
+    label: resolvedLabel,
+    summary,
+    penalties,
+    penaltySummary,
+    durationDays,
+    cooldownDays,
+    cooldownEndsOnDay,
+    startedAt,
+    alertId,
+  };
 };
 
 const REQUIRED_TEMPLATE_FIELDS = ['id', 'name'];
@@ -1939,6 +2025,94 @@ class MissionSystem {
     return { outcome, roll, successChance };
   }
 
+  _getSafehouseCollection() {
+    if (!this.state) {
+      return null;
+    }
+
+    if (this.state.safehouses instanceof SafehouseCollection) {
+      return this.state.safehouses;
+    }
+
+    const collection = new SafehouseCollection(this.state.safehouses ?? []);
+    this.state.safehouses = collection;
+    return collection;
+  }
+
+  _syncSafehouseDowntimeFromAlert(alert, { currentDay = null } = {}) {
+    if (!alert || !this.state) {
+      return;
+    }
+
+    const collection = this._getSafehouseCollection();
+    if (!collection) {
+      return;
+    }
+
+    if (typeof collection.pruneFacilityDowntimes === 'function' && Number.isFinite(currentDay)) {
+      collection.pruneFacilityDowntimes(currentDay);
+    }
+
+    const safehouseId = alert.safehouseId ?? null;
+    const facilityId = alert.facilityId ?? null;
+    if (!safehouseId || !facilityId) {
+      return;
+    }
+
+    const status = typeof alert.status === 'string' ? alert.status : 'alert';
+
+    if (status === 'cooldown') {
+      if (typeof collection.applyFacilityDowntime !== 'function') {
+        return;
+      }
+
+      const downtimeSource = alert.downtime ?? alert.facilityDowntime ?? null;
+      const normalizedDowntime =
+        sanitizeFacilityDowntime(downtimeSource ?? {}, {
+          facilityId,
+          label: alert.facilityName ?? null,
+          currentDay,
+        }) ?? {
+          facilityId,
+          label: alert.facilityName ?? null,
+          penalties: [],
+        };
+
+      const resolvedDowntime = {
+        ...normalizedDowntime,
+        facilityId,
+        label: normalizedDowntime.label ?? alert.facilityName ?? null,
+        summary: normalizedDowntime.summary ?? alert.summary ?? null,
+        penalties: Array.isArray(normalizedDowntime.penalties)
+          ? normalizedDowntime.penalties
+          : [],
+        penaltySummary: normalizedDowntime.penaltySummary ?? null,
+        cooldownDays: Number.isFinite(alert.cooldownDays)
+          ? Math.max(0, alert.cooldownDays)
+          : normalizedDowntime.cooldownDays ?? null,
+        cooldownEndsOnDay: Number.isFinite(alert.cooldownEndsOnDay)
+          ? alert.cooldownEndsOnDay
+          : normalizedDowntime.cooldownEndsOnDay ?? null,
+        startedAt: Number.isFinite(alert.resolvedAt)
+          ? alert.resolvedAt
+          : normalizedDowntime.startedAt ?? null,
+        alertId: normalizedDowntime.alertId ?? alert.id ?? null,
+      };
+
+      if (
+        !Number.isFinite(resolvedDowntime.cooldownEndsOnDay) &&
+        Number.isFinite(currentDay) &&
+        Number.isFinite(resolvedDowntime.cooldownDays)
+      ) {
+        resolvedDowntime.cooldownEndsOnDay = currentDay + resolvedDowntime.cooldownDays;
+      }
+
+      collection.applyFacilityDowntime(safehouseId, resolvedDowntime, currentDay);
+    } else if (typeof collection.clearFacilityDowntime === 'function') {
+      collection.clearFacilityDowntime(safehouseId, facilityId, { currentDay });
+    }
+  }
+
   normalizeSafehouseIncursions(currentDay = this.state?.day ?? 1) {
     const numericDay = Number.isFinite(currentDay) ? currentDay : null;
     const entries = Array.isArray(this.state?.safehouseIncursions)
@@ -1959,6 +2133,10 @@ class MissionSystem {
           numericDay !== null &&
           numericDay >= cooldownEndsOnDay
         ) {
+          this._syncSafehouseDowntimeFromAlert(
+            { ...entry, status: 'resolved' },
+            { currentDay: numericDay },
+          );
           return list;
         }
 
@@ -1969,6 +2147,10 @@ class MissionSystem {
 
     if (this.state) {
       this.state.safehouseIncursions = normalized;
+    }
+
+    if (numericDay !== null) {
+      normalized.forEach((entry) => this._syncSafehouseDowntimeFromAlert(entry, { currentDay: numericDay }));
     }
 
     return normalized;
@@ -2013,12 +2195,24 @@ class MissionSystem {
           typeof alert.lastResolutionSummary === 'string' ? alert.lastResolutionSummary : null,
       };
 
+      const downtime = sanitizeFacilityDowntime(alert.downtime ?? alert.facilityDowntime, {
+        facilityId: payload.facilityId ?? alert.facilityId ?? null,
+        label: payload.facilityName ?? null,
+        currentDay,
+      });
+      payload.downtime = downtime ?? null;
+      if (payload.downtime && payload.cooldownDays === null && Number.isFinite(payload.downtime.cooldownDays)) {
+        payload.cooldownDays = payload.downtime.cooldownDays;
+      }
+
       if (payload.status === 'alert') {
         payload.resolvedAt = null;
         payload.cooldownEndsOnDay = null;
       } else if (payload.status === 'cooldown') {
         if (Number.isFinite(alert.cooldownEndsOnDay)) {
           payload.cooldownEndsOnDay = alert.cooldownEndsOnDay;
+        } else if (payload.downtime && Number.isFinite(payload.downtime.cooldownEndsOnDay)) {
+          payload.cooldownEndsOnDay = payload.downtime.cooldownEndsOnDay;
         } else if (payload.cooldownDays !== null && Number.isFinite(currentDay)) {
           payload.cooldownEndsOnDay = currentDay + payload.cooldownDays;
         } else {
@@ -2030,13 +2224,33 @@ class MissionSystem {
           : null;
       }
 
+      if (payload.downtime) {
+        if (!Number.isFinite(payload.downtime.cooldownDays) && Number.isFinite(payload.cooldownDays)) {
+          payload.downtime.cooldownDays = payload.cooldownDays;
+        }
+        if (!Number.isFinite(payload.downtime.cooldownEndsOnDay) && Number.isFinite(payload.cooldownEndsOnDay)) {
+          payload.downtime.cooldownEndsOnDay = payload.cooldownEndsOnDay;
+        }
+        if (!payload.downtime.label && payload.facilityName) {
+          payload.downtime.label = payload.facilityName;
+        }
+        if (!payload.downtime.alertId) {
+          payload.downtime.alertId = payload.id;
+        }
+      }
+
       if (indexMap.has(payload.id)) {
         const index = indexMap.get(payload.id);
         const existing = { ...normalized[index], ...payload };
+        if (payload.downtime === null && normalized[index]?.downtime) {
+          existing.downtime = { ...normalized[index].downtime };
+        }
         normalized[index] = existing;
+        this._syncSafehouseDowntimeFromAlert(existing, { currentDay });
       } else {
         normalized.push(payload);
         indexMap.set(payload.id, normalized.length - 1);
+        this._syncSafehouseDowntimeFromAlert(payload, { currentDay });
       }
 
       mutated = true;
@@ -2053,7 +2267,10 @@ class MissionSystem {
     return normalized;
   }
 
-  markSafehouseAlertResolved(alertId, { summary = null, resolvedAt = Date.now() } = {}) {
+  markSafehouseAlertResolved(
+    alertId,
+    { summary = null, resolvedAt = Date.now(), downtime = null } = {},
+  ) {
     if (!alertId || !this.state) {
       return null;
     }
@@ -2071,6 +2288,25 @@ class MissionSystem {
     if (typeof summary === 'string' && summary.trim()) {
       entry.lastResolutionSummary = summary.trim();
     }
+    const sanitizedDowntime = sanitizeFacilityDowntime(downtime, {
+      facilityId: entry.facilityId ?? null,
+      label: entry.facilityName ?? null,
+      currentDay,
+    });
+    if (sanitizedDowntime) {
+      if (!Number.isFinite(sanitizedDowntime.startedAt) && Number.isFinite(entry.resolvedAt)) {
+        sanitizedDowntime.startedAt = entry.resolvedAt;
+      }
+      entry.downtime = sanitizedDowntime;
+      if (
+        !Number.isFinite(entry.cooldownDays) &&
+        Number.isFinite(sanitizedDowntime.cooldownDays)
+      ) {
+        entry.cooldownDays = sanitizedDowntime.cooldownDays;
+      }
+    } else {
+      entry.downtime = null;
+    }
     const cooldownDays = Number.isFinite(entry.cooldownDays) ? entry.cooldownDays : null;
     if (cooldownDays !== null && Number.isFinite(currentDay)) {
       entry.cooldownEndsOnDay = currentDay + cooldownDays;
@@ -2081,6 +2317,7 @@ class MissionSystem {
     alerts[index] = entry;
     this.state.safehouseIncursions = alerts;
     this.state.needsHudRefresh = true;
+    this._syncSafehouseDowntimeFromAlert(entry, { currentDay });
     return entry;
   }
 
@@ -2277,7 +2514,13 @@ class MissionSystem {
     };
 
     const effects = choice.effects ?? {};
+    const currentDay = Number.isFinite(this.state?.day) ? this.state.day : null;
     const futureDebtNotices = [];
+    const facilityDowntimeEffect = sanitizeFacilityDowntime(effects.facilityDowntime, {
+      facilityId: eventEntry.facilityId ?? null,
+      label: eventEntry.facilityName ?? null,
+      currentDay,
+    });
 
     if (Number.isFinite(effects.payoutMultiplier)) {
       mission.payout = Math.max(0, Math.round(mission.payout * effects.payoutMultiplier));
@@ -2398,6 +2641,21 @@ class MissionSystem {
     if (Math.abs(durationDelta) >= 1) {
       deltaParts.push(`Duration ${durationDelta > 0 ? '+' : ''}${Math.round(durationDelta)}s`);
     }
+    if (facilityDowntimeEffect) {
+      const downtimeLabel = facilityDowntimeEffect.label ?? eventEntry.facilityName ?? eventEntry.label;
+      const downtimeDays = Number.isFinite(facilityDowntimeEffect.cooldownDays)
+        ? facilityDowntimeEffect.cooldownDays
+        : Number.isFinite(facilityDowntimeEffect.durationDays)
+          ? facilityDowntimeEffect.durationDays
+          : null;
+      if (downtimeDays !== null) {
+        deltaParts.push(
+          `${downtimeLabel} offline ${downtimeDays} day${downtimeDays === 1 ? '' : 's'}`,
+        );
+      } else {
+        deltaParts.push(`${downtimeLabel} offline until systems recover`);
+      }
+    }
     if (crewLoyaltyDelta !== 0) {
       deltaParts.push(`Crew loyalty ${crewLoyaltyDelta > 0 ? '+' : ''}${crewLoyaltyDelta} total`);
     }
@@ -2414,10 +2672,28 @@ class MissionSystem {
     if (deltaParts.length) {
       summaryParts.push(deltaParts.join(', '));
     }
+    if (facilityDowntimeEffect) {
+      const penaltyLines = Array.isArray(facilityDowntimeEffect.penalties)
+        ? facilityDowntimeEffect.penalties
+        : [];
+      if (penaltyLines.length) {
+        summaryParts.push(`Impact: ${penaltyLines.join(' ')}`);
+      } else if (facilityDowntimeEffect.summary) {
+        summaryParts.push(facilityDowntimeEffect.summary);
+      }
+    }
 
     const eventSummary = summaryParts.join(' ').trim() || `${choice.label} resolved.`;
 
     mission.eventHistory = Array.isArray(mission.eventHistory) ? mission.eventHistory : [];
+    const historyEffects =
+      typeof choice.effects === 'object' && choice.effects !== null ? { ...choice.effects } : {};
+    if (facilityDowntimeEffect) {
+      historyEffects.facilityDowntime = { ...facilityDowntimeEffect };
+    }
+
+    const resolvedAtTimestamp = Date.now();
+
     const historyEntry = {
       eventId: eventEntry.id,
       eventLabel: eventEntry.label,
@@ -2425,17 +2701,14 @@ class MissionSystem {
       choiceLabel: choice.label,
       choiceNarrative: choice.narrative ?? null,
       triggeredAt: pending.triggeredAt ?? Date.now(),
-      resolvedAt: Date.now(),
+      resolvedAt: resolvedAtTimestamp,
       progressAt: pending.triggerProgress ?? mission.progress,
       summary: eventSummary,
       effectSummary: deltaParts.length ? deltaParts.join(', ') : null,
       eventBadges: Array.isArray(eventEntry.badges)
         ? eventEntry.badges.map((badge) => ({ ...badge }))
         : [],
-      effects:
-        typeof choice.effects === 'object' && choice.effects !== null
-          ? { ...choice.effects }
-          : {},
+      effects: historyEffects,
       deltas: {
         payout: payoutDelta,
         heat: heatDelta,
@@ -2451,9 +2724,13 @@ class MissionSystem {
     }
 
     if (eventEntry.safehouseAlertId) {
+      const downtimeForAlert = facilityDowntimeEffect
+        ? { ...facilityDowntimeEffect, startedAt: resolvedAtTimestamp }
+        : null;
       this.markSafehouseAlertResolved(eventEntry.safehouseAlertId, {
         summary: eventSummary,
         resolvedAt: historyEntry.resolvedAt,
+        downtime: downtimeForAlert,
       });
     }
 
