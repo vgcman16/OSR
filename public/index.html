@@ -478,6 +478,26 @@
             <button id="mission-maintenance-repair-btn" type="button">Repair Condition</button>
             <button id="mission-maintenance-heat-btn" type="button">Reduce Heat</button>
           </div>
+          <div class="mission-maintenance__resources">
+            <h4 class="mission-maintenance__subtitle">Workshop Inventory</h4>
+            <p id="mission-maintenance-parts" class="mission-maintenance__parts">
+              Parts in storage: 0
+            </p>
+          </div>
+          <div class="mission-maintenance__crafting">
+            <h4 class="mission-maintenance__subtitle">Fabricate Vehicle Mods</h4>
+            <p class="mission-maintenance__hint">
+              Recover parts from dismantled vehicles to build bespoke upgrades instantly.
+            </p>
+            <ul
+              id="mission-maintenance-crafting-list"
+              class="mission-details__list mission-maintenance__crafting-list"
+            >
+              <li class="mission-maintenance__crafting-item mission-maintenance__crafting-item--empty">
+                Salvage vehicles to unlock fabrication schematics.
+              </li>
+            </ul>
+          </div>
           <div class="mission-maintenance__upgrades">
             <h4 class="mission-maintenance__subtitle">Vehicle Upgrades</h4>
             <label class="mission-maintenance__label" for="mission-maintenance-upgrade-select">
@@ -499,6 +519,17 @@
             >
               <li class="mission-maintenance__upgrade-item mission-maintenance__upgrade-item--empty">
                 Select a vehicle to review installed upgrades.
+              </li>
+            </ul>
+          </div>
+          <div class="mission-maintenance__log">
+            <h4 class="mission-maintenance__subtitle">Garage Activity</h4>
+            <ul
+              id="mission-garage-activity-list"
+              class="mission-details__list mission-garage-activity__list"
+            >
+              <li class="mission-garage-activity__item mission-garage-activity__item--empty">
+                No garage activity recorded yet.
               </li>
             </ul>
           </div>

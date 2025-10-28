@@ -737,6 +737,105 @@ body {
   outline: none;
 }
 
+.mission-maintenance__resources,
+.mission-maintenance__crafting,
+.mission-maintenance__log {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(9, 14, 28, 0.78);
+  border: 1px solid rgba(120, 190, 255, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mission-maintenance__parts {
+  font-weight: 600;
+  color: rgba(209, 234, 255, 0.92);
+}
+
+.mission-maintenance__hint {
+  font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.7);
+}
+
+.mission-maintenance__crafting-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mission-maintenance__crafting-item {
+  list-style: none;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: rgba(6, 10, 20, 0.85);
+  border: 1px solid rgba(120, 190, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mission-maintenance__crafting-item--empty {
+  text-align: center;
+  font-style: italic;
+  color: rgba(209, 234, 255, 0.65);
+}
+
+.mission-maintenance__crafting-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.mission-maintenance__crafting-name {
+  font-weight: 600;
+  color: rgba(209, 234, 255, 0.95);
+}
+
+.mission-maintenance__crafting-cost {
+  font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.78);
+}
+
+.mission-maintenance__crafting-summary {
+  font-size: 0.9rem;
+  color: rgba(209, 234, 255, 0.78);
+}
+
+.mission-maintenance__crafting-status {
+  font-size: 0.85rem;
+  color: rgba(255, 196, 120, 0.85);
+}
+
+.mission-maintenance__crafting-action {
+  align-self: flex-start;
+}
+
+.mission-garage-activity__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mission-garage-activity__item {
+  list-style: none;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  background: rgba(6, 10, 20, 0.82);
+  border: 1px solid rgba(120, 190, 255, 0.14);
+  font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.88);
+}
+
+.mission-garage-activity__item--empty {
+  text-align: center;
+  font-style: italic;
+  color: rgba(209, 234, 255, 0.6);
+}
+
 @media (min-width: 520px) {
   .mission-details__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

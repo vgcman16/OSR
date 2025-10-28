@@ -8,6 +8,7 @@ import { getAvailableCrewStorylineMissions, applyCrewStorylineOutcome } from './
 import { getCrackdownOperationTemplates } from './crackdownOperations.js';
 import { getActiveStorageCapacityFromState, getActiveSafehouseFromState } from '../world/safehouse.js';
 import { getCrewPerkEffect } from './crewPerks.js';
+import { getVehicleModRecipe, assessVehicleModAffordability } from './vehicleModRecipes.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
   const numeric = Number(value);
@@ -549,6 +550,14 @@ const normalizeFunds = (value) => {
   return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 0;
 };
 
+const formatFunds = (value) => {
+  if (!Number.isFinite(value)) {
+    return '$0';
+  }
+
+  return `$${Math.round(value).toLocaleString()}`;
+};
+
 const computeVehicleBaseValue = (vehicle) => {
   if (!vehicle || typeof vehicle !== 'object') {
     return 0;
@@ -1075,10 +1084,70 @@ class MissionSystem {
       this.state.pendingDebts = [];
     }
 
+    if (!Number.isFinite(this.state.partsInventory)) {
+      this.state.partsInventory = 0;
+    } else {
+      this.state.partsInventory = Math.max(0, Math.round(this.state.partsInventory));
+    }
+
+    if (!Array.isArray(this.state.garageActivityLog)) {
+      this.state.garageActivityLog = [];
+    }
+
     this.refreshContractPoolFromCity();
     this.ensureCrewStorylineContracts();
     this.ensureCrackdownOperations(this.currentCrackdownTier);
     this.applyHeatRestrictions();
+  }
+
+  recordGarageActivity(entry = {}) {
+    const summary = typeof entry.summary === 'string' ? entry.summary.trim() : '';
+    if (!summary) {
+      return null;
+    }
+
+    const timestamp = Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now();
+    const details = Array.isArray(entry.details)
+      ? entry.details
+          .map((detail) => (typeof detail === 'string' ? detail.trim() : ''))
+          .filter(Boolean)
+      : [];
+    const type = typeof entry.type === 'string' && entry.type.trim()
+      ? entry.type.trim()
+      : 'garage';
+
+    if (!Array.isArray(this.state.garageActivityLog)) {
+      this.state.garageActivityLog = [];
+    }
+
+    const partsInventory = Number.isFinite(entry.partsInventory)
+      ? Math.max(0, Math.round(entry.partsInventory))
+      : Number.isFinite(this.state.partsInventory)
+        ? Math.max(0, Math.round(this.state.partsInventory))
+        : undefined;
+
+    const normalized = {
+      id: entry.id ?? `garage-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      summary,
+      details,
+      timestamp,
+    };
+
+    if (partsInventory !== undefined) {
+      normalized.partsInventory = partsInventory;
+    }
+
+    if (entry.metadata && typeof entry.metadata === 'object') {
+      normalized.metadata = { ...entry.metadata };
+    }
+
+    this.state.garageActivityLog.unshift(normalized);
+    if (this.state.garageActivityLog.length > 30) {
+      this.state.garageActivityLog.length = 30;
+    }
+
+    return normalized;
   }
 
   getMissionDistrict(source) {
@@ -3844,6 +3913,18 @@ class MissionSystem {
       timestamp: Date.now(),
     };
 
+    const logDetails = [];
+    if (cost > 0) {
+      logDetails.push(`Spent ${formatFunds(cost)}`);
+    }
+
+    this.recordGarageActivity({
+      type: 'upgrade-purchase',
+      summary: `Installed ${profile.label ?? profile.id} on ${vehicle.model ?? 'vehicle'} via purchase.`,
+      details: logDetails,
+      timestamp: this.state.lastVehicleReport.timestamp,
+    });
+
     return {
       success: true,
       vehicleId: vehicle.id,
@@ -3853,6 +3934,180 @@ class MissionSystem {
       cost,
       installedMods: refreshedMods,
       modBonuses,
+    };
+  }
+
+  craftVehicleMod(vehicleId, modId, economySystem, overrides = {}) {
+    if (!modId) {
+      return {
+        success: false,
+        reason: 'unknown-upgrade',
+        modId,
+        vehicleId,
+      };
+    }
+
+    const vehicle = this.getVehicleFromGarage(vehicleId);
+    if (!vehicle) {
+      return {
+        success: false,
+        reason: 'vehicle-not-found',
+        vehicleId,
+        modId,
+      };
+    }
+
+    const baseRecipe = getVehicleModRecipe(modId);
+    if (!baseRecipe) {
+      return {
+        success: false,
+        reason: 'unknown-upgrade',
+        vehicleId,
+        modId,
+      };
+    }
+
+    const recipe = {
+      ...baseRecipe,
+      partsCost: Number.isFinite(overrides?.partsCost)
+        ? Math.max(0, Math.round(overrides.partsCost))
+        : baseRecipe.partsCost,
+      fundsCost: Number.isFinite(overrides?.fundsCost)
+        ? Math.max(0, Math.round(overrides.fundsCost))
+        : baseRecipe.fundsCost,
+    };
+
+    const installedMods = typeof vehicle.getInstalledMods === 'function'
+      ? vehicle.getInstalledMods()
+      : Array.isArray(vehicle.installedMods)
+        ? vehicle.installedMods.slice()
+        : [];
+
+    if (installedMods.includes(recipe.modId)) {
+      return {
+        success: false,
+        reason: 'already-installed',
+        vehicleId,
+        modId: recipe.modId,
+      };
+    }
+
+    if (!Number.isFinite(this.state.partsInventory)) {
+      this.state.partsInventory = 0;
+    } else {
+      this.state.partsInventory = Math.max(0, Math.round(this.state.partsInventory));
+    }
+
+    if (!Number.isFinite(this.state.funds)) {
+      this.state.funds = 0;
+    }
+
+    const partsAvailable = this.state.partsInventory;
+    const fundsAvailable = this.state.funds;
+
+    const affordability = assessVehicleModAffordability(recipe, {
+      partsAvailable,
+      fundsAvailable,
+    });
+
+    if (!affordability.affordable) {
+      const reason = affordability.partsShortfall > 0 ? 'insufficient-parts' : 'insufficient-funds';
+      return {
+        success: false,
+        reason,
+        vehicleId,
+        modId: recipe.modId,
+        partsRequired: recipe.partsCost,
+        fundsRequired: recipe.fundsCost,
+        partsAvailable,
+        fundsAvailable,
+        partsShortfall: affordability.partsShortfall,
+        fundsShortfall: affordability.fundsShortfall,
+      };
+    }
+
+    if (recipe.fundsCost > 0) {
+      if (economySystem && typeof economySystem.adjustFunds === 'function') {
+        economySystem.adjustFunds(-recipe.fundsCost);
+      } else {
+        this.state.funds -= recipe.fundsCost;
+      }
+    }
+
+    if (recipe.partsCost > 0) {
+      this.state.partsInventory = Math.max(0, this.state.partsInventory - recipe.partsCost);
+    }
+
+    if (typeof vehicle.installMod === 'function') {
+      vehicle.installMod(recipe.modId, VEHICLE_UPGRADE_CATALOG);
+    } else {
+      const nextMods = new Set(installedMods);
+      nextMods.add(recipe.modId);
+      vehicle.installedMods = Array.from(nextMods);
+      if (typeof vehicle.refreshModBonuses === 'function') {
+        vehicle.refreshModBonuses(VEHICLE_UPGRADE_CATALOG);
+      }
+    }
+
+    const refreshedMods = typeof vehicle.getInstalledMods === 'function'
+      ? vehicle.getInstalledMods()
+      : Array.isArray(vehicle.installedMods)
+        ? vehicle.installedMods.slice()
+        : [];
+
+    const modBonuses = typeof vehicle.getModBonuses === 'function'
+      ? vehicle.getModBonuses(VEHICLE_UPGRADE_CATALOG)
+      : aggregateVehicleModBonuses(refreshedMods, VEHICLE_UPGRADE_CATALOG);
+
+    const modProfile = VEHICLE_UPGRADE_CATALOG?.[recipe.modId] ?? null;
+
+    const report = {
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      outcome: 'crafting',
+      upgradeId: recipe.modId,
+      upgradeLabel: modProfile?.label ?? recipe.modId,
+      cost: recipe.fundsCost,
+      partsSpent: recipe.partsCost,
+      fundsSpent: recipe.fundsCost,
+      partsRemaining: this.state.partsInventory,
+      installedMods: refreshedMods,
+      modBonuses,
+      timestamp: Date.now(),
+    };
+
+    this.state.lastVehicleReport = report;
+
+    const logDetails = [];
+    if (recipe.partsCost > 0) {
+      logDetails.push(`${recipe.partsCost} parts consumed`);
+    }
+    if (recipe.fundsCost > 0) {
+      logDetails.push(`Spent ${formatFunds(recipe.fundsCost)}`);
+    }
+    logDetails.push(`Parts remaining: ${this.state.partsInventory}`);
+
+    this.recordGarageActivity({
+      type: 'crafting',
+      summary: `Fabricated ${modProfile?.label ?? recipe.modId} for ${vehicle.model ?? 'vehicle'}.`,
+      details: logDetails,
+      timestamp: report.timestamp,
+      partsInventory: this.state.partsInventory,
+    });
+
+    return {
+      success: true,
+      vehicleId: vehicle.id,
+      vehicleModel: vehicle.model,
+      modId: recipe.modId,
+      upgradeLabel: modProfile?.label ?? recipe.modId,
+      cost: recipe.fundsCost,
+      partsSpent: recipe.partsCost,
+      fundsSpent: recipe.fundsCost,
+      partsRemaining: this.state.partsInventory,
+      installedMods: refreshedMods,
+      modBonuses,
+      report,
     };
   }
 
@@ -3944,6 +4199,15 @@ class MissionSystem {
       this.state.funds += creditedFunds;
     }
 
+    if (!Number.isFinite(this.state.partsInventory)) {
+      this.state.partsInventory = 0;
+    }
+
+    const appliedParts = normalizedParts !== null && normalizedParts > 0 ? normalizedParts : 0;
+    if (appliedParts > 0) {
+      this.state.partsInventory = Math.max(0, Math.round(this.state.partsInventory + appliedParts));
+    }
+
     const conditionBefore = Number.isFinite(vehicle.condition)
       ? clamp(vehicle.condition, 0, 1)
       : null;
@@ -3964,9 +4228,38 @@ class MissionSystem {
       heatAfter: null,
       heatDelta: null,
       timestamp: Date.now(),
+      partsRemaining: Number.isFinite(this.state.partsInventory)
+        ? this.state.partsInventory
+        : null,
     };
 
     this.state.lastVehicleReport = report;
+
+    const details = [];
+    if (appliedParts > 0) {
+      details.push(`${appliedParts} parts recovered (now ${this.state.partsInventory})`);
+    }
+    if (creditedFunds > 0) {
+      details.push(`Credited ${formatFunds(creditedFunds)}`);
+    }
+
+    const actionLabel = (() => {
+      if (outcome === 'sale') {
+        return 'Sold';
+      }
+      if (outcome === 'scrap') {
+        return 'Scrapped';
+      }
+      return 'Processed';
+    })();
+
+    this.recordGarageActivity({
+      type: outcome ?? 'disposition',
+      summary: `${actionLabel} ${vehicle.model ?? 'vehicle'}.`,
+      details,
+      timestamp: report.timestamp,
+      partsInventory: this.state.partsInventory,
+    });
     return report;
   }
 
