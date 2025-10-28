@@ -191,6 +191,13 @@ const missionControls = {
   lastGarageStatusTimestamp: 0,
 };
 
+const CITY_INTEL_CANVAS_ARIA_LABEL = 'City districts map — hover or use arrow keys to preview intel.';
+
+let cityIntelDistrictRects = [];
+let cityIntelLastRenderedDistricts = [];
+let cityIntelInteractionOverride = null;
+let cityIntelKeyboardIndex = -1;
+
 let missionControlSyncHandle = null;
 
 const CONTROL_SYNC_INTERVAL_MS = 500;
@@ -1306,6 +1313,83 @@ const createDistrictKeyFromMission = (mission) => {
   return null;
 };
 
+const getDistrictIndexByKey = (key) => {
+  if (!key) {
+    return -1;
+  }
+
+  return cityIntelDistrictRects.find((entry) => entry?.key === key)?.index ?? -1;
+};
+
+const getCityIntelInteractionOverrideMission = () => cityIntelInteractionOverride?.mission ?? null;
+
+const updateCityIntelCanvasAriaLabel = (districtName = null) => {
+  const canvas = missionControls.cityIntelCanvas;
+  if (!canvas) {
+    return;
+  }
+
+  if (districtName) {
+    canvas.setAttribute('aria-label', `${CITY_INTEL_CANVAS_ARIA_LABEL} Active district: ${districtName}.`);
+  } else {
+    canvas.setAttribute('aria-label', CITY_INTEL_CANVAS_ARIA_LABEL);
+  }
+};
+
+const createMissionPreviewFromDistrict = (district) => {
+  if (!district) {
+    return null;
+  }
+
+  const districtKey = createDistrictKeyFromDistrict(district);
+  if (!districtKey) {
+    return null;
+  }
+
+  const intelSnapshot = (() => {
+    if (typeof district.getIntelSnapshot === 'function') {
+      return district.getIntelSnapshot();
+    }
+
+    const influence = Number.isFinite(district?.influence) ? Math.round(district.influence) : null;
+    const intelLevel = Number.isFinite(district?.intelLevel) ? Math.round(district.intelLevel) : null;
+    const crackdownPressure = Number.isFinite(district?.crackdownPressure)
+      ? Math.round(district.crackdownPressure)
+      : null;
+
+    if (influence === null && intelLevel === null && crackdownPressure === null) {
+      return null;
+    }
+
+    return { influence, intelLevel, crackdownPressure };
+  })();
+
+  const pointOfInterest = (() => {
+    const list = Array.isArray(district?.pointsOfInterest) ? district.pointsOfInterest : [];
+    if (!list.length) {
+      return null;
+    }
+
+    const [primary] = list;
+    if (!primary || typeof primary !== 'object') {
+      return null;
+    }
+
+    const clone = { ...primary };
+    clone.modifiers = typeof clone.modifiers === 'object' && clone.modifiers !== null ? { ...clone.modifiers } : {};
+    return clone;
+  })();
+
+  return {
+    districtId: district.id ?? null,
+    districtName: district.name ?? null,
+    description: district.description ?? '',
+    riskTier: determineDistrictRiskTier(district.security),
+    pointOfInterest,
+    districtIntel: intelSnapshot,
+  };
+};
+
 const findDistrictForMission = (districts, mission) => {
   if (!Array.isArray(districts) || !mission) {
     return null;
@@ -1392,6 +1476,8 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
   context.strokeRect(0.5, 0.5, canvas.width - 1, canvas.height - 1);
 
   const districtList = Array.isArray(districts) ? districts : [];
+  cityIntelLastRenderedDistricts = districtList.slice();
+  cityIntelDistrictRects = [];
   if (!districtList.length) {
     context.fillStyle = '#9ac7ff';
     context.font = '14px "Segoe UI", sans-serif';
@@ -1399,6 +1485,8 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
     context.textBaseline = 'middle';
     context.fillText('City intel offline', canvas.width / 2, canvas.height / 2);
     context.restore();
+    cityIntelKeyboardIndex = -1;
+    updateCityIntelCanvasAriaLabel();
     return;
   }
 
@@ -1460,7 +1548,21 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
     context.fillText(district?.name ?? 'Unknown District', cellX + 8, labelY);
     context.fillStyle = detailColor;
     context.fillText(riskLabel, cellX + 8, labelY + 16);
+
+    cityIntelDistrictRects.push({
+      key: districtKey,
+      index,
+      district,
+      x: cellX,
+      y: cellY,
+      width: cellWidth,
+      height: cellHeight,
+    });
   });
+
+  if (cityIntelKeyboardIndex >= districtList.length) {
+    cityIntelKeyboardIndex = districtList.length ? districtList.length - 1 : -1;
+  }
 
   context.restore();
 };
@@ -1469,10 +1571,14 @@ const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission
   const city = missionSystem?.state?.city ?? null;
   const districts = Array.isArray(city?.districts) ? city.districts : [];
 
-  const mission = highlightedMission ?? activeMission ?? null;
+  const overrideMission = getCityIntelInteractionOverrideMission();
+  const mission = overrideMission ?? highlightedMission ?? activeMission ?? null;
   if (!mission) {
     resetCityIntelPanel();
     renderCityIntelMap({ districts, highlightedMission: null, activeMission });
+    if (!overrideMission) {
+      updateCityIntelCanvasAriaLabel();
+    }
     return;
   }
 
@@ -1529,6 +1635,274 @@ const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission
   });
 
   renderCityIntelMap({ districts, highlightedMission: mission, activeMission });
+
+  if (!overrideMission) {
+    updateCityIntelCanvasAriaLabel(districtName);
+  }
+};
+
+const refreshCityIntelPanelWithOverride = () => {
+  const missionSystem = getMissionSystem();
+  if (!missionSystem) {
+    resetCityIntelPanel();
+    cityIntelDistrictRects = [];
+    cityIntelLastRenderedDistricts = [];
+    cityIntelKeyboardIndex = -1;
+    updateCityIntelCanvasAriaLabel();
+    renderCityIntelMap({ districts: [], highlightedMission: null, activeMission: null });
+    return;
+  }
+
+  updateCityIntelPanel({
+    missionSystem,
+    highlightedMission: getCityIntelInteractionOverrideMission(),
+    activeMission: missionSystem.state?.activeMission ?? null,
+  });
+};
+
+const setCityIntelInteractionOverrideFromDistrict = (district, { reason = 'hover', index = null } = {}) => {
+  if (!district) {
+    return;
+  }
+
+  const districtKey = createDistrictKeyFromDistrict(district);
+  if (!districtKey) {
+    return;
+  }
+
+  const normalizedReason = reason || 'hover';
+  const previousKey = cityIntelInteractionOverride?.key ?? null;
+  const previousReason = cityIntelInteractionOverride?.reason ?? null;
+
+  if (previousKey === districtKey && previousReason === normalizedReason) {
+    if (normalizedReason === 'keyboard' && typeof index === 'number') {
+      cityIntelKeyboardIndex = index;
+    }
+    updateCityIntelCanvasAriaLabel(district?.name ?? null);
+    return;
+  }
+
+  const missionPreview = createMissionPreviewFromDistrict(district);
+  if (!missionPreview) {
+    return;
+  }
+
+  const resolvedIndex =
+    typeof index === 'number' && index >= 0 ? index : getDistrictIndexByKey(districtKey);
+
+  cityIntelInteractionOverride = {
+    mission: missionPreview,
+    key: districtKey,
+    reason: normalizedReason,
+    index: resolvedIndex,
+    districtName: district?.name ?? null,
+  };
+
+  if (normalizedReason === 'keyboard') {
+    cityIntelKeyboardIndex = resolvedIndex;
+  }
+
+  updateCityIntelCanvasAriaLabel(district?.name ?? null);
+  refreshCityIntelPanelWithOverride();
+};
+
+const clearCityIntelInteractionOverride = (reason = null) => {
+  if (!cityIntelInteractionOverride) {
+    if (!reason || reason === 'keyboard') {
+      cityIntelKeyboardIndex = reason === 'keyboard' ? -1 : cityIntelKeyboardIndex;
+      updateCityIntelCanvasAriaLabel();
+      refreshCityIntelPanelWithOverride();
+    }
+    return;
+  }
+
+  if (reason && cityIntelInteractionOverride.reason !== reason) {
+    return;
+  }
+
+  cityIntelInteractionOverride = null;
+
+  if (!reason || reason === 'keyboard') {
+    cityIntelKeyboardIndex = -1;
+  }
+
+  updateCityIntelCanvasAriaLabel();
+  refreshCityIntelPanelWithOverride();
+};
+
+const resolveCityIntelPointerTarget = (event) => {
+  const canvas = missionControls.cityIntelCanvas;
+  if (!canvas || !event) {
+    return null;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  if (!rect || rect.width === 0 || rect.height === 0) {
+    return null;
+  }
+
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const x = (event.clientX - rect.left) * scaleX;
+  const y = (event.clientY - rect.top) * scaleY;
+
+  return (
+    cityIntelDistrictRects.find(
+      (entry) =>
+        entry &&
+        typeof entry.x === 'number' &&
+        typeof entry.y === 'number' &&
+        typeof entry.width === 'number' &&
+        typeof entry.height === 'number' &&
+        x >= entry.x &&
+        x <= entry.x + entry.width &&
+        y >= entry.y &&
+        y <= entry.y + entry.height,
+    ) ?? null
+  );
+};
+
+const handleCityIntelCanvasPointerMove = (event) => {
+  const target = resolveCityIntelPointerTarget(event);
+  if (!target) {
+    if (cityIntelInteractionOverride?.reason === 'hover') {
+      clearCityIntelInteractionOverride('hover');
+    }
+    return;
+  }
+
+  setCityIntelInteractionOverrideFromDistrict(target.district, {
+    reason: 'hover',
+    index: target.index,
+  });
+};
+
+const handleCityIntelCanvasPointerDown = (event) => {
+  const canvas = missionControls.cityIntelCanvas;
+  if (canvas && document.activeElement !== canvas) {
+    canvas.focus({ preventScroll: true });
+  }
+
+  const target = resolveCityIntelPointerTarget(event);
+  if (target) {
+    setCityIntelInteractionOverrideFromDistrict(target.district, {
+      reason: 'hover',
+      index: target.index,
+    });
+  }
+};
+
+const handleCityIntelCanvasPointerLeave = () => {
+  if (cityIntelInteractionOverride?.reason === 'hover') {
+    clearCityIntelInteractionOverride('hover');
+    if (cityIntelKeyboardIndex >= 0) {
+      const fallback = cityIntelLastRenderedDistricts[cityIntelKeyboardIndex];
+      if (fallback) {
+        setCityIntelInteractionOverrideFromDistrict(fallback, {
+          reason: 'keyboard',
+          index: cityIntelKeyboardIndex,
+        });
+      }
+    }
+  }
+};
+
+const handleCityIntelCanvasFocus = () => {
+  const canvas = missionControls.cityIntelCanvas;
+  if (!canvas) {
+    return;
+  }
+
+  canvas.style.outline = '2px solid rgba(255, 214, 102, 0.85)';
+  canvas.style.outlineOffset = '2px';
+
+  if (cityIntelKeyboardIndex < 0) {
+    const currentKey = cityIntelInteractionOverride?.key ?? null;
+    let startIndex = currentKey ? getDistrictIndexByKey(currentKey) : -1;
+
+    if (startIndex < 0) {
+      const missionSystem = getMissionSystem();
+      const missionState = missionSystem?.state ?? {};
+      const activeMission = missionState.activeMission ?? null;
+      const selectValue = missionControls.select?.value ?? null;
+      const highlightedMission = (() => {
+        if (!missionSystem) {
+          return activeMission;
+        }
+        if (selectValue) {
+          return (
+            missionSystem.availableMissions?.find((mission) => mission.id === selectValue) ?? activeMission ?? null
+          );
+        }
+        return activeMission;
+      })();
+
+      startIndex = getDistrictIndexByKey(createDistrictKeyFromMission(highlightedMission));
+    }
+
+    if (startIndex >= 0) {
+      cityIntelKeyboardIndex = startIndex;
+    }
+  }
+};
+
+const handleCityIntelCanvasBlur = () => {
+  const canvas = missionControls.cityIntelCanvas;
+  if (canvas) {
+    canvas.style.outline = 'none';
+  }
+
+  if (cityIntelInteractionOverride?.reason === 'keyboard') {
+    clearCityIntelInteractionOverride('keyboard');
+  }
+};
+
+const handleCityIntelCanvasKeyDown = (event) => {
+  const { key } = event;
+  const totalDistricts = cityIntelLastRenderedDistricts.length;
+  if (!totalDistricts) {
+    return;
+  }
+
+  let nextIndex = cityIntelKeyboardIndex >= 0 ? cityIntelKeyboardIndex : getDistrictIndexByKey(cityIntelInteractionOverride?.key);
+  let handled = false;
+
+  if (key === 'ArrowDown' || key === 'ArrowRight') {
+    nextIndex = Math.min(totalDistricts - 1, (nextIndex ?? -1) + 1);
+    handled = true;
+  } else if (key === 'ArrowUp' || key === 'ArrowLeft') {
+    nextIndex = Math.max(0, (nextIndex ?? totalDistricts) - 1);
+    handled = true;
+  } else if (key === 'Home') {
+    nextIndex = 0;
+    handled = true;
+  } else if (key === 'End') {
+    nextIndex = totalDistricts - 1;
+    handled = true;
+  } else if (key === 'Escape') {
+    clearCityIntelInteractionOverride('keyboard');
+    handled = true;
+  }
+
+  if (!handled) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (key === 'Escape') {
+    return;
+  }
+
+  if (nextIndex < 0 || nextIndex >= totalDistricts) {
+    return;
+  }
+
+  const district = cityIntelLastRenderedDistricts[nextIndex];
+  if (district) {
+    setCityIntelInteractionOverrideFromDistrict(district, { reason: 'keyboard', index: nextIndex });
+  }
 };
 
 const formatMissionStatusMessage = (mission) => {
@@ -8091,6 +8465,16 @@ const setupMissionControls = () => {
   missionControls.cityIntelCanvas = document.getElementById('mission-city-intel-map');
   if (missionControls.cityIntelCanvas) {
     missionControls.cityIntelCanvasContext = missionControls.cityIntelCanvas.getContext('2d');
+    missionControls.cityIntelCanvas.tabIndex = 0;
+    missionControls.cityIntelCanvas.setAttribute('role', 'listbox');
+    missionControls.cityIntelCanvas.setAttribute('aria-label', CITY_INTEL_CANVAS_ARIA_LABEL);
+    missionControls.cityIntelCanvas.setAttribute('aria-describedby', 'mission-city-intel-district-name');
+    missionControls.cityIntelCanvas.addEventListener('pointermove', handleCityIntelCanvasPointerMove);
+    missionControls.cityIntelCanvas.addEventListener('pointerleave', handleCityIntelCanvasPointerLeave);
+    missionControls.cityIntelCanvas.addEventListener('pointerdown', handleCityIntelCanvasPointerDown);
+    missionControls.cityIntelCanvas.addEventListener('focus', handleCityIntelCanvasFocus);
+    missionControls.cityIntelCanvas.addEventListener('blur', handleCityIntelCanvasBlur);
+    missionControls.cityIntelCanvas.addEventListener('keydown', handleCityIntelCanvasKeyDown);
   }
   missionControls.eventPrompt = document.getElementById('mission-event-prompt');
   missionControls.eventChoices = document.getElementById('mission-event-choices');
