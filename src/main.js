@@ -3817,6 +3817,10 @@ const updateMaintenancePanel = () => {
       const modProfile = VEHICLE_UPGRADE_CATALOG?.[recipe.modId] ?? null;
       const label = recipe.label ?? modProfile?.label ?? recipe.modId;
       const summary = modProfile?.summary ?? modProfile?.description ?? 'Effect profile unavailable.';
+      const descriptionText = modProfile?.description && modProfile.description !== summary
+        ? modProfile.description
+        : null;
+      const availabilityNote = typeof recipe.availabilityNote === 'string' ? recipe.availabilityNote : '';
       const costSegments = [
         `${recipe.partsCost} parts`,
         ...(recipe.fundsCost > 0 ? [formatCurrency(recipe.fundsCost)] : []),
@@ -3846,6 +3850,14 @@ const updateMaintenancePanel = () => {
       description.className = 'mission-maintenance__crafting-summary';
       description.textContent = summary;
 
+      const detail = document.createElement('p');
+      detail.className = 'mission-maintenance__crafting-detail';
+      detail.textContent = descriptionText ?? '';
+
+      if (!descriptionText) {
+        detail.remove();
+      }
+
       const status = document.createElement('p');
       status.className = 'mission-maintenance__crafting-status';
 
@@ -3872,13 +3884,21 @@ const updateMaintenancePanel = () => {
         disabledReason = statusMessage;
         action.disabled = true;
       } else if (!affordability.affordable) {
-        const requirements = [`${recipe.partsCost} parts (have ${partsInventory})`];
-        if (recipe.fundsCost > 0) {
-          requirements.push(`${formatCurrency(recipe.fundsCost)} (have ${formatCurrency(funds)})`);
+        const shortfalls = [];
+        if (affordability.partsShortfall > 0) {
+          shortfalls.push(`${affordability.partsShortfall} more parts`);
         }
-        statusMessage = `Requires ${requirements.join(' + ')}.`;
+        if (affordability.fundsShortfall > 0) {
+          shortfalls.push(`another ${formatCurrency(affordability.fundsShortfall)}`);
+        }
+        if (shortfalls.length) {
+          statusMessage = `Need ${shortfalls.join(' and ')}.`;
+        } else {
+          statusMessage = 'Requirements not met yet.';
+        }
         disabledReason = statusMessage;
         action.disabled = true;
+        action.textContent = 'Insufficient resources';
       } else {
         statusMessage = 'Ready to fabricate and install.';
         action.disabled = false;
@@ -3895,6 +3915,15 @@ const updateMaintenancePanel = () => {
 
       item.appendChild(header);
       item.appendChild(description);
+      if (descriptionText) {
+        item.appendChild(detail);
+      }
+      if (availabilityNote) {
+        const note = document.createElement('p');
+        note.className = 'mission-maintenance__crafting-note';
+        note.textContent = availabilityNote;
+        item.appendChild(note);
+      }
       item.appendChild(status);
       item.appendChild(action);
       maintenanceCraftingList.appendChild(item);

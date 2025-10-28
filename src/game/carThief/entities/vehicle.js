@@ -95,6 +95,32 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       wearMitigation: 0.25,
     },
   },
+  'adaptive-suspension': {
+    id: 'adaptive-suspension',
+    label: 'Adaptive Suspension',
+    description:
+      'Sensor-linked dampers and torque vectoring bite into corners while easing frame fatigue.',
+    summary: '+0.9 handling, +0.6 acceleration, wear mitigation 0.35.',
+    cost: 5600,
+    effects: {
+      handlingBonus: 0.9,
+      accelerationBonus: 0.6,
+      wearMitigation: 0.35,
+    },
+  },
+  'thermal-cloak': {
+    id: 'thermal-cloak',
+    label: 'Thermal Cloak',
+    description:
+      'Phase-change body panels and baffled vents dump heat trails, fooling pursuit sensors.',
+    summary: '-0.5 base heat, 20% less heat gain, +0.015 success.',
+    cost: 5900,
+    effects: {
+      heatFlatAdjustment: -0.5,
+      heatGainMultiplier: 0.8,
+      successBonus: 0.015,
+    },
+  },
 });
 
 const aggregateVehicleModBonuses = (installedMods = [], catalog = VEHICLE_MOD_CATALOG) => {

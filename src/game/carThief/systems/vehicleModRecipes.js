@@ -25,6 +25,20 @@ const VEHICLE_MOD_RECIPES = Object.freeze({
     partsCost: 9,
     fundsCost: 900,
   },
+  'adaptive-suspension': {
+    id: 'adaptive-suspension',
+    modId: 'adaptive-suspension',
+    partsCost: 19,
+    fundsCost: 1650,
+    availabilityNote: 'Best suited for high-performance chassis that can exploit the cornering gains.',
+  },
+  'thermal-cloak': {
+    id: 'thermal-cloak',
+    modId: 'thermal-cloak',
+    partsCost: 21,
+    fundsCost: 1750,
+    availabilityNote: 'Plan around the extra fabrication time — crew downtime increases during installation.',
+  },
 });
 
 const cloneRecipe = (recipe) => {
@@ -34,12 +48,14 @@ const cloneRecipe = (recipe) => {
 
   const normalizedParts = Number.isFinite(recipe.partsCost) ? Math.max(0, Math.round(recipe.partsCost)) : 0;
   const normalizedFunds = Number.isFinite(recipe.fundsCost) ? Math.max(0, Math.round(recipe.fundsCost)) : 0;
+  const availabilityNote = typeof recipe.availabilityNote === 'string' ? recipe.availabilityNote.trim() : '';
 
   return {
     id: recipe.id ?? recipe.modId,
     modId: recipe.modId,
     partsCost: normalizedParts,
     fundsCost: normalizedFunds,
+    availabilityNote: availabilityNote || undefined,
   };
 };
 
