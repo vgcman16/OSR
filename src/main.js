@@ -108,6 +108,17 @@ const missionControls = {
   debtList: null,
   debtStatus: null,
   debtStatusDetail: '',
+  operationsSection: null,
+  operationsExpensesValue: null,
+  operationsExpensesStatus: null,
+  operationsPassiveIncomeValue: null,
+  operationsPassiveIncomeStatus: null,
+  operationsPayrollValue: null,
+  operationsPayrollStatus: null,
+  operationsStorageValue: null,
+  operationsStorageStatus: null,
+  operationsCrewFatigueValue: null,
+  operationsCrewFatigueStatus: null,
   trainingCrewSelect: null,
   trainingSpecialtySelect: null,
   trainingLoyaltyButton: null,
@@ -2615,6 +2626,365 @@ const updateDebtPanel = () => {
 
   const detailMessage = missionControls.debtStatusDetail?.trim();
   debtStatus.textContent = detailMessage || summaryMessage;
+};
+
+const setOperationsDashboardValue = (valueNode, statusNode, { text, riskLevel, statusText }) => {
+  if (valueNode) {
+    valueNode.textContent = text ?? '—';
+    valueNode.dataset.riskLevel = riskLevel ?? 'unknown';
+  }
+
+  if (statusNode) {
+    statusNode.textContent = statusText ?? '';
+  }
+};
+
+const resetOperationsDashboard = () => {
+  const {
+    operationsExpensesValue,
+    operationsExpensesStatus,
+    operationsPassiveIncomeValue,
+    operationsPassiveIncomeStatus,
+    operationsPayrollValue,
+    operationsPayrollStatus,
+    operationsStorageValue,
+    operationsStorageStatus,
+    operationsCrewFatigueValue,
+    operationsCrewFatigueStatus,
+  } = missionControls;
+
+  setOperationsDashboardValue(operationsExpensesValue, operationsExpensesStatus, {
+    text: '—',
+    riskLevel: 'unknown',
+    statusText: 'Expense telemetry syncing.',
+  });
+  setOperationsDashboardValue(operationsPassiveIncomeValue, operationsPassiveIncomeStatus, {
+    text: '—',
+    riskLevel: 'unknown',
+    statusText: 'Passive income telemetry syncing.',
+  });
+  setOperationsDashboardValue(operationsPayrollValue, operationsPayrollStatus, {
+    text: '—',
+    riskLevel: 'unknown',
+    statusText: 'Payroll telemetry syncing.',
+  });
+  setOperationsDashboardValue(operationsStorageValue, operationsStorageStatus, {
+    text: '—',
+    riskLevel: 'unknown',
+    statusText: 'Storage telemetry syncing.',
+  });
+  setOperationsDashboardValue(operationsCrewFatigueValue, operationsCrewFatigueStatus, {
+    text: '—',
+    riskLevel: 'unknown',
+    statusText: 'Fatigue telemetry syncing.',
+  });
+};
+
+const describeRelativeTime = (timestamp) => {
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  const now = Date.now();
+  const delta = Math.max(0, now - timestamp);
+  const minutes = Math.floor(delta / 60000);
+
+  if (minutes <= 0) {
+    return 'moments ago';
+  }
+
+  if (minutes === 1) {
+    return '1 minute ago';
+  }
+
+  if (minutes < 60) {
+    return `${minutes} minutes ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) {
+    return '1 hour ago';
+  }
+
+  if (hours < 48) {
+    return `${hours} hours ago`;
+  }
+
+  const days = Math.floor(hours / 24);
+  return days === 1 ? '1 day ago' : `${days} days ago`;
+};
+
+const updateOperationsDashboard = () => {
+  const {
+    operationsExpensesValue,
+    operationsExpensesStatus,
+    operationsPassiveIncomeValue,
+    operationsPassiveIncomeStatus,
+    operationsPayrollValue,
+    operationsPayrollStatus,
+    operationsStorageValue,
+    operationsStorageStatus,
+    operationsCrewFatigueValue,
+    operationsCrewFatigueStatus,
+  } = missionControls;
+
+  const elementsReady = [
+    operationsExpensesValue,
+    operationsExpensesStatus,
+    operationsPassiveIncomeValue,
+    operationsPassiveIncomeStatus,
+    operationsPayrollValue,
+    operationsPayrollStatus,
+    operationsStorageValue,
+    operationsStorageStatus,
+    operationsCrewFatigueValue,
+    operationsCrewFatigueStatus,
+  ].every(Boolean);
+
+  if (!elementsReady) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+
+  if (!missionSystem || !economySystem) {
+    resetOperationsDashboard();
+    return;
+  }
+
+  const state = missionSystem.state ?? getSharedState();
+  const funds = Number.isFinite(state?.funds) ? Math.max(0, state.funds) : 0;
+
+  const projectedExpensesRaw = economySystem.getProjectedDailyExpenses();
+  const payrollRaw = economySystem.getCrewPayroll();
+  const passiveIncomeRaw =
+    typeof economySystem.getSafehousePassiveIncome === 'function'
+      ? economySystem.getSafehousePassiveIncome()
+      : 0;
+
+  if (typeof economySystem.recoverCrewFatigue === 'function') {
+    economySystem.recoverCrewFatigue(0);
+  }
+
+  const formatPerDay = (value, { signed = false } = {}) => {
+    if (!Number.isFinite(value)) {
+      return '—';
+    }
+
+    const absoluteLabel = formatCurrency(Math.abs(value));
+    const prefix = signed ? (value >= 0 ? '+' : '-') : '';
+    return `${prefix}${absoluteLabel}/day`;
+  };
+
+  const projectedExpenses = Number.isFinite(projectedExpensesRaw)
+    ? Math.max(0, Math.round(projectedExpensesRaw))
+    : null;
+  const payroll = Number.isFinite(payrollRaw) ? Math.max(0, Math.round(payrollRaw)) : null;
+  const passiveIncome = Number.isFinite(passiveIncomeRaw) ? Math.round(passiveIncomeRaw) : null;
+
+  const expenseLabel = projectedExpenses !== null ? formatPerDay(projectedExpenses) : '—';
+  let expenseRisk = 'unknown';
+  let expenseStatus = 'Expense telemetry unavailable.';
+  if (projectedExpenses !== null) {
+    if (funds <= 0 && projectedExpenses > 0) {
+      expenseRisk = 'high';
+      expenseStatus = 'No reserves available to cover daily expenses.';
+    } else if (projectedExpenses === 0) {
+      expenseRisk = 'low';
+      expenseStatus = 'Daily overhead neutralized for now.';
+    } else {
+      const ratio = funds > 0 ? projectedExpenses / funds : Infinity;
+      if (ratio >= 0.8) {
+        expenseRisk = 'high';
+        expenseStatus = 'Daily burn will drain reserves rapidly — schedule payouts carefully.';
+      } else if (ratio >= 0.45) {
+        expenseRisk = 'medium';
+        expenseStatus = 'Monitor cash flow — reserves are tightening.';
+      } else {
+        expenseRisk = 'low';
+        expenseStatus = 'Daily burn sustainable with current reserves.';
+      }
+    }
+  }
+
+  setOperationsDashboardValue(operationsExpensesValue, operationsExpensesStatus, {
+    text: expenseLabel,
+    riskLevel: expenseRisk,
+    statusText: expenseStatus,
+  });
+
+  const passiveLabel = formatPerDay(passiveIncome ?? NaN, { signed: true });
+  let passiveRisk = 'unknown';
+  let passiveStatus = 'Passive income telemetry unavailable.';
+  if (Number.isFinite(passiveIncomeRaw)) {
+    if ((passiveIncome ?? 0) > 0) {
+      passiveRisk = 'positive';
+      passiveStatus = 'Safehouse assets are covering part of the daily burn.';
+    } else if (passiveIncome === 0) {
+      passiveRisk = 'medium';
+      passiveStatus = 'No passive income online — invest in amenities to offset expenses.';
+    } else {
+      passiveRisk = 'high';
+      passiveStatus = 'Passive income deficit — amenities are draining reserves.';
+    }
+  }
+
+  setOperationsDashboardValue(operationsPassiveIncomeValue, operationsPassiveIncomeStatus, {
+    text: passiveLabel,
+    riskLevel: passiveRisk,
+    statusText: passiveStatus,
+  });
+
+  const payrollLabel = payroll !== null ? formatPerDay(payroll) : '—';
+  let payrollRisk = 'unknown';
+  let payrollStatus = 'Payroll telemetry unavailable.';
+  if (payroll !== null) {
+    if (payroll === 0) {
+      payrollRisk = 'low';
+      payrollStatus = 'No active payroll commitments.';
+    } else {
+      const ratio = funds > 0 ? payroll / funds : Infinity;
+      if (ratio >= 0.6) {
+        payrollRisk = 'high';
+        payrollStatus = 'Crew payroll will strain reserves — consider new contracts or downsizing.';
+      } else if (ratio >= 0.35) {
+        payrollRisk = 'medium';
+        payrollStatus = 'Payroll is manageable but should be monitored.';
+      } else {
+        payrollRisk = 'low';
+        payrollStatus = 'Payroll covered comfortably by reserves.';
+      }
+    }
+  }
+
+  setOperationsDashboardValue(operationsPayrollValue, operationsPayrollStatus, {
+    text: payrollLabel,
+    riskLevel: payrollRisk,
+    statusText: payrollStatus,
+  });
+
+  const garage = Array.isArray(state?.garage) ? state.garage : [];
+  const resolvedCapacity = (() => {
+    if (typeof economySystem.getActiveStorageCapacity === 'function') {
+      const capacity = economySystem.getActiveStorageCapacity();
+      if (Number.isFinite(capacity) && capacity >= 0) {
+        return capacity;
+      }
+    }
+
+    const fallback = getActiveStorageCapacityFromState(state);
+    if (Number.isFinite(fallback) && fallback >= 0) {
+      return fallback;
+    }
+
+    return null;
+  })();
+
+  let storageRisk = 'unknown';
+  let storageStatus = 'Storage telemetry unavailable.';
+  let storageLabel = `${garage.length} vehicles`;
+
+  if (Number.isFinite(resolvedCapacity) && resolvedCapacity >= 0) {
+    const garageSize = garage.length;
+    const usageRatio = resolvedCapacity > 0 ? garageSize / resolvedCapacity : Infinity;
+    if (resolvedCapacity === 0) {
+      storageLabel = `${garageSize} stored / 0 capacity`;
+      storageRisk = garageSize > 0 ? 'high' : 'medium';
+      storageStatus = garageSize > 0
+        ? 'No garage capacity available — liquidate vehicles immediately.'
+        : 'Garage not yet expanded — secure upgrades to store vehicles.';
+    } else {
+      storageLabel = `${garageSize}/${resolvedCapacity} slots`;
+      if (usageRatio >= 1) {
+        storageRisk = 'high';
+        storageStatus = 'Garage full — sell or scrap vehicles before accepting new assets.';
+      } else if (usageRatio >= 0.75) {
+        storageRisk = 'medium';
+        const slotsFree = Math.max(0, resolvedCapacity - garageSize);
+        storageStatus = `${slotsFree === 1 ? '1 slot' : `${slotsFree} slots`} remaining — plan a sale soon.`;
+      } else {
+        storageRisk = 'low';
+        const slotsFree = Math.max(0, resolvedCapacity - garageSize);
+        storageStatus = `${slotsFree === 1 ? '1 slot' : `${slotsFree} slots`} ready for new acquisitions.`;
+      }
+    }
+  } else {
+    storageRisk = 'medium';
+    storageStatus = `Garage telemetry offline — tracking ${garage.length} vehicles manually.`;
+  }
+
+  setOperationsDashboardValue(operationsStorageValue, operationsStorageStatus, {
+    text: storageLabel,
+    riskLevel: storageRisk,
+    statusText: storageStatus,
+  });
+
+  const crew = Array.isArray(state?.crew)
+    ? state.crew
+    : Array.isArray(economySystem?.state?.crew)
+      ? economySystem.state.crew
+      : [];
+  const readinessSummaries = crew.map((member) => summarizeCrewReadiness(member));
+  const fatigueValues = readinessSummaries
+    .map((summary) => (Number.isFinite(summary.fatiguePercent) ? summary.fatiguePercent : null))
+    .filter((value) => value !== null);
+
+  const crewCount = crew.length;
+  const averageFatigue =
+    fatigueValues.length > 0
+      ? Math.round(fatigueValues.reduce((total, value) => total + value, 0) / fatigueValues.length)
+      : null;
+  const highestFatigue = fatigueValues.length > 0 ? Math.max(...fatigueValues) : null;
+  const tiredThreshold = Number.isFinite(CREW_FATIGUE_CONFIG?.tiredThreshold)
+    ? CREW_FATIGUE_CONFIG.tiredThreshold
+    : 45;
+  const exhaustionThreshold = Number.isFinite(CREW_FATIGUE_CONFIG?.exhaustionThreshold)
+    ? CREW_FATIGUE_CONFIG.exhaustionThreshold
+    : 80;
+
+  let fatigueRisk = 'unknown';
+  let fatigueStatus = 'Fatigue telemetry unavailable.';
+  let fatigueLabel = crewCount === 0 ? 'No crew' : '—';
+
+  if (crewCount > 0) {
+    if (averageFatigue === null || highestFatigue === null) {
+      fatigueRisk = 'unknown';
+      fatigueLabel = `${crewCount} crew`;
+      fatigueStatus = 'Crew fatigue data unavailable.';
+    } else {
+      fatigueLabel = `${averageFatigue}% avg • ${highestFatigue}% peak`;
+      if (highestFatigue >= exhaustionThreshold) {
+        fatigueRisk = 'high';
+        fatigueStatus = 'Crew exhaustion imminent — rotate squads or assign rest orders.';
+      } else if (highestFatigue >= tiredThreshold) {
+        fatigueRisk = 'medium';
+        fatigueStatus = 'Crew showing fatigue — stagger missions to recover.';
+      } else {
+        fatigueRisk = 'low';
+        fatigueStatus = 'Crew rested and ready for operations.';
+      }
+    }
+  } else {
+    fatigueRisk = 'medium';
+    fatigueStatus = 'Recruit crew to run missions.';
+  }
+
+  const lastRecoveryTimestamp = Number.isFinite(economySystem?.state?.lastCrewRecoveryTimestamp)
+    ? economySystem.state.lastCrewRecoveryTimestamp
+    : Number.isFinite(state?.lastCrewRecoveryTimestamp)
+      ? state.lastCrewRecoveryTimestamp
+      : null;
+  const lastRecoveryLabel = describeRelativeTime(lastRecoveryTimestamp);
+  if (lastRecoveryLabel) {
+    fatigueStatus = `${fatigueStatus} Last recovery pulse ${lastRecoveryLabel}.`;
+  }
+
+  setOperationsDashboardValue(operationsCrewFatigueValue, operationsCrewFatigueStatus, {
+    text: fatigueLabel,
+    riskLevel: fatigueRisk,
+    statusText: fatigueStatus,
+  });
 };
 
 const updateHeatManagementPanel = () => {
@@ -5542,6 +5912,16 @@ const updateMissionControls = () => {
     eventStatus,
     debtList,
     debtStatus,
+    operationsExpensesValue,
+    operationsExpensesStatus,
+    operationsPassiveIncomeValue,
+    operationsPassiveIncomeStatus,
+    operationsPayrollValue,
+    operationsPayrollStatus,
+    operationsStorageValue,
+    operationsStorageStatus,
+    operationsCrewFatigueValue,
+    operationsCrewFatigueStatus,
     crewList,
     vehicleList,
     crackdownText,
@@ -5607,6 +5987,16 @@ const updateMissionControls = () => {
     eventStatus,
     debtList,
     debtStatus,
+    operationsExpensesValue,
+    operationsExpensesStatus,
+    operationsPassiveIncomeValue,
+    operationsPassiveIncomeStatus,
+    operationsPayrollValue,
+    operationsPayrollStatus,
+    operationsStorageValue,
+    operationsStorageStatus,
+    operationsCrewFatigueValue,
+    operationsCrewFatigueStatus,
     crewList,
     vehicleList,
     crackdownText,
@@ -5657,6 +6047,7 @@ const updateMissionControls = () => {
   updatePlayerDevelopmentPanel();
   updateMaintenancePanel();
   updateDebtPanel();
+  updateOperationsDashboard();
 
   const isReady = Boolean(missionSystem && economySystem);
   controls.forEach((control) => {
@@ -6359,6 +6750,17 @@ const setupMissionControls = () => {
   missionControls.cityIntelPoiName = document.getElementById('mission-city-intel-poi-name');
   missionControls.cityIntelPoiDescription = document.getElementById('mission-city-intel-poi-description');
   missionControls.cityIntelPoiPerks = document.getElementById('mission-city-intel-poi-perks');
+  missionControls.operationsSection = document.querySelector('.mission-operations');
+  missionControls.operationsExpensesValue = document.getElementById('mission-ops-expenses');
+  missionControls.operationsExpensesStatus = document.getElementById('mission-ops-expenses-status');
+  missionControls.operationsPassiveIncomeValue = document.getElementById('mission-ops-passive-income');
+  missionControls.operationsPassiveIncomeStatus = document.getElementById('mission-ops-passive-income-status');
+  missionControls.operationsPayrollValue = document.getElementById('mission-ops-payroll');
+  missionControls.operationsPayrollStatus = document.getElementById('mission-ops-payroll-status');
+  missionControls.operationsStorageValue = document.getElementById('mission-ops-storage');
+  missionControls.operationsStorageStatus = document.getElementById('mission-ops-storage-status');
+  missionControls.operationsCrewFatigueValue = document.getElementById('mission-ops-fatigue');
+  missionControls.operationsCrewFatigueStatus = document.getElementById('mission-ops-fatigue-status');
   missionControls.cityIntelCanvas = document.getElementById('mission-city-intel-map');
   if (missionControls.cityIntelCanvas) {
     missionControls.cityIntelCanvasContext = missionControls.cityIntelCanvas.getContext('2d');

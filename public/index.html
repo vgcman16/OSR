@@ -90,6 +90,129 @@
             </div>
           </dl>
         </section>
+        <section
+          class="mission-operations"
+          aria-labelledby="mission-operations-title"
+          aria-describedby="mission-operations-legend"
+        >
+          <h3 id="mission-operations-title" class="mission-details__title">
+            Operations Dashboard
+          </h3>
+          <p id="mission-operations-legend" class="visually-hidden">
+            Green values indicate stable operations, yellow signals tightening margins, and red demands
+            immediate attention. Status messages summarize why each value is highlighted.
+          </p>
+          <p class="mission-details__hint">
+            Monitor cash flow, storage pressure, and crew stamina to prevent mission failures.
+          </p>
+          <dl class="mission-details__grid mission-operations__grid">
+            <div class="mission-details__row mission-operations__row">
+              <dt>Projected Daily Expenses</dt>
+              <dd>
+                <span
+                  id="mission-ops-expenses"
+                  class="mission-operations__value"
+                  data-risk-level="unknown"
+                  aria-describedby="mission-operations-legend mission-ops-expenses-status"
+                >
+                  —
+                </span>
+                <span
+                  id="mission-ops-expenses-status"
+                  class="mission-operations__status visually-hidden"
+                  role="status"
+                  aria-live="polite"
+                >
+                  Expense telemetry syncing.
+                </span>
+              </dd>
+            </div>
+            <div class="mission-details__row mission-operations__row">
+              <dt>Passive Income</dt>
+              <dd>
+                <span
+                  id="mission-ops-passive-income"
+                  class="mission-operations__value"
+                  data-risk-level="unknown"
+                  aria-describedby="mission-operations-legend mission-ops-passive-income-status"
+                >
+                  —
+                </span>
+                <span
+                  id="mission-ops-passive-income-status"
+                  class="mission-operations__status visually-hidden"
+                  role="status"
+                  aria-live="polite"
+                >
+                  Passive income telemetry syncing.
+                </span>
+              </dd>
+            </div>
+            <div class="mission-details__row mission-operations__row">
+              <dt>Outstanding Payroll</dt>
+              <dd>
+                <span
+                  id="mission-ops-payroll"
+                  class="mission-operations__value"
+                  data-risk-level="unknown"
+                  aria-describedby="mission-operations-legend mission-ops-payroll-status"
+                >
+                  —
+                </span>
+                <span
+                  id="mission-ops-payroll-status"
+                  class="mission-operations__status visually-hidden"
+                  role="status"
+                  aria-live="polite"
+                >
+                  Payroll telemetry syncing.
+                </span>
+              </dd>
+            </div>
+            <div class="mission-details__row mission-operations__row">
+              <dt>Storage Usage</dt>
+              <dd>
+                <span
+                  id="mission-ops-storage"
+                  class="mission-operations__value"
+                  data-risk-level="unknown"
+                  aria-describedby="mission-operations-legend mission-ops-storage-status"
+                >
+                  —
+                </span>
+                <span
+                  id="mission-ops-storage-status"
+                  class="mission-operations__status visually-hidden"
+                  role="status"
+                  aria-live="polite"
+                >
+                  Storage telemetry syncing.
+                </span>
+              </dd>
+            </div>
+            <div class="mission-details__row mission-operations__row">
+              <dt>Crew Fatigue</dt>
+              <dd>
+                <span
+                  id="mission-ops-fatigue"
+                  class="mission-operations__value"
+                  data-risk-level="unknown"
+                  aria-describedby="mission-operations-legend mission-ops-fatigue-status"
+                >
+                  —
+                </span>
+                <span
+                  id="mission-ops-fatigue-status"
+                  class="mission-operations__status visually-hidden"
+                  role="status"
+                  aria-live="polite"
+                >
+                  Fatigue telemetry syncing.
+                </span>
+              </dd>
+            </div>
+          </dl>
+        </section>
         <section class="mission-city-intel" aria-labelledby="mission-city-intel-title">
           <h3 id="mission-city-intel-title" class="mission-details__title">City Intel</h3>
           <p class="mission-details__hint">
