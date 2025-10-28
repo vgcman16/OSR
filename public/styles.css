@@ -76,6 +76,27 @@ body {
   border: 1px solid rgba(120, 190, 255, 0.2);
 }
 
+.mission-audio {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: -0.25rem;
+}
+
+.mission-audio__toggle {
+  font-size: 0.85rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  min-width: 0;
+}
+
+.mission-audio__toggle[data-muted='true'] {
+  border-color: rgba(255, 120, 120, 0.45);
+  color: rgba(255, 196, 196, 0.95);
+  box-shadow: 0 0 18px rgba(255, 120, 120, 0.15);
+}
+
 .control-panel h2 {
   font-size: 1.3rem;
   letter-spacing: 0.04em;
