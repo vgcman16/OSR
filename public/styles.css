@@ -76,6 +76,18 @@ body {
   border: 1px solid rgba(120, 190, 255, 0.2);
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .mission-audio {
   display: flex;
   justify-content: flex-end;
@@ -192,6 +204,62 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+
+.mission-operations {
+  padding: 1rem;
+  border-radius: 14px;
+  background: rgba(8, 12, 26, 0.85);
+  border: 1px solid rgba(140, 200, 255, 0.25);
+  box-shadow: inset 0 0 18px rgba(120, 190, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mission-operations__grid {
+  margin-top: -0.25rem;
+}
+
+.mission-operations__row {
+  border-color: rgba(120, 190, 255, 0.2);
+  background: rgba(5, 10, 24, 0.7);
+}
+
+.mission-operations__value {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+
+.mission-operations__value[data-risk-level='low'] {
+  color: #82f7a3;
+  text-shadow: 0 0 12px rgba(130, 247, 163, 0.25);
+}
+
+.mission-operations__value[data-risk-level='medium'] {
+  color: #f2d98d;
+  text-shadow: 0 0 12px rgba(242, 217, 141, 0.2);
+}
+
+.mission-operations__value[data-risk-level='high'] {
+  color: #ff9c9c;
+  text-shadow: 0 0 16px rgba(255, 80, 80, 0.35);
+}
+
+.mission-operations__value[data-risk-level='positive'] {
+  color: #7ecbff;
+  text-shadow: 0 0 12px rgba(126, 203, 255, 0.3);
+}
+
+.mission-operations__value[data-risk-level='unknown'] {
+  color: rgba(209, 234, 255, 0.85);
+}
+
+.mission-operations__status {
+  font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.85);
 }
 
 .mission-details__row dt {
