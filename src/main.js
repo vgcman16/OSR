@@ -65,6 +65,9 @@ const missionControls = {
   eventHistory: null,
   eventStatus: null,
   eventStatusDetail: '',
+  debtList: null,
+  debtStatus: null,
+  debtStatusDetail: '',
   trainingCrewSelect: null,
   trainingSpecialtySelect: null,
   trainingLoyaltyButton: null,
@@ -1230,6 +1233,61 @@ const formatCurrency = (value) => {
   return `$${Math.round(value).toLocaleString()}`;
 };
 
+const getDebtPrincipal = (debt) => {
+  if (!debt || typeof debt !== 'object') {
+    return 0;
+  }
+
+  const amount = Number(debt.amount);
+  if (Number.isFinite(amount) && amount > 0) {
+    return Math.round(amount);
+  }
+
+  const remaining = Number(debt.remaining);
+  if (Number.isFinite(remaining) && remaining > 0) {
+    return Math.round(remaining);
+  }
+
+  return 0;
+};
+
+const getDebtOutstanding = (debt) => {
+  if (!debt || typeof debt !== 'object') {
+    return 0;
+  }
+
+  const remaining = Number(debt.remaining);
+  if (Number.isFinite(remaining) && remaining > 0) {
+    return Math.round(remaining);
+  }
+
+  return getDebtPrincipal(debt);
+};
+
+const formatDebtSource = (debt) => {
+  if (!debt || typeof debt !== 'object') {
+    return 'outstanding debt';
+  }
+
+  const parts = [];
+
+  const eventLabel = typeof debt.sourceEventLabel === 'string' ? debt.sourceEventLabel.trim() : '';
+  if (eventLabel) {
+    parts.push(eventLabel);
+  }
+
+  const choiceLabel = typeof debt.sourceChoiceLabel === 'string' ? debt.sourceChoiceLabel.trim() : '';
+  if (choiceLabel && choiceLabel !== eventLabel) {
+    parts.push(choiceLabel);
+  }
+
+  if (parts.length) {
+    return parts.join(' — ');
+  }
+
+  return 'outstanding debt';
+};
+
 const formatSeconds = (value) => {
   if (!Number.isFinite(value)) {
     return '—';
@@ -2014,6 +2072,258 @@ const renderHeatMitigationHistory = (historyEntries) => {
 
     list.appendChild(item);
   });
+};
+
+const handleDebtPayment = (debtId, requestedPayment = null) => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+
+  if (!missionSystem || !economySystem || !state) {
+    missionControls.debtStatusDetail = 'Economy systems offline — unable to settle debts.';
+    updateMissionControls();
+    return;
+  }
+
+  const pendingDebts = Array.isArray(state.pendingDebts) ? state.pendingDebts.slice() : [];
+  const debtIndex = pendingDebts.findIndex((entry) => entry?.id === debtId);
+  if (debtIndex === -1) {
+    missionControls.debtStatusDetail = 'Debt record not found — refresh the ledger.';
+    updateMissionControls();
+    return;
+  }
+
+  const debt = pendingDebts[debtIndex];
+  const outstanding = getDebtOutstanding(debt);
+  if (outstanding <= 0) {
+    missionControls.debtStatusDetail = `${formatDebtSource(debt)} already settled.`;
+    updateMissionControls();
+    return;
+  }
+
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  const availableFunds = Math.max(0, Math.round(funds));
+  let payment = Number.isFinite(requestedPayment) ? Math.round(requestedPayment) : outstanding;
+  payment = Math.min(payment, outstanding);
+  payment = Math.min(payment, availableFunds);
+
+  if (payment <= 0) {
+    const required = formatCurrency(outstanding);
+    const available = formatCurrency(availableFunds);
+    missionControls.debtStatusDetail = `Insufficient funds — requires ${required}, available ${available}.`;
+    updateMissionControls();
+    return;
+  }
+
+  economySystem.adjustFunds(-payment);
+
+  const remaining = Math.max(0, outstanding - payment);
+  const updatedEntry = { ...debt, remaining };
+  if (remaining <= 0) {
+    updatedEntry.remaining = 0;
+    updatedEntry.settledAt = Date.now();
+  } else {
+    updatedEntry.updatedAt = Date.now();
+  }
+
+  if (remaining <= 0) {
+    pendingDebts.splice(debtIndex, 1);
+  } else {
+    pendingDebts[debtIndex] = updatedEntry;
+  }
+
+  missionSystem.state.pendingDebts = pendingDebts;
+  if (state !== missionSystem.state) {
+    state.pendingDebts = pendingDebts;
+  }
+
+  if (missionSystem.state) {
+    missionSystem.state.needsHudRefresh = true;
+  }
+
+  const sourceLabel = formatDebtSource(debt);
+  const messageSegments = [`Paid ${formatCurrency(payment)} toward ${sourceLabel}.`];
+  if (remaining > 0) {
+    messageSegments.push(`Remaining balance ${formatCurrency(remaining)}.`);
+  } else {
+    messageSegments.push('Debt settled.');
+  }
+
+  missionControls.debtStatusDetail = messageSegments.join(' ');
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleDebtListClick = (event) => {
+  const button = event.target.closest('button[data-debt-id]');
+  if (!button) {
+    return;
+  }
+
+  event.preventDefault();
+
+  const debtId = button.dataset.debtId;
+  if (!debtId) {
+    missionControls.debtStatusDetail = 'Debt record not found — refresh the ledger.';
+    updateMissionControls();
+    return;
+  }
+
+  const requestedAmount = Number(button.dataset.paymentAmount);
+  const paymentAmount = Number.isFinite(requestedAmount) ? requestedAmount : null;
+  handleDebtPayment(debtId, paymentAmount);
+};
+
+const updateDebtPanel = () => {
+  const { debtList, debtStatus } = missionControls;
+  if (!debtList || !debtStatus) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+
+  debtList.innerHTML = '';
+
+  if (!missionSystem || !state) {
+    const placeholder = document.createElement('li');
+    placeholder.className = 'mission-debt__item mission-debt__item--empty';
+    placeholder.textContent = 'Debt ledger syncing…';
+    debtList.appendChild(placeholder);
+
+    const detail = missionControls.debtStatusDetail?.trim();
+    debtStatus.textContent = detail || 'Debt ledger syncing…';
+    return;
+  }
+
+  const pendingDebts = Array.isArray(state.pendingDebts) ? state.pendingDebts : [];
+  const ledgerEntries = pendingDebts
+    .map((debt) => ({
+      debt,
+      outstanding: getDebtOutstanding(debt),
+      principal: getDebtPrincipal(debt),
+    }))
+    .filter((entry) => entry.outstanding > 0)
+    .sort((a, b) => {
+      const aTime = Number.isFinite(a.debt?.createdAt) ? a.debt.createdAt : 0;
+      const bTime = Number.isFinite(b.debt?.createdAt) ? b.debt.createdAt : 0;
+      return aTime - bTime;
+    });
+
+  if (!ledgerEntries.length) {
+    const placeholder = document.createElement('li');
+    placeholder.className = 'mission-debt__item mission-debt__item--empty';
+    placeholder.textContent = 'No outstanding debts.';
+    debtList.appendChild(placeholder);
+  } else {
+    const funds = Number.isFinite(state.funds) ? state.funds : 0;
+    const availableFunds = Math.max(0, Math.round(funds));
+
+    ledgerEntries.forEach(({ debt, outstanding, principal }) => {
+      const item = document.createElement('li');
+      item.className = 'mission-debt__item';
+
+      const header = document.createElement('div');
+      header.className = 'mission-debt__row';
+
+      const label = document.createElement('span');
+      label.className = 'mission-debt__label';
+      label.textContent = formatDebtSource(debt);
+      header.appendChild(label);
+
+      const amount = document.createElement('span');
+      amount.className = 'mission-debt__amount';
+      amount.textContent = formatCurrency(outstanding);
+      header.appendChild(amount);
+
+      item.appendChild(header);
+
+      const metaSegments = [];
+      if (principal > 0 && principal !== outstanding) {
+        metaSegments.push(`Original ${formatCurrency(principal)}`);
+      }
+      const timestampValue = Number.isFinite(debt?.createdAt) ? debt.createdAt : null;
+      if (timestampValue) {
+        try {
+          const timeLabel = new Date(timestampValue).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          });
+          metaSegments.push(`Logged @ ${timeLabel}`);
+        } catch (error) {
+          // Ignore date formatting issues
+        }
+      }
+
+      if (metaSegments.length) {
+        const meta = document.createElement('div');
+        meta.className = 'mission-debt__meta';
+        meta.textContent = metaSegments.join(' • ');
+        item.appendChild(meta);
+      }
+
+      if (typeof debt?.notes === 'string' && debt.notes.trim()) {
+        const notes = document.createElement('div');
+        notes.className = 'mission-debt__notes';
+        notes.textContent = debt.notes.trim();
+        item.appendChild(notes);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'mission-debt__actions';
+
+      const paymentAmount = Math.min(outstanding, availableFunds);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mission-debt__pay-btn';
+      button.dataset.debtId = debt?.id ?? '';
+      button.dataset.paymentAmount = String(Math.max(0, paymentAmount));
+
+      const hasEconomy = Boolean(economySystem);
+      const canPay = hasEconomy && paymentAmount > 0;
+
+      if (paymentAmount > 0) {
+        const partial = paymentAmount < outstanding;
+        button.textContent = partial
+          ? `Pay ${formatCurrency(paymentAmount)} (partial)`
+          : `Pay ${formatCurrency(paymentAmount)}`;
+        button.title = partial
+          ? `Apply ${formatCurrency(paymentAmount)} — ${formatCurrency(outstanding - paymentAmount)} remains.`
+          : 'Settle this debt in full.';
+      } else {
+        button.textContent = 'Pay Debt';
+        button.title = hasEconomy
+          ? 'Insufficient funds to make a payment.'
+          : 'Economy systems offline.';
+      }
+
+      button.disabled = !canPay;
+      if (!hasEconomy) {
+        button.title = 'Economy systems offline.';
+      }
+
+      actions.appendChild(button);
+      item.appendChild(actions);
+
+      debtList.appendChild(item);
+    });
+  }
+
+  const totalOutstanding = ledgerEntries.reduce((sum, entry) => sum + entry.outstanding, 0);
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+
+  let summaryMessage;
+  if (!economySystem) {
+    summaryMessage = 'Economy systems offline — manual payments unavailable.';
+  } else if (!ledgerEntries.length) {
+    summaryMessage = 'All debts settled.';
+  } else {
+    summaryMessage = `Total outstanding: ${formatCurrency(totalOutstanding)} • Funds available: ${formatCurrency(funds)}.`;
+  }
+
+  const detailMessage = missionControls.debtStatusDetail?.trim();
+  debtStatus.textContent = detailMessage || summaryMessage;
 };
 
 const updateHeatManagementPanel = () => {
@@ -4858,6 +5168,8 @@ const updateMissionControls = () => {
     eventChoices,
     eventHistory,
     eventStatus,
+    debtList,
+    debtStatus,
     crewList,
     vehicleList,
     crackdownText,
@@ -4921,6 +5233,8 @@ const updateMissionControls = () => {
     eventChoices,
     eventHistory,
     eventStatus,
+    debtList,
+    debtStatus,
     crewList,
     vehicleList,
     crackdownText,
@@ -4970,6 +5284,7 @@ const updateMissionControls = () => {
   updateTrainingOptions();
   updatePlayerDevelopmentPanel();
   updateMaintenancePanel();
+  updateDebtPanel();
 
   const isReady = Boolean(missionSystem && economySystem);
   controls.forEach((control) => {
@@ -4993,6 +5308,7 @@ const updateMissionControls = () => {
     });
     updateMissionStatusText();
     updateCrackdownIndicator();
+    updateDebtPanel();
     updateHeatManagementPanel();
     updateMaintenancePanel();
     updateSafehousePanel();
@@ -5243,6 +5559,7 @@ const updateMissionControls = () => {
   });
 
   updateMissionStatusText();
+  updateDebtPanel();
   updateHeatManagementPanel();
   updateMaintenancePanel();
   updateSafehousePanel();
@@ -5624,6 +5941,8 @@ const setupMissionControls = () => {
   missionControls.eventChoices = document.getElementById('mission-event-choices');
   missionControls.eventHistory = document.getElementById('mission-event-history');
   missionControls.eventStatus = document.getElementById('mission-event-status');
+  missionControls.debtList = document.getElementById('mission-debt-list');
+  missionControls.debtStatus = document.getElementById('mission-debt-status');
   missionControls.crewList = document.getElementById('mission-crew-list');
   missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
@@ -5685,6 +6004,8 @@ const setupMissionControls = () => {
     eventChoices,
     eventHistory,
     eventStatus,
+    debtList,
+    debtStatus,
     crewList,
     vehicleList,
     crackdownText,
@@ -5749,6 +6070,8 @@ const setupMissionControls = () => {
     logList,
     recruitList,
     recruitStatus,
+    debtList,
+    debtStatus,
     safehouseName,
     safehouseTier,
     safehouseEffects,
@@ -5791,6 +6114,7 @@ const setupMissionControls = () => {
     updateMissionControls();
   });
   missionControls.eventChoices?.addEventListener('click', handleMissionEventChoice);
+  missionControls.debtList?.addEventListener('click', handleDebtListClick);
   trainingCrewSelect.addEventListener('change', updateTrainingOptions);
   trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
   trainingAttributeSelect?.addEventListener('change', updateTrainingOptions);
@@ -5819,6 +6143,7 @@ const setupMissionControls = () => {
   setTrainingStatus('');
   setPlayerStatus('');
   setMissionEventStatus('');
+  missionControls.debtStatusDetail = '';
   missionControls.safehouseStatusDetail = '';
   clearMaintenanceStatusDetail();
   updateRecruitmentOptions();

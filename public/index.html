@@ -164,6 +164,23 @@
             <li>No event history yet.</li>
           </ul>
         </section>
+        <section class="mission-debt" aria-labelledby="mission-debt-title">
+          <h3 id="mission-debt-title" class="mission-details__title">Pending Debts</h3>
+          <p class="mission-details__hint">
+            Settle outstanding obligations to keep suppliers and crews cooperative.
+          </p>
+          <ul id="mission-debt-list" class="mission-details__list mission-debt__list">
+            <li class="mission-debt__item mission-debt__item--empty">No outstanding debts.</li>
+          </ul>
+          <p
+            id="mission-debt-status"
+            class="control-panel__status mission-debt__status"
+            role="status"
+            aria-live="polite"
+          >
+            Ledger syncing…
+          </p>
+        </section>
         <section class="mission-crew" aria-labelledby="mission-crew-title">
           <h3 id="mission-crew-title" class="mission-details__title">Assign Crew</h3>
           <p id="mission-crew-hint" class="mission-details__hint">
