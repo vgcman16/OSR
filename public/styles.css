@@ -284,6 +284,131 @@ body {
   gap: 0.35rem;
 }
 
+.mission-recon__list {
+  list-style: none;
+  padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.mission-recon__item {
+  list-style: none;
+  margin-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  background: rgba(12, 18, 30, 0.35);
+  border: 1px solid rgba(120, 190, 255, 0.15);
+  box-shadow: inset 0 0 12px rgba(120, 190, 255, 0.08);
+}
+
+.mission-recon__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mission-recon__summary {
+  font-weight: 600;
+  color: rgba(227, 239, 255, 0.95);
+  flex: 1 1 auto;
+}
+
+.mission-recon__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.mission-recon__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 190, 255, 0.28);
+  background: rgba(120, 190, 255, 0.15);
+  color: rgba(209, 234, 255, 0.92);
+  box-shadow: 0 0 8px rgba(120, 190, 255, 0.12);
+}
+
+.mission-recon__badge--failed {
+  background: rgba(255, 94, 94, 0.2);
+  border-color: rgba(255, 94, 94, 0.45);
+  color: rgba(255, 204, 204, 0.95);
+  box-shadow: 0 0 12px rgba(255, 94, 94, 0.25);
+}
+
+.mission-recon__badge--injury {
+  background: rgba(255, 168, 120, 0.18);
+  border-color: rgba(255, 168, 120, 0.4);
+  color: rgba(255, 228, 208, 0.92);
+}
+
+.mission-recon__badge--capture {
+  background: rgba(255, 120, 176, 0.18);
+  border-color: rgba(255, 120, 176, 0.4);
+  color: rgba(255, 215, 230, 0.92);
+}
+
+.mission-recon__badge--intel {
+  background: rgba(120, 180, 255, 0.18);
+  border-color: rgba(120, 180, 255, 0.42);
+}
+
+.mission-recon__badge--heat {
+  background: rgba(255, 145, 120, 0.2);
+  border-color: rgba(255, 145, 120, 0.45);
+  color: rgba(255, 224, 214, 0.95);
+}
+
+.mission-recon__badge--success {
+  background: rgba(120, 220, 155, 0.22);
+  border-color: rgba(120, 220, 155, 0.42);
+  color: rgba(214, 247, 224, 0.95);
+}
+
+.mission-recon__badge--active {
+  background: rgba(120, 190, 255, 0.18);
+  border-color: rgba(120, 190, 255, 0.38);
+}
+
+.mission-recon__badge--warning {
+  background: rgba(255, 196, 120, 0.18);
+  border-color: rgba(255, 196, 120, 0.42);
+  color: rgba(255, 236, 208, 0.95);
+}
+
+.mission-recon__badge--cancelled {
+  background: rgba(160, 170, 190, 0.18);
+  border-color: rgba(160, 170, 190, 0.35);
+  color: rgba(220, 228, 240, 0.9);
+}
+
+.mission-recon__crew-notes {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: rgba(209, 234, 255, 0.78);
+}
+
+.mission-recon__cancel-btn {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  align-self: flex-start;
+}
+
 .mission-details__hint {
   margin-top: 0.35rem;
   font-size: 0.85rem;
