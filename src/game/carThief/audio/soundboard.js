@@ -4,6 +4,9 @@ const CLIP_SOURCES = {
   missionSuccess: 'mission-success.mp3',
   missionFailure: 'mission-failure.mp3',
   missionStalemate: 'mission-stalemate.mp3',
+  safehouseAlert: 'safehouse-alert.mp3',
+  crackdownShift: 'crackdown-shift.mp3',
+  missionUpdate: 'mission-update.mp3',
 };
 
 const normalizeBasePath = (basePath) => {
@@ -27,6 +30,9 @@ const createNoopSoundboard = ({ muted = false } = {}) => {
     playMissionStart: () => false,
     playEventPrompt: () => false,
     playMissionOutcome: () => false,
+    playSafehouseAlert: () => false,
+    playCrackdownShift: () => false,
+    playMissionUpdate: () => false,
   };
 };
 
@@ -136,6 +142,9 @@ const createSoundboard = ({ basePath = 'audio/', muted = false } = {}) => {
     playMissionStart: () => playClip('missionStart'),
     playEventPrompt: () => playClip('eventPrompt'),
     playMissionOutcome,
+    playSafehouseAlert: () => playClip('safehouseAlert'),
+    playCrackdownShift: () => playClip('crackdownShift'),
+    playMissionUpdate: () => playClip('missionUpdate'),
   };
 };
 
