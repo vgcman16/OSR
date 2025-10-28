@@ -138,6 +138,49 @@ const normalizeStoryProgress = (progress) => {
   return { completedSteps: completed };
 };
 
+const normalizeGearId = (gearId) => {
+  if (!gearId) {
+    return null;
+  }
+
+  const normalized = String(gearId).trim();
+  return normalized ? normalized : null;
+};
+
+const normalizeGearList = (gearIds) => {
+  if (!Array.isArray(gearIds)) {
+    return [];
+  }
+
+  const unique = [];
+  gearIds.forEach((gearId) => {
+    const normalized = normalizeGearId(gearId);
+    if (normalized && !unique.includes(normalized)) {
+      unique.push(normalized);
+    }
+  });
+
+  return unique;
+};
+
+const normalizeEquippedGearList = (equippedIds, inventory = []) => {
+  if (!Array.isArray(equippedIds)) {
+    return [];
+  }
+
+  const inventorySet = inventory instanceof Set ? inventory : new Set(inventory);
+  const unique = [];
+
+  equippedIds.forEach((gearId) => {
+    const normalized = normalizeGearId(gearId);
+    if (normalized && inventorySet.has(normalized) && !unique.includes(normalized)) {
+      unique.push(normalized);
+    }
+  });
+
+  return unique;
+};
+
 const SPECIALTY_TRAIT_PROFILE = {
   wheelman: { driving: 3, tactics: 2, stealth: 1 },
   hacker: { tech: 3, stealth: 2, tactics: 1 },
@@ -329,6 +372,8 @@ const createCrewTemplate = ({
   backgroundId = null,
   perks = null,
   storyProgress = null,
+  gearInventory = null,
+  equippedGear = null,
 } = {}) => {
   const resolvedSpecialty = specialty ?? 'wheelman';
   const resolvedBackground = background
@@ -353,6 +398,8 @@ const createCrewTemplate = ({
       ? [resolvedBackground.perkLabel]
       : [];
   const resolvedStoryProgress = normalizeStoryProgress(storyProgress ?? {});
+  const resolvedGearInventory = normalizeGearList(gearInventory ?? []);
+  const resolvedEquippedGear = normalizeEquippedGearList(equippedGear ?? [], resolvedGearInventory);
 
   return {
     id: id ?? generateId(),
@@ -364,6 +411,8 @@ const createCrewTemplate = ({
     background: resolvedBackground,
     perks: resolvedPerks,
     storyProgress: resolvedStoryProgress,
+    gearInventory: resolvedGearInventory,
+    equippedGear: resolvedEquippedGear,
   };
 };
 
@@ -379,6 +428,8 @@ class CrewMember {
     this.background = template.background;
     this.perks = template.perks;
     this.storyProgress = normalizeStoryProgress(options.storyProgress ?? template.storyProgress ?? {});
+    this.gearInventory = [];
+    this.equippedGear = [];
     this.status = 'idle';
     this.falloutStatus = options.falloutStatus ?? null;
     this.falloutDetails =
@@ -396,6 +447,8 @@ class CrewMember {
       : null;
     const restPlan = options.restPlan ?? null;
     this.restPlan = normalizeRestPlan(restPlan);
+    this.setGearInventory(options.gearInventory ?? template.gearInventory ?? []);
+    this.setEquippedGear(options.equippedGear ?? template.equippedGear ?? []);
     if (this.isExhausted()) {
       this.status = 'needs-rest';
     }
@@ -777,6 +830,102 @@ class CrewMember {
     this.traits[traitKey] = Math.round(updatedValue);
   }
 
+  getGearInventory() {
+    this.gearInventory = normalizeGearList(this.gearInventory);
+    return [...this.gearInventory];
+  }
+
+  getEquippedGearIds() {
+    const inventory = this.getGearInventory();
+    this.equippedGear = normalizeEquippedGearList(this.equippedGear, inventory);
+    return [...this.equippedGear];
+  }
+
+  setGearInventory(gearIds = []) {
+    this.gearInventory = normalizeGearList(gearIds);
+    this.equippedGear = normalizeEquippedGearList(this.equippedGear, this.gearInventory);
+    return this.getGearInventory();
+  }
+
+  setEquippedGear(gearIds = []) {
+    const inventory = this.getGearInventory();
+    this.equippedGear = normalizeEquippedGearList(gearIds, inventory);
+    return this.getEquippedGearIds();
+  }
+
+  ownsGear(gearId) {
+    const normalized = normalizeGearId(gearId);
+    if (!normalized) {
+      return false;
+    }
+
+    return this.getGearInventory().includes(normalized);
+  }
+
+  isGearEquipped(gearId) {
+    const normalized = normalizeGearId(gearId);
+    if (!normalized) {
+      return false;
+    }
+
+    return this.getEquippedGearIds().includes(normalized);
+  }
+
+  addGear(gearId) {
+    const normalized = normalizeGearId(gearId);
+    if (!normalized) {
+      return this.getGearInventory();
+    }
+
+    const inventory = this.getGearInventory();
+    if (!inventory.includes(normalized)) {
+      inventory.push(normalized);
+      this.gearInventory = inventory;
+    }
+
+    return this.getGearInventory();
+  }
+
+  removeGear(gearId) {
+    const normalized = normalizeGearId(gearId);
+    if (!normalized) {
+      return this.getGearInventory();
+    }
+
+    this.gearInventory = this.getGearInventory().filter((entry) => entry !== normalized);
+    this.equippedGear = this.getEquippedGearIds().filter((entry) => entry !== normalized);
+    return this.getGearInventory();
+  }
+
+  equipGear(gearId) {
+    const normalized = normalizeGearId(gearId);
+    if (!normalized) {
+      return this.getEquippedGearIds();
+    }
+
+    if (!this.ownsGear(normalized)) {
+      return this.getEquippedGearIds();
+    }
+
+    const equipped = this.getEquippedGearIds();
+    if (!equipped.includes(normalized)) {
+      equipped.push(normalized);
+      this.equippedGear = equipped;
+    }
+
+    return this.getEquippedGearIds();
+  }
+
+  unequipGear(gearId) {
+    const normalized = normalizeGearId(gearId);
+    if (!normalized) {
+      return this.getEquippedGearIds();
+    }
+
+    this.equippedGear = this.getEquippedGearIds().filter((entry) => entry !== normalized);
+    return this.getEquippedGearIds();
+  }
+
   toJSON() {
     return {
       id: this.id,
@@ -799,6 +948,8 @@ class CrewMember {
       lastMissionCompletedAt: this.lastMissionCompletedAt,
       restPlan: this.restPlan ? { ...this.restPlan } : null,
       storyProgress: this.getStoryProgressSnapshot(),
+      gearInventory: this.getGearInventory(),
+      equippedGear: this.getEquippedGearIds(),
     };
   }
 
@@ -822,6 +973,8 @@ class CrewMember {
         data.storyProgress && typeof data.storyProgress === 'object'
           ? { ...data.storyProgress }
           : undefined,
+      gearInventory: Array.isArray(data.gearInventory) ? [...data.gearInventory] : [],
+      equippedGear: Array.isArray(data.equippedGear) ? [...data.equippedGear] : [],
     });
   }
 }

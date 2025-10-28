@@ -8,6 +8,7 @@ import { getAvailableCrewStorylineMissions, applyCrewStorylineOutcome } from './
 import { getCrackdownOperationTemplates } from './crackdownOperations.js';
 import { getActiveStorageCapacityFromState, getActiveSafehouseFromState } from '../world/safehouse.js';
 import { getCrewPerkEffect } from './crewPerks.js';
+import { getCrewGearEffect } from './crewGear.js';
 import { getVehicleModRecipe, assessVehicleModAffordability } from './vehicleModRecipes.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
@@ -649,6 +650,61 @@ const summarizeCrewEffect = (
   return `${member.name}: ${adjustments.join(', ')}`;
 };
 
+const computeCrewGearImpact = (member, mission, context = {}) => {
+  const gearIds = typeof member?.getEquippedGearIds === 'function'
+    ? member.getEquippedGearIds()
+    : Array.isArray(member?.equippedGear)
+      ? member.equippedGear.filter((gearId) => gearId)
+      : [];
+
+  if (!gearIds.length) {
+    return {
+      durationMultiplier: 1,
+      payoutMultiplier: 1,
+      heatMultiplier: 1,
+      successBonus: 0,
+      summaries: [],
+    };
+  }
+
+  let durationMultiplier = 1;
+  let payoutMultiplier = 1;
+  let heatMultiplier = 1;
+  let successBonus = 0;
+  const summaries = [];
+
+  gearIds.forEach((gearId) => {
+    const effect = getCrewGearEffect(gearId, {
+      member,
+      mission,
+      baseHeat: context.baseHeat,
+      vehicle: context.vehicle,
+      support: context.support,
+    });
+    if (!effect) {
+      return;
+    }
+
+    durationMultiplier *= effect.durationMultiplier ?? 1;
+    payoutMultiplier *= effect.payoutMultiplier ?? 1;
+    heatMultiplier *= effect.heatMultiplier ?? 1;
+    successBonus += effect.successBonus ?? 0;
+
+    const detail = effect.summary || effect.label || String(gearId);
+    if (detail) {
+      summaries.push(detail);
+    }
+  });
+
+  return {
+    durationMultiplier: Math.max(0.35, Math.min(1.8, durationMultiplier)),
+    payoutMultiplier: Math.max(0.5, Math.min(2.2, payoutMultiplier)),
+    heatMultiplier: Math.max(0.2, Math.min(2.5, heatMultiplier)),
+    successBonus,
+    summaries,
+  };
+};
+
 const computeCrewMemberTraitImpact = (member, mission, context = {}) => {
   const normalizedSpecialty = typeof member?.specialty === 'string'
     ? member.specialty.toLowerCase()
@@ -743,10 +799,20 @@ const computeCrewMemberTraitImpact = (member, mission, context = {}) => {
   let successBonus = baseSuccessBonus + (hasBackgroundPerk ? 0 : fallbackSuccessBonus);
 
   const perkImpact = computeCrewPerkImpact(member, mission, context);
+  const gearImpact = computeCrewGearImpact(member, mission, context);
   durationMultiplier *= perkImpact.durationMultiplier ?? 1;
+  durationMultiplier *= gearImpact.durationMultiplier ?? 1;
   payoutMultiplier *= perkImpact.payoutMultiplier ?? 1;
-  heatMultiplier = Math.max(0.2, Math.min(2.5, heatMultiplier * (perkImpact.heatMultiplier ?? 1)));
-  successBonus += perkImpact.successBonus ?? 0;
+  payoutMultiplier *= gearImpact.payoutMultiplier ?? 1;
+  heatMultiplier = Math.max(
+    0.2,
+    Math.min(2.5, heatMultiplier * (perkImpact.heatMultiplier ?? 1)),
+  );
+  heatMultiplier = Math.max(
+    0.2,
+    Math.min(2.5, heatMultiplier * (gearImpact.heatMultiplier ?? 1)),
+  );
+  successBonus += (perkImpact.successBonus ?? 0) + (gearImpact.successBonus ?? 0);
 
   const summary = summarizeCrewEffect(member, {
     durationDelta: durationMultiplier - 1,
@@ -754,19 +820,32 @@ const computeCrewMemberTraitImpact = (member, mission, context = {}) => {
     successDelta: successBonus,
     heatDelta: heatMultiplier - 1,
   });
+  const perkSummaries = Array.isArray(perkImpact.summaries) ? perkImpact.summaries : [];
+  const gearSummaries = Array.isArray(gearImpact.summaries) ? gearImpact.summaries : [];
+  const detailSegments = [];
+  if (perkSummaries.length) {
+    detailSegments.push(`Perks: ${perkSummaries.join('; ')}`);
+  }
+  if (gearSummaries.length) {
+    detailSegments.push(`Gear: ${gearSummaries.join('; ')}`);
+  }
 
-  const perkSuffix = perkImpact.summaries?.length
-    ? ` — Perks: ${perkImpact.summaries.join('; ')}.`
-    : '';
-  const summaryWithPerks = perkSuffix ? `${summary}${perkSuffix}` : summary;
+  const baseSummary = summary.endsWith('.') ? summary.slice(0, -1) : summary;
+  const summaryWithDetails = detailSegments.length
+    ? `${baseSummary} — ${detailSegments.join(' • ')}.`
+    : summary;
+  const combinedSummaries = [
+    ...perkSummaries.map((entry) => `Perk — ${entry}`),
+    ...gearSummaries.map((entry) => `Gear — ${entry}`),
+  ];
 
   return {
     durationMultiplier,
     payoutMultiplier,
     heatMultiplier,
     successBonus,
-    summary: summaryWithPerks,
-    perkSummaries: perkImpact.summaries ?? [],
+    summary: summaryWithDetails,
+    perkSummaries: combinedSummaries,
   };
 };
 
