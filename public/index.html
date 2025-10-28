@@ -267,6 +267,37 @@
             role="img"
             aria-label="City district overview"
           ></canvas>
+          <section
+            class="mission-campaign mission-details"
+            aria-labelledby="mission-campaign-title"
+            data-state="empty"
+          >
+            <h4 id="mission-campaign-title" class="mission-details__subtitle">Campaign Progress</h4>
+            <p id="mission-campaign-stage" class="mission-campaign__stage">
+              No district campaign is currently tracked.
+            </p>
+            <p
+              id="mission-campaign-readiness"
+              class="mission-campaign__status"
+              data-state="idle"
+              role="status"
+              aria-live="polite"
+            >
+              Campaign readiness intel pending.
+            </p>
+            <div class="mission-campaign__requirements">
+              <h5 class="mission-campaign__requirements-title">Requirements</h5>
+              <ul
+                id="mission-campaign-requirements"
+                class="mission-details__list mission-campaign__requirements-list"
+              >
+                <li data-state="locked">Requirement intel pending.</li>
+              </ul>
+            </div>
+            <p id="mission-campaign-reward" class="mission-campaign__reward">
+              Reward preview pending.
+            </p>
+          </section>
           <article class="mission-recon" aria-labelledby="mission-recon-title">
             <h4 id="mission-recon-title" class="mission-details__subtitle">Field Recon</h4>
             <p class="mission-details__hint">
