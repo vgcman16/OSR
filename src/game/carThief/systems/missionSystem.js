@@ -1,5 +1,11 @@
 import { Vehicle, VEHICLE_MOD_CATALOG, aggregateVehicleModBonuses } from '../entities/vehicle.js';
-import { CREW_TRAIT_KEYS, CREW_FATIGUE_CONFIG } from '../entities/crewMember.js';
+import {
+  CREW_TRAIT_KEYS,
+  CREW_FATIGUE_CONFIG,
+  CREW_RELATIONSHIP_CONFIG,
+  clampAffinityScore,
+  computeRelationshipMultiplier,
+} from '../entities/crewMember.js';
 import { HeatSystem } from './heatSystem.js';
 import { generateContractsFromDistricts, generateFalloutContracts } from './contractFactory.js';
 import { buildMissionEventDeck } from './missionEvents.js';
@@ -478,6 +484,294 @@ const buildCrewTraitSupport = (crewMembers = []) => {
   return support;
 };
 
+const evaluateCrewChemistry = (crewMembers = []) => {
+  const members = crewMembers.filter(Boolean);
+  const getMemberId = (member) => {
+    if (!member) {
+      return null;
+    }
+    const rawId = member.id;
+    if (rawId === undefined || rawId === null) {
+      return null;
+    }
+    const normalized = String(rawId).trim();
+    return normalized || null;
+  };
+
+  if (!members.length) {
+    return {
+      memberMultipliers: new Map(),
+      memberDetails: [],
+      pairSummaries: [],
+      teamAverageAffinity: 0,
+      teamMultiplier: 1,
+      summary: null,
+      highlight: null,
+      warning: null,
+      bestPair: null,
+      worstPair: null,
+    };
+  }
+
+  const memberTracker = new Map();
+  members.forEach((member) => {
+    const memberId = getMemberId(member);
+    if (!memberId) {
+      return;
+    }
+    memberTracker.set(memberId, {
+      name: typeof member.name === 'string' ? member.name : 'Crew member',
+      total: 0,
+      count: 0,
+    });
+  });
+
+  const pairSummaries = [];
+  let totalAffinity = 0;
+  let pairCount = 0;
+
+  for (let indexA = 0; indexA < members.length; indexA += 1) {
+    const memberA = members[indexA];
+    const idA = getMemberId(memberA);
+    if (!idA) {
+      continue;
+    }
+
+    for (let indexB = indexA + 1; indexB < members.length; indexB += 1) {
+      const memberB = members[indexB];
+      const idB = getMemberId(memberB);
+      if (!idB) {
+        continue;
+      }
+
+      const scores = [];
+      if (typeof memberA.getAffinityForCrewmate === 'function') {
+        const score = memberA.getAffinityForCrewmate(idB);
+        if (Number.isFinite(score)) {
+          scores.push(score);
+        }
+      }
+      if (typeof memberB.getAffinityForCrewmate === 'function') {
+        const score = memberB.getAffinityForCrewmate(idA);
+        if (Number.isFinite(score)) {
+          scores.push(score);
+        }
+      }
+
+      const averageAffinity = scores.length
+        ? scores.reduce((sum, value) => sum + value, 0) / scores.length
+        : 0;
+      const clampedAffinity = clampAffinityScore(averageAffinity);
+      const multiplier = computeRelationshipMultiplier(clampedAffinity);
+
+      totalAffinity += clampedAffinity;
+      pairCount += 1;
+
+      const trackerA = memberTracker.get(idA);
+      if (trackerA) {
+        trackerA.total += clampedAffinity;
+        trackerA.count += 1;
+      }
+      const trackerB = memberTracker.get(idB);
+      if (trackerB) {
+        trackerB.total += clampedAffinity;
+        trackerB.count += 1;
+      }
+
+      pairSummaries.push({
+        ids: [idA, idB],
+        names: [
+          typeof memberA.name === 'string' ? memberA.name : 'Crew member',
+          typeof memberB.name === 'string' ? memberB.name : 'Crew member',
+        ],
+        affinity: clampedAffinity,
+        multiplier,
+      });
+    }
+  }
+
+  const teamAverageAffinity = pairCount ? clampAffinityScore(totalAffinity / pairCount) : 0;
+  const teamMultiplier = computeRelationshipMultiplier(teamAverageAffinity);
+
+  const synergyThreshold = Number.isFinite(CREW_RELATIONSHIP_CONFIG.synergyThreshold)
+    ? CREW_RELATIONSHIP_CONFIG.synergyThreshold
+    : 35;
+  const strainThreshold = Number.isFinite(CREW_RELATIONSHIP_CONFIG.strainThreshold)
+    ? CREW_RELATIONSHIP_CONFIG.strainThreshold
+    : -35;
+
+  const percentShift = Math.round((teamMultiplier - 1) * 100);
+  let summary;
+  if (members.length <= 1) {
+    summary = 'Solo operative — chemistry steady.';
+  } else if (!pairCount) {
+    summary = 'Chemistry steady (insufficient history).';
+  } else if (teamAverageAffinity >= synergyThreshold) {
+    summary = `Strong synergy (+${percentShift}% effectiveness).`;
+  } else if (teamAverageAffinity <= strainThreshold) {
+    summary = `Strained chemistry (${percentShift}% to effectiveness).`;
+  } else if (Math.abs(percentShift) >= 1) {
+    summary = `Chemistry shift ${percentShift > 0 ? `+${percentShift}` : `${percentShift}`}% to effectiveness.`;
+  } else {
+    summary = 'Chemistry steady (no change).';
+  }
+
+  const bestPair = pairSummaries.length
+    ? pairSummaries.reduce(
+        (best, pair) => (pair.affinity > (best?.affinity ?? -Infinity) ? pair : best),
+        null,
+      )
+    : null;
+  const worstPair = pairSummaries.length
+    ? pairSummaries.reduce(
+        (worst, pair) => (pair.affinity < (worst?.affinity ?? Infinity) ? pair : worst),
+        null,
+      )
+    : null;
+
+  const highlight = bestPair && bestPair.affinity >= synergyThreshold
+    ? `${bestPair.names[0]} and ${bestPair.names[1]} operate smoothly (+${Math.round((bestPair.multiplier - 1) * 100)}%).`
+    : null;
+
+  const penaltyPercent = worstPair ? Math.round((1 - worstPair.multiplier) * 100) : 0;
+  const warning = worstPair && worstPair.affinity <= strainThreshold
+    ? `${worstPair.names[0]} and ${worstPair.names[1]} are clashing (${penaltyPercent > 0 ? `-${penaltyPercent}` : penaltyPercent}% penalty).`
+    : null;
+
+  const memberMultipliers = new Map();
+  members.forEach((member) => {
+    const memberId = getMemberId(member);
+    if (!memberId) {
+      return;
+    }
+
+    const tracker = memberTracker.get(memberId) ?? {
+      name: typeof member.name === 'string' ? member.name : 'Crew member',
+      total: 0,
+      count: 0,
+    };
+    const averageAffinity = tracker.count ? tracker.total / tracker.count : teamAverageAffinity;
+    const clampedAverage = clampAffinityScore(averageAffinity);
+    const multiplier = computeRelationshipMultiplier(clampedAverage);
+    tracker.averageAffinity = clampedAverage;
+    tracker.multiplier = multiplier;
+    tracker.name = tracker.name ?? (typeof member.name === 'string' ? member.name : 'Crew member');
+    memberTracker.set(memberId, tracker);
+    memberMultipliers.set(memberId, multiplier);
+  });
+
+  const memberDetails = members
+    .map((member) => {
+      const memberId = getMemberId(member);
+      if (!memberId) {
+        return null;
+      }
+      const tracker = memberTracker.get(memberId);
+      if (!tracker) {
+        return null;
+      }
+      return {
+        id: memberId,
+        name: tracker.name ?? (typeof member.name === 'string' ? member.name : 'Crew member'),
+        averageAffinity: clampAffinityScore(tracker.averageAffinity ?? teamAverageAffinity),
+        multiplier: tracker.multiplier ?? computeRelationshipMultiplier(teamAverageAffinity),
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    memberMultipliers,
+    memberDetails,
+    pairSummaries,
+    teamAverageAffinity,
+    teamMultiplier,
+    summary,
+    highlight,
+    warning,
+    bestPair,
+    worstPair,
+  };
+};
+
+const serializeChemistryProfile = (profile) => {
+  if (!profile) {
+    return null;
+  }
+
+  const toSerializablePair = (pair) => {
+    if (!pair) {
+      return null;
+    }
+    return {
+      ids: Array.isArray(pair.ids) ? pair.ids.slice() : [],
+      names: Array.isArray(pair.names) ? pair.names.slice() : [],
+      affinity: pair.affinity,
+      multiplier: pair.multiplier,
+    };
+  };
+
+  return {
+    summary: profile.summary ?? null,
+    highlight: profile.highlight ?? null,
+    warning: profile.warning ?? null,
+    teamAverageAffinity: profile.teamAverageAffinity,
+    teamMultiplier: profile.teamMultiplier,
+    memberDetails: Array.isArray(profile.memberDetails)
+      ? profile.memberDetails.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          averageAffinity: entry.averageAffinity,
+          multiplier: entry.multiplier,
+        }))
+      : [],
+    pairSummaries: Array.isArray(profile.pairSummaries)
+      ? profile.pairSummaries.map((entry) => ({
+          ids: Array.isArray(entry.ids) ? entry.ids.slice() : [],
+          names: Array.isArray(entry.names) ? entry.names.slice() : [],
+          affinity: entry.affinity,
+          multiplier: entry.multiplier,
+        }))
+      : [],
+    bestPair: toSerializablePair(profile.bestPair),
+    worstPair: toSerializablePair(profile.worstPair),
+  };
+};
+
+const computeMissionStressLevel = (mission, { outcome = 'success', falloutByCrewId = null } = {}) => {
+  const difficulty = Number.isFinite(mission?.difficulty)
+    ? Math.max(0, mission.difficulty)
+    : Number.isFinite(mission?.baseDifficulty)
+      ? Math.max(0, mission.baseDifficulty)
+      : 1;
+  const baseHeatValue = Number.isFinite(mission?.baseHeat)
+    ? Math.max(0, mission.baseHeat)
+    : Number.isFinite(mission?.heat)
+      ? Math.max(0, mission.heat)
+      : 0;
+  const adjustedHeatValue = Number.isFinite(mission?.assignedCrewImpact?.adjustedHeat)
+    ? Math.max(0, mission.assignedCrewImpact.adjustedHeat)
+    : baseHeatValue;
+  const effectiveHeat = Math.max(baseHeatValue, adjustedHeatValue);
+  const falloutCount = (() => {
+    if (!falloutByCrewId) {
+      return 0;
+    }
+    if (falloutByCrewId instanceof Map) {
+      return falloutByCrewId.size;
+    }
+    if (Array.isArray(falloutByCrewId)) {
+      return falloutByCrewId.length;
+    }
+    if (typeof falloutByCrewId === 'object') {
+      return Object.keys(falloutByCrewId).length;
+    }
+    return 0;
+  })();
+  const failureStress = outcome === 'failure' ? 1.2 : 0;
+  const stressScore = 0.3 + difficulty * 0.45 + Math.min(effectiveHeat, 80) * 0.012 + falloutCount * 0.9 + failureStress;
+  return clamp(stressScore, 0, 5);
+};
+
 const computeCrewPerkImpact = (member, mission, context = {}) => {
   const perks = Array.isArray(member?.perks) ? member.perks : [];
   if (!perks.length) {
@@ -838,6 +1132,15 @@ const computeCrewMemberTraitImpact = (member, mission, context = {}) => {
   const loyaltyBoost = Number.isFinite(loyaltyValue)
     ? 1 + Math.max(0, loyaltyValue) * 0.05
     : 1;
+  const minChemistryMultiplier = Number.isFinite(CREW_RELATIONSHIP_CONFIG.minimumTraitMultiplier)
+    ? CREW_RELATIONSHIP_CONFIG.minimumTraitMultiplier
+    : 0.6;
+  const maxChemistryMultiplier = Number.isFinite(CREW_RELATIONSHIP_CONFIG.maximumTraitMultiplier)
+    ? CREW_RELATIONSHIP_CONFIG.maximumTraitMultiplier
+    : 1.3;
+  const chemistryMultiplier = Number.isFinite(context?.chemistryMultiplier)
+    ? clamp(context.chemistryMultiplier, minChemistryMultiplier, maxChemistryMultiplier)
+    : 1;
 
   const totals = {
     durationReduction: 0,
@@ -860,7 +1163,8 @@ const computeCrewMemberTraitImpact = (member, mission, context = {}) => {
     }
 
     const synergy = Number.isFinite(synergyProfile[traitKey]) ? synergyProfile[traitKey] : 1;
-    const contributionStrength = aboveBase * Math.max(0.5, synergy) * loyaltyBoost * difficultyFactor;
+    const contributionStrength =
+      aboveBase * Math.max(0.5, synergy) * loyaltyBoost * difficultyFactor * chemistryMultiplier;
 
     if (traitEffect.durationReduction) {
       totals.durationReduction += traitEffect.durationReduction * contributionStrength;
@@ -2954,6 +3258,10 @@ class MissionSystem {
     const perkSummary = [];
 
     const support = buildCrewTraitSupport(crewMembers);
+    const chemistryProfile = evaluateCrewChemistry(crewMembers);
+    const chemistryMultipliers = chemistryProfile?.memberMultipliers instanceof Map
+      ? chemistryProfile.memberMultipliers
+      : new Map();
 
     const playerImpact = computePlayerImpact(mission, this.state?.player ?? null);
     if (playerImpact) {
@@ -2989,10 +3297,16 @@ class MissionSystem {
         return;
       }
 
+      const memberId = member.id !== undefined && member.id !== null ? String(member.id).trim() : null;
+      const chemistryMultiplier = memberId && chemistryMultipliers.has(memberId)
+        ? chemistryMultipliers.get(memberId)
+        : 1;
+
       const impact = computeCrewMemberTraitImpact(member, mission, {
         support,
         baseHeat,
         vehicle,
+        chemistryMultiplier,
       });
       durationMultiplier *= impact?.durationMultiplier ?? 1;
       payoutMultiplier *= impact?.payoutMultiplier ?? 1;
@@ -3008,6 +3322,20 @@ class MissionSystem {
         });
       }
     });
+
+    const chemistryLines = [];
+    if (chemistryProfile?.summary) {
+      chemistryLines.push(`Chemistry: ${chemistryProfile.summary}`);
+    }
+    if (chemistryProfile?.highlight) {
+      chemistryLines.push(`Chemistry boost: ${chemistryProfile.highlight}`);
+    }
+    if (chemistryProfile?.warning) {
+      chemistryLines.push(`⚠️ Chemistry warning: ${chemistryProfile.warning}`);
+    }
+    for (let index = chemistryLines.length - 1; index >= 0; index -= 1) {
+      summary.unshift(chemistryLines[index]);
+    }
 
     durationMultiplier = Math.max(0.5, durationMultiplier);
     payoutMultiplier = Math.max(0.5, payoutMultiplier);
@@ -3243,6 +3571,7 @@ class MissionSystem {
       heatMultiplier,
       vehicleImpact,
       playerImpact,
+      chemistry: serializeChemistryProfile(chemistryProfile),
     };
   }
 
@@ -3354,6 +3683,7 @@ class MissionSystem {
       mission.payout = crewImpact.adjustedPayout;
       mission.successChance = crewImpact.adjustedSuccessChance;
       mission.assignedCrewImpact = crewImpact;
+      mission.assignedChemistry = crewImpact.chemistry ?? null;
       mission.heat = crewImpact.adjustedHeat;
       mission.assignedVehicleImpact = assignedVehicle ? crewImpact.vehicleImpact : null;
       mission.playerEffectSummary = Array.isArray(crewImpact.playerImpact?.summary)
@@ -3369,6 +3699,7 @@ class MissionSystem {
         ? mission.baseSuccessChance
         : deriveBaseSuccessChance(mission.difficulty);
       mission.assignedCrewImpact = null;
+      mission.assignedChemistry = null;
       mission.heat = Number.isFinite(mission.baseHeat)
         ? mission.baseHeat
         : coerceFiniteNumber(mission.heat, 0);
@@ -4034,6 +4365,24 @@ class MissionSystem {
         }
       }
     });
+
+    const participantIds = assignedCrew
+      .map((member) => (member?.id !== undefined && member?.id !== null ? String(member.id).trim() : null))
+      .filter((id) => id);
+    if (participantIds.length >= 2) {
+      const stressLevel = computeMissionStressLevel(mission, { outcome, falloutByCrewId });
+      assignedCrew.forEach((member) => {
+        if (!member || typeof member.applyMissionRelationshipShift !== 'function') {
+          return;
+        }
+        member.applyMissionRelationshipShift({
+          crewIds: participantIds,
+          outcome,
+          falloutByCrewId,
+          stressLevel,
+        });
+      });
+    }
 
     const followUpSummaries = queuedFollowUps.map((entry) => ({
       id: entry?.id ?? null,
