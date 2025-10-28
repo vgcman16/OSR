@@ -9,6 +9,7 @@ import {
   getNotorietyProfile,
   getNextNotorietyProfile,
 } from './game/carThief/systems/missionSystem.js';
+import { getVehicleModRecipes, assessVehicleModAffordability } from './game/carThief/systems/vehicleModRecipes.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
 import { getAvailableCrewStorylineMissions } from './game/carThief/systems/crewStorylines.js';
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
@@ -153,8 +154,11 @@ const missionControls = {
   maintenanceUpgradeSelect: null,
   maintenanceUpgradeButton: null,
   maintenanceUpgradeList: null,
+  maintenancePartsStockpile: null,
+  maintenanceCraftingList: null,
   maintenanceStatus: null,
   maintenanceStatusDetail: '',
+  garageActivityList: null,
   heatLayLowButton: null,
   heatBribeButton: null,
   heatStatus: null,
@@ -1600,6 +1604,29 @@ const describeVehicleReportOutcome = (report) => {
     return `${modelLabel} installed ${upgradeLabel}${costLabel}.${detailLabel}`.trim();
   }
 
+  if (report.outcome === 'crafting') {
+    const upgradeProfile = report.upgradeId ? VEHICLE_UPGRADE_CATALOG?.[report.upgradeId] : null;
+    const upgradeLabel = report.upgradeLabel ?? upgradeProfile?.label ?? 'Upgrade';
+    const partsSpent = Number.isFinite(report.partsSpent) ? Math.max(0, report.partsSpent) : 0;
+    const fundsSpent = Number.isFinite(report.fundsSpent) ? Math.max(0, report.fundsSpent) : 0;
+    const partsRemaining = Number.isFinite(report.partsRemaining) ? Math.max(0, report.partsRemaining) : null;
+    const detail = upgradeProfile?.summary ?? upgradeProfile?.description ?? '';
+    const segments = [`${modelLabel} fabricated ${upgradeLabel}.`];
+    if (partsSpent > 0) {
+      segments.push(`${partsSpent} parts consumed.`);
+    }
+    if (fundsSpent > 0) {
+      segments.push(`Spent ${formatCurrency(fundsSpent)}.`);
+    }
+    if (partsRemaining !== null) {
+      segments.push(`Parts remaining: ${partsRemaining}.`);
+    }
+    if (detail) {
+      segments.push(detail);
+    }
+    return segments.join(' ').trim();
+  }
+
   if (report.outcome === 'vehicle-acquired') {
     const summary = typeof report.summary === 'string' ? report.summary.trim() : '';
     if (summary) {
@@ -2810,6 +2837,8 @@ const handleDebtPayment = (debtId, requestedPayment = null) => {
   const economySystem = getEconomySystem();
   const state = missionSystem?.state ?? getSharedState();
 
+  renderGarageActivityLog();
+
   if (!missionSystem || !economySystem || !state) {
     missionControls.debtStatusDetail = 'Economy systems offline — unable to settle debts.';
     updateMissionControls();
@@ -3496,6 +3525,9 @@ const updateMaintenancePanel = () => {
     maintenanceUpgradeSelect,
     maintenanceUpgradeButton,
     maintenanceUpgradeList,
+    maintenancePartsStockpile,
+    maintenanceCraftingList,
+    garageActivityList,
   } = missionControls;
 
   if (
@@ -3505,6 +3537,9 @@ const updateMaintenancePanel = () => {
     || !maintenanceUpgradeSelect
     || !maintenanceUpgradeButton
     || !maintenanceUpgradeList
+    || !maintenancePartsStockpile
+    || !maintenanceCraftingList
+    || !garageActivityList
   ) {
     return;
   }
@@ -3518,6 +3553,10 @@ const updateMaintenancePanel = () => {
     ? garage.find((vehicle) => vehicle?.id === selectedVehicleId) ?? null
     : null;
   const funds = Number.isFinite(state?.funds) ? state.funds : 0;
+  const partsInventory = Number.isFinite(state?.partsInventory)
+    ? Math.max(0, Math.round(state.partsInventory))
+    : 0;
+  maintenancePartsStockpile.textContent = `Parts in storage: ${partsInventory}`;
   const latestVehicleReport = missionSystem?.state?.lastVehicleReport ?? null;
 
   if (latestVehicleReport) {
@@ -3628,6 +3667,108 @@ const updateMaintenancePanel = () => {
         ? selectedVehicle.installedMods.slice()
         : []
     : [];
+
+  const fabricationRecipes = getVehicleModRecipes()
+    .map((recipe) => ({
+      ...recipe,
+      label: VEHICLE_UPGRADE_CATALOG?.[recipe.modId]?.label ?? recipe.modId,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  maintenanceCraftingList.innerHTML = '';
+  if (!fabricationRecipes.length) {
+    const item = document.createElement('li');
+    item.className = 'mission-maintenance__crafting-item mission-maintenance__crafting-item--empty';
+    item.textContent = 'No fabrication schematics available.';
+    maintenanceCraftingList.appendChild(item);
+  } else {
+    fabricationRecipes.forEach((recipe) => {
+      const modProfile = VEHICLE_UPGRADE_CATALOG?.[recipe.modId] ?? null;
+      const label = recipe.label ?? modProfile?.label ?? recipe.modId;
+      const summary = modProfile?.summary ?? modProfile?.description ?? 'Effect profile unavailable.';
+      const costSegments = [
+        `${recipe.partsCost} parts`,
+        ...(recipe.fundsCost > 0 ? [formatCurrency(recipe.fundsCost)] : []),
+      ];
+      const affordability = assessVehicleModAffordability(recipe, {
+        partsAvailable: partsInventory,
+        fundsAvailable: funds,
+      });
+
+      const item = document.createElement('li');
+      item.className = 'mission-maintenance__crafting-item';
+
+      const header = document.createElement('div');
+      header.className = 'mission-maintenance__crafting-header';
+
+      const name = document.createElement('span');
+      name.className = 'mission-maintenance__crafting-name';
+      name.textContent = label;
+      header.appendChild(name);
+
+      const cost = document.createElement('span');
+      cost.className = 'mission-maintenance__crafting-cost';
+      cost.textContent = costSegments.join(' + ');
+      header.appendChild(cost);
+
+      const description = document.createElement('p');
+      description.className = 'mission-maintenance__crafting-summary';
+      description.textContent = summary;
+
+      const status = document.createElement('p');
+      status.className = 'mission-maintenance__crafting-status';
+
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'mission-maintenance__crafting-action';
+      action.dataset.modId = recipe.modId;
+      action.textContent = `Fabricate (${costSegments.join(' + ')})`;
+
+      let statusMessage = '';
+      let disabledReason = '';
+
+      if (!systemsReady) {
+        statusMessage = 'Maintenance systems offline.';
+        disabledReason = statusMessage;
+        action.disabled = true;
+      } else if (!hasSelection) {
+        statusMessage = 'Select a garage vehicle to craft upgrades.';
+        disabledReason = statusMessage;
+        action.disabled = true;
+        action.textContent = 'Select a vehicle to craft';
+      } else if (installedMods.includes(recipe.modId)) {
+        statusMessage = 'Already installed on this vehicle.';
+        disabledReason = statusMessage;
+        action.disabled = true;
+      } else if (!affordability.affordable) {
+        const requirements = [`${recipe.partsCost} parts (have ${partsInventory})`];
+        if (recipe.fundsCost > 0) {
+          requirements.push(`${formatCurrency(recipe.fundsCost)} (have ${formatCurrency(funds)})`);
+        }
+        statusMessage = `Requires ${requirements.join(' + ')}.`;
+        disabledReason = statusMessage;
+        action.disabled = true;
+      } else {
+        statusMessage = 'Ready to fabricate and install.';
+        action.disabled = false;
+        action.title = `Consume ${costSegments.join(' + ')} to install immediately.`;
+      }
+
+      if (disabledReason && !action.disabled) {
+        action.title = disabledReason;
+      } else if (disabledReason) {
+        action.title = disabledReason;
+      }
+
+      status.textContent = statusMessage;
+
+      item.appendChild(header);
+      item.appendChild(description);
+      item.appendChild(status);
+      item.appendChild(action);
+      maintenanceCraftingList.appendChild(item);
+    });
+  }
 
   maintenanceUpgradeList.innerHTML = '';
   if (!hasSelection) {
@@ -3769,6 +3910,9 @@ const updateMaintenancePanel = () => {
       heatCost,
     )} to lower heat by ${heatLabel}.${affordabilityMessage}`;
   }
+
+  const partsMessage = `Workshop inventory: ${partsInventory} parts on hand.`;
+  summaryMessage = `${summaryMessage} ${partsMessage}`.trim();
 
   if (capacityMessage) {
     summaryMessage = `${summaryMessage} ${capacityMessage}`.trim();
@@ -3980,6 +4124,103 @@ const handleMaintenanceUpgrade = () => {
 
   updateMissionControls();
   triggerHudRender();
+};
+
+const handleCraftVehicleMod = (modId) => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+
+  if (!missionSystem || !economySystem) {
+    missionControls.maintenanceStatusDetail = 'Maintenance systems offline.';
+    updateMaintenancePanel();
+    return;
+  }
+
+  const vehicleId = missionControls.selectedVehicleId;
+  if (!vehicleId) {
+    missionControls.maintenanceStatusDetail = 'Select a garage vehicle before fabricating upgrades.';
+    updateMaintenancePanel();
+    return;
+  }
+
+  if (!modId) {
+    missionControls.maintenanceStatusDetail = 'Select a schematic before fabricating an upgrade.';
+    updateMaintenancePanel();
+    return;
+  }
+
+  const result = missionSystem.craftVehicleMod(vehicleId, modId, economySystem);
+  if (!result?.success) {
+    let failureMessage = 'Unable to fabricate upgrade.';
+    switch (result?.reason) {
+      case 'vehicle-not-found':
+        failureMessage = 'Selected vehicle no longer in the garage.';
+        break;
+      case 'already-installed':
+        failureMessage = 'Upgrade already installed on this vehicle.';
+        break;
+      case 'unknown-upgrade':
+        failureMessage = 'Fabrication plan unavailable — refresh schematics.';
+        break;
+      case 'insufficient-parts': {
+        const required = Number.isFinite(result.partsRequired) ? result.partsRequired : null;
+        const available = Number.isFinite(result.partsAvailable) ? result.partsAvailable : null;
+        failureMessage = `Insufficient parts — requires ${required ?? '?'} (available ${available ?? 0}).`;
+        break;
+      }
+      case 'insufficient-funds': {
+        const required = Number.isFinite(result.fundsRequired)
+          ? formatCurrency(result.fundsRequired)
+          : null;
+        const available = Number.isFinite(result.fundsAvailable)
+          ? formatCurrency(result.fundsAvailable)
+          : null;
+        failureMessage = `Insufficient funds — requires ${required ?? 'funds'}, available ${available ?? formatCurrency(0)}.`;
+        break;
+      }
+      default:
+        break;
+    }
+
+    missionControls.maintenanceStatusDetail = failureMessage;
+    updateMaintenancePanel();
+    return;
+  }
+
+  const segments = [
+    `Fabricated ${result.upgradeLabel ?? 'upgrade'} for ${result.vehicleModel ?? 'vehicle'}.`,
+  ];
+  if (Number.isFinite(result.partsSpent) && result.partsSpent > 0) {
+    segments.push(`${result.partsSpent} parts used.`);
+  }
+  if (Number.isFinite(result.fundsSpent) && result.fundsSpent > 0) {
+    segments.push(`Spent ${formatCurrency(result.fundsSpent)}.`);
+  }
+  if (Number.isFinite(result.partsRemaining)) {
+    segments.push(`Parts remaining: ${result.partsRemaining}.`);
+  }
+  const profile = result.modId ? VEHICLE_UPGRADE_CATALOG?.[result.modId] ?? null : null;
+  const detail = profile?.summary ?? profile?.description ?? '';
+  if (detail) {
+    segments.push(detail);
+  }
+
+  missionControls.maintenanceStatusDetail = segments.join(' ');
+
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleMaintenanceCraftingClick = (event) => {
+  const button = event.target?.closest('button[data-mod-id]');
+  if (!button) {
+    return;
+  }
+
+  const modId = button.dataset.modId;
+  if (modId) {
+    handleCraftVehicleMod(modId);
+  }
 };
 
 const performHeatMitigation = (actionKey) => {
@@ -6215,6 +6456,7 @@ const updateMissionStatusText = () => {
   missionControls.statusText.textContent = statusMessage;
   renderMissionEvents();
   renderMissionLog();
+  renderGarageActivityLog();
 };
 
 const updateCrackdownIndicator = () => {
@@ -6301,6 +6543,50 @@ const renderMissionLog = () => {
     const timeLabel = timestamp ? ` @ ${timestamp.toLocaleTimeString([], options)}` : '';
     item.textContent = `${details.join(' — ')}${timeLabel}`;
     logList.appendChild(item);
+  });
+};
+
+const renderGarageActivityLog = () => {
+  const list = missionControls.garageActivityList;
+  if (!list) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const activityEntries = Array.isArray(missionSystem?.state?.garageActivityLog)
+    ? missionSystem.state.garageActivityLog
+    : [];
+
+  list.innerHTML = '';
+
+  if (!activityEntries.length) {
+    const placeholder = document.createElement('li');
+    placeholder.className = 'mission-garage-activity__item mission-garage-activity__item--empty';
+    placeholder.textContent = 'No garage activity recorded yet.';
+    list.appendChild(placeholder);
+    return;
+  }
+
+  const options = { hour: '2-digit', minute: '2-digit' };
+
+  activityEntries.slice(0, 6).forEach((entry) => {
+    const item = document.createElement('li');
+    item.className = 'mission-garage-activity__item';
+    const segments = [];
+    const summary = typeof entry?.summary === 'string' ? entry.summary.trim() : '';
+    if (summary) {
+      segments.push(summary);
+    }
+    const details = Array.isArray(entry?.details) ? entry.details : [];
+    details.forEach((detail) => {
+      if (typeof detail === 'string' && detail.trim()) {
+        segments.push(detail.trim());
+      }
+    });
+    const timestamp = Number.isFinite(entry?.timestamp) ? new Date(entry.timestamp) : null;
+    const timeLabel = timestamp ? ` @ ${timestamp.toLocaleTimeString([], options)}` : '';
+    item.textContent = `${segments.join(' — ') || 'Garage activity recorded.'}${timeLabel}`;
+    list.appendChild(item);
   });
 };
 
@@ -6522,7 +6808,10 @@ const updateMissionControls = () => {
     maintenanceUpgradeSelect,
     maintenanceUpgradeButton,
     maintenanceUpgradeList,
+    maintenancePartsStockpile,
+    maintenanceCraftingList,
     maintenanceStatus,
+    garageActivityList,
     crewStorylineList,
     crewStorylineStatus,
     playerStatsList,
@@ -6601,7 +6890,10 @@ const updateMissionControls = () => {
     maintenanceUpgradeSelect,
     maintenanceUpgradeButton,
     maintenanceUpgradeList,
+    maintenancePartsStockpile,
+    maintenanceCraftingList,
     maintenanceStatus,
+    garageActivityList,
     crewStorylineList,
     crewStorylineStatus,
     playerStatsList,
@@ -7387,7 +7679,10 @@ const setupMissionControls = () => {
   missionControls.maintenanceUpgradeSelect = document.getElementById('mission-maintenance-upgrade-select');
   missionControls.maintenanceUpgradeButton = document.getElementById('mission-maintenance-upgrade-btn');
   missionControls.maintenanceUpgradeList = document.getElementById('mission-maintenance-upgrade-list');
+  missionControls.maintenancePartsStockpile = document.getElementById('mission-maintenance-parts');
+  missionControls.maintenanceCraftingList = document.getElementById('mission-maintenance-crafting-list');
   missionControls.maintenanceStatus = document.getElementById('mission-maintenance-status');
+  missionControls.garageActivityList = document.getElementById('mission-garage-activity-list');
   missionControls.heatLayLowButton = document.getElementById('mission-heat-laylow-btn');
   missionControls.heatBribeButton = document.getElementById('mission-heat-bribe-btn');
   missionControls.heatStatus = document.getElementById('mission-heat-status');
@@ -7556,6 +7851,7 @@ const setupMissionControls = () => {
   maintenanceHeatButton.addEventListener('click', handleMaintenanceHeat);
   maintenanceUpgradeButton?.addEventListener('click', handleMaintenanceUpgrade);
   maintenanceUpgradeSelect?.addEventListener('change', updateMaintenancePanel);
+  maintenanceCraftingList?.addEventListener('click', handleMaintenanceCraftingClick);
   heatLayLowButton.addEventListener('click', handleHeatLayLow);
   heatBribeButton.addEventListener('click', handleHeatBribe);
   missionControls.safehouseProjects?.addEventListener('click', handleSafehouseProjectListClick);

@@ -55,6 +55,73 @@ const normalizeReconAssignments = (assignments) => {
     .filter(Boolean);
 };
 
+const sanitizeGarageActivityEntry = (entry) => {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const summary = typeof entry.summary === 'string' ? entry.summary.trim() : '';
+  if (!summary) {
+    return null;
+  }
+
+  const timestamp = Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now();
+  const id = entry.id
+    ? String(entry.id)
+    : `garage-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+  const type = typeof entry.type === 'string' && entry.type.trim()
+    ? entry.type.trim()
+    : 'garage';
+
+  const details = Array.isArray(entry.details)
+    ? entry.details
+        .map((detail) => (typeof detail === 'string' ? detail.trim() : ''))
+        .filter(Boolean)
+    : [];
+
+  const partsInventory = Number.isFinite(entry.partsInventory)
+    ? Math.max(0, Math.round(entry.partsInventory))
+    : undefined;
+
+  const metadata = entry.metadata && typeof entry.metadata === 'object'
+    ? { ...entry.metadata }
+    : undefined;
+
+  const sanitized = {
+    id,
+    type,
+    summary,
+    details,
+    timestamp,
+  };
+
+  if (partsInventory !== undefined) {
+    sanitized.partsInventory = partsInventory;
+  }
+
+  if (metadata) {
+    sanitized.metadata = metadata;
+  }
+
+  return sanitized;
+};
+
+const sanitizeGarageActivityLog = (log) => {
+  if (!Array.isArray(log)) {
+    return [];
+  }
+
+  const entries = log
+    .map((entry) => sanitizeGarageActivityEntry(entry))
+    .filter(Boolean);
+
+  if (entries.length > 40) {
+    return entries.slice(0, 40);
+  }
+
+  return entries;
+};
+
 class GameState {
   constructor({
     day = 1,
@@ -75,6 +142,8 @@ class GameState {
     followUpSequence = 0,
     safehouseIncursions = [],
     reconAssignments = [],
+    partsInventory = 0,
+    garageActivityLog = [],
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -108,6 +177,10 @@ class GameState {
           .map((entry) => ({ ...entry }))
       : [];
     this.reconAssignments = normalizeReconAssignments(reconAssignments);
+    this.partsInventory = Number.isFinite(partsInventory)
+      ? Math.max(0, Math.round(partsInventory))
+      : 0;
+    this.garageActivityLog = sanitizeGarageActivityLog(garageActivityLog);
   }
 
   toJSON() {
@@ -169,6 +242,8 @@ class GameState {
       followUpSequence: this.followUpSequence,
       safehouseIncursions: serializeArray(this.safehouseIncursions),
       reconAssignments: serializeArray(this.reconAssignments),
+      partsInventory: this.partsInventory,
+      garageActivityLog: serializeArray(this.garageActivityLog),
     };
   }
 
@@ -214,6 +289,10 @@ class GameState {
             .map((entry) => ({ ...entry }))
         : [],
       reconAssignments: normalizeReconAssignments(data.reconAssignments),
+      partsInventory: Number.isFinite(data.partsInventory)
+        ? Math.max(0, Math.round(data.partsInventory))
+        : 0,
+      garageActivityLog: sanitizeGarageActivityLog(data.garageActivityLog),
     });
   }
 
@@ -390,6 +469,8 @@ const createInitialGameState = () => {
     lastExpenseReport: null,
     pendingDebts: [],
     reconAssignments: [],
+    partsInventory: 0,
+    garageActivityLog: [],
   });
 };
 
