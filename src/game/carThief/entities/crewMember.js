@@ -416,7 +416,8 @@ class CrewMember {
   }
 
   getReadinessState() {
-    if (this.hasActiveRestOrder() && (this.status ?? '').toLowerCase() !== 'on-mission') {
+    const statusLabel = (this.status ?? '').toLowerCase();
+    if (this.hasActiveRestOrder() && !['on-mission', 'on-recon'].includes(statusLabel)) {
       return 'resting';
     }
     const fatigue = this.getFatigueLevel();
@@ -456,7 +457,7 @@ class CrewMember {
 
   isRestEligible() {
     const statusLabel = (this.status ?? '').toLowerCase();
-    if (statusLabel === 'on-mission' || statusLabel === 'captured') {
+    if (['on-mission', 'on-recon', 'captured'].includes(statusLabel)) {
       return false;
     }
 
@@ -486,7 +487,7 @@ class CrewMember {
       this.restPlan.orderedAt = Date.now();
     }
 
-    if ((this.status ?? '').toLowerCase() !== 'on-mission') {
+    if (!['on-mission', 'on-recon'].includes((this.status ?? '').toLowerCase())) {
       this.setStatus('resting');
     }
 
@@ -597,7 +598,7 @@ class CrewMember {
 
     if (plan.remainingDays <= 0 || this.getFatigueLevel() === 0) {
       this.clearRestOrder();
-    } else if ((this.status ?? '').toLowerCase() !== 'on-mission') {
+    } else if (!['on-mission', 'on-recon'].includes((this.status ?? '').toLowerCase())) {
       this.setStatus('resting');
     }
 
@@ -618,6 +619,14 @@ class CrewMember {
       this.clearRestOrder({ keepStatus: true });
     }
     this.setStatus('on-mission');
+  }
+
+  beginRecon() {
+    if (this.hasActiveRestOrder()) {
+      this.clearRestOrder({ keepStatus: true });
+    }
+    this.setStatus('on-recon');
+    return this.status;
   }
 
   applyMissionFatigue(impact = CREW_FATIGUE_CONFIG.missionFatigueBase) {
@@ -700,7 +709,7 @@ class CrewMember {
   }
 
   recoverFatigue(days = 1, { recoveryMultiplier = 1, preserveStatus = false } = {}) {
-    if ((this.status ?? '').toLowerCase() === 'on-mission') {
+    if (['on-mission', 'on-recon'].includes((this.status ?? '').toLowerCase())) {
       return this.getFatigueLevel();
     }
 

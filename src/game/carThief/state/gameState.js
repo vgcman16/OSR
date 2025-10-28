@@ -4,6 +4,57 @@ import { Vehicle } from '../entities/vehicle.js';
 import { CityMap } from '../world/cityMap.js';
 import { SafehouseCollection, createDefaultSafehouseCollection } from '../world/safehouse.js';
 
+const cloneReconAssignment = (assignment) => {
+  if (!assignment || typeof assignment !== 'object') {
+    return null;
+  }
+
+  const cloned = { ...assignment };
+  cloned.crewIds = Array.isArray(assignment.crewIds)
+    ? assignment.crewIds.filter((id) => id !== null && id !== undefined)
+    : [];
+  cloned.events = Array.isArray(assignment.events)
+    ? assignment.events
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({ ...entry }))
+    : [];
+
+  if (assignment.result && typeof assignment.result === 'object') {
+    const resultClone = { ...assignment.result };
+    if (resultClone.before && typeof resultClone.before === 'object') {
+      resultClone.before = { ...resultClone.before };
+    }
+    if (resultClone.after && typeof resultClone.after === 'object') {
+      resultClone.after = { ...resultClone.after };
+    }
+    if (resultClone.delta && typeof resultClone.delta === 'object') {
+      resultClone.delta = { ...resultClone.delta };
+    }
+    cloned.result = resultClone;
+  } else {
+    cloned.result = assignment.result ?? null;
+  }
+
+  if (Array.isArray(assignment.history)) {
+    cloned.history = assignment.history
+      .filter((entry) => entry && typeof entry === 'object')
+      .map((entry) => ({ ...entry }));
+  }
+
+  return cloned;
+};
+
+const normalizeReconAssignments = (assignments) => {
+  if (!Array.isArray(assignments)) {
+    return [];
+  }
+
+  return assignments
+    .filter((entry) => entry && typeof entry === 'object')
+    .map((entry) => cloneReconAssignment(entry))
+    .filter(Boolean);
+};
+
 class GameState {
   constructor({
     day = 1,
@@ -23,6 +74,7 @@ class GameState {
     pendingDebts = [],
     followUpSequence = 0,
     safehouseIncursions = [],
+    reconAssignments = [],
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -55,6 +107,7 @@ class GameState {
           .filter((entry) => entry && typeof entry === 'object' && entry.id)
           .map((entry) => ({ ...entry }))
       : [];
+    this.reconAssignments = normalizeReconAssignments(reconAssignments);
   }
 
   toJSON() {
@@ -115,6 +168,7 @@ class GameState {
       pendingDebts: serializeArray(this.pendingDebts),
       followUpSequence: this.followUpSequence,
       safehouseIncursions: serializeArray(this.safehouseIncursions),
+      reconAssignments: serializeArray(this.reconAssignments),
     };
   }
 
@@ -159,7 +213,100 @@ class GameState {
             .filter((entry) => entry && typeof entry === 'object' && entry.id)
             .map((entry) => ({ ...entry }))
         : [],
+      reconAssignments: normalizeReconAssignments(data.reconAssignments),
     });
+  }
+
+  getReconAssignments() {
+    if (!Array.isArray(this.reconAssignments)) {
+      this.reconAssignments = [];
+    }
+    return this.reconAssignments;
+  }
+
+  addReconAssignment(assignment = {}) {
+    const cloned = cloneReconAssignment(assignment);
+    if (!cloned) {
+      return null;
+    }
+
+    if (!Array.isArray(this.reconAssignments)) {
+      this.reconAssignments = [];
+    }
+
+    this.reconAssignments.unshift(cloned);
+    return cloned;
+  }
+
+  updateReconAssignment(assignmentId, updates = {}) {
+    if (!assignmentId || !updates || typeof updates !== 'object') {
+      return null;
+    }
+
+    if (!Array.isArray(this.reconAssignments)) {
+      this.reconAssignments = [];
+      return null;
+    }
+
+    const index = this.reconAssignments.findIndex((entry) => entry?.id === assignmentId);
+    if (index === -1) {
+      return null;
+    }
+
+    const target = this.reconAssignments[index];
+
+    if (Array.isArray(updates.crewIds)) {
+      target.crewIds = updates.crewIds.filter((id) => id !== null && id !== undefined);
+    }
+
+    if (Array.isArray(updates.events)) {
+      target.events = updates.events
+        .filter((entry) => entry && typeof entry === 'object')
+        .map((entry) => ({ ...entry }));
+    } else if (updates.events === null) {
+      target.events = [];
+    }
+
+    if ('result' in updates) {
+      if (updates.result && typeof updates.result === 'object') {
+        const resultClone = { ...updates.result };
+        if (resultClone.before && typeof resultClone.before === 'object') {
+          resultClone.before = { ...resultClone.before };
+        }
+        if (resultClone.after && typeof resultClone.after === 'object') {
+          resultClone.after = { ...resultClone.after };
+        }
+        if (resultClone.delta && typeof resultClone.delta === 'object') {
+          resultClone.delta = { ...resultClone.delta };
+        }
+        target.result = resultClone;
+      } else {
+        target.result = updates.result ?? null;
+      }
+    }
+
+    Object.keys(updates).forEach((key) => {
+      if (['crewIds', 'events', 'result'].includes(key)) {
+        return;
+      }
+      target[key] = updates[key];
+    });
+
+    return target;
+  }
+
+  removeReconAssignment(assignmentId) {
+    if (!assignmentId || !Array.isArray(this.reconAssignments)) {
+      return null;
+    }
+
+    const index = this.reconAssignments.findIndex((entry) => entry?.id === assignmentId);
+    if (index === -1) {
+      return null;
+    }
+
+    const [removed] = this.reconAssignments.splice(index, 1);
+    return removed ?? null;
   }
 }
 
@@ -242,6 +389,7 @@ const createInitialGameState = () => {
     ],
     lastExpenseReport: null,
     pendingDebts: [],
+    reconAssignments: [],
   });
 };
 

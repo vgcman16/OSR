@@ -2,6 +2,7 @@ import { GameState, createInitialGameState } from './state/gameState.js';
 import { MissionSystem } from './systems/missionSystem.js';
 import { HeatSystem } from './systems/heatSystem.js';
 import { EconomySystem } from './systems/economySystem.js';
+import { ReconSystem } from './systems/reconSystem.js';
 import { getActiveSafehouseFromState } from './world/safehouse.js';
 import { GameLoop } from './loop/gameLoop.js';
 
@@ -266,6 +267,7 @@ const createCarThiefGame = ({ canvas, context }) => {
   const heatSystem = new HeatSystem(state);
   const missionSystem = new MissionSystem(state, { heatSystem });
   const economySystem = new EconomySystem(state);
+  const reconSystem = new ReconSystem(state);
 
   if (loadedFromSave && savedPayload?.systems) {
     applyHeatSystemSnapshot(heatSystem, savedPayload.systems.heat);
@@ -995,6 +997,90 @@ const createCarThiefGame = ({ canvas, context }) => {
     }
 
     missionInfoY += 32;
+    context.fillText('Recon Ops:', missionInfoX, missionInfoY);
+    missionInfoY += 26;
+
+    const reconAssignments = Array.isArray(state.reconAssignments) ? state.reconAssignments : [];
+    const activeRecon = reconAssignments.filter((assignment) => assignment?.status === 'in-progress');
+    const crewRoster = Array.isArray(state.crew) ? state.crew : [];
+    const crewById = new Map(crewRoster.map((member) => [member?.id, member]));
+
+    if (activeRecon.length) {
+      activeRecon.slice(0, 3).forEach((assignment) => {
+        if (!assignment) {
+          return;
+        }
+
+        const progressPercent = Math.round((assignment.progress ?? 0) * 100);
+        const remainingSeconds = Number.isFinite(assignment.remainingSeconds)
+          ? Math.ceil(Math.max(0, assignment.remainingSeconds))
+          : null;
+        const statusSegments = [
+          `${progressPercent}%`,
+          remainingSeconds !== null ? `${remainingSeconds}s remaining` : null,
+        ].filter(Boolean);
+        const statusLabel = statusSegments.length ? statusSegments.join(' — ') : 'In progress';
+
+        context.fillText(
+          `${assignment.districtName ?? 'District'} — ${statusLabel}`,
+          missionInfoX,
+          missionInfoY,
+        );
+        missionInfoY += 22;
+
+        const crewNames = Array.isArray(assignment.crewIds)
+          ? assignment.crewIds
+              .map((crewId) => crewById.get(crewId)?.name ?? null)
+              .filter(Boolean)
+          : [];
+        if (crewNames.length) {
+          context.fillStyle = '#9ac7ff';
+          context.fillText(`Crew: ${crewNames.join(', ')}`, missionInfoX + 12, missionInfoY);
+          missionInfoY += 20;
+          context.fillStyle = '#d1eaff';
+        }
+      });
+    } else {
+      const latestRecon = reconAssignments
+        .filter((assignment) => assignment?.status === 'completed')
+        .sort((a, b) => (b?.completedAt ?? 0) - (a?.completedAt ?? 0))[0];
+
+      if (latestRecon) {
+        const timeLabel = Number.isFinite(latestRecon.completedAt)
+          ? new Date(latestRecon.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : null;
+        const summaryLabel = latestRecon.resultSummary ?? 'Recon completed.';
+        const reconLabel = timeLabel
+          ? `${latestRecon.districtName ?? 'District'} — ${summaryLabel} @ ${timeLabel}`
+          : `${latestRecon.districtName ?? 'District'} — ${summaryLabel}`;
+        context.fillText(`Last recon: ${reconLabel}`, missionInfoX, missionInfoY);
+        missionInfoY += 24;
+      } else {
+        context.fillText('No recon teams deployed.', missionInfoX, missionInfoY);
+        missionInfoY += 24;
+      }
+    }
+
+    if (activeRecon.length) {
+      const latestRecon = reconAssignments
+        .filter((assignment) => assignment?.status === 'completed')
+        .sort((a, b) => (b?.completedAt ?? 0) - (a?.completedAt ?? 0))[0];
+      if (latestRecon) {
+        const timeLabel = Number.isFinite(latestRecon.completedAt)
+          ? new Date(latestRecon.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : null;
+        const summaryLabel = latestRecon.resultSummary ?? 'Recon completed.';
+        const reconLabel = timeLabel
+          ? `${latestRecon.districtName ?? 'District'} — ${summaryLabel} @ ${timeLabel}`
+          : `${latestRecon.districtName ?? 'District'} — ${summaryLabel}`;
+        context.fillStyle = '#9ac7ff';
+        context.fillText(`Last recon: ${reconLabel}`, missionInfoX, missionInfoY);
+        missionInfoY += 20;
+        context.fillStyle = '#d1eaff';
+      }
+    }
+
+    missionInfoY += 12;
     context.fillText('Contracts:', missionInfoX, missionInfoY);
     missionSystem.availableMissions.forEach((mission, index) => {
       const baseY = missionInfoY + 30 + index * 26;
@@ -1030,6 +1116,7 @@ const createCarThiefGame = ({ canvas, context }) => {
       missionSystem.update(delta);
       heatSystem.update(delta);
       economySystem.update(delta);
+      reconSystem.update(delta);
 
       saveAccumulator += delta;
       if (saveAccumulator >= SAVE_INTERVAL_SECONDS) {
@@ -1084,6 +1171,7 @@ const createCarThiefGame = ({ canvas, context }) => {
       mission: missionSystem,
       heat: heatSystem,
       economy: economySystem,
+      recon: reconSystem,
     },
     loop,
     boot,
