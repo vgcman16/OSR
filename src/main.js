@@ -186,9 +186,12 @@ const missionControls = {
   safehouseAlertsList: null,
   safehouseAlertStatus: null,
   safehouseSelectedProjectId: null,
+  lastSafehouseAlertSignature: null,
   selectedCrewIds: [],
   selectedVehicleId: null,
   lastGarageStatusTimestamp: 0,
+  lastCrackdownTierName: null,
+  lastMissionStatusKey: null,
 };
 
 const CITY_INTEL_CANVAS_ARIA_LABEL = 'City districts map — hover or use arrow keys to preview intel.';
@@ -3027,6 +3030,7 @@ const updateSafehousePanel = () => {
     const detail = missionControls.safehouseStatusDetail?.trim();
     const summary = 'Safehouse telemetry unavailable.';
     safehouseStatus.textContent = [detail, alertSummaryLine, summary].filter(Boolean).join(' ');
+    missionControls.lastSafehouseAlertSignature = 'none';
     return;
   }
 
@@ -3036,6 +3040,33 @@ const updateSafehousePanel = () => {
 
   const dayValue = Number.isFinite(state.day) ? state.day : null;
   const safehouseAlerts = Array.isArray(state.safehouseIncursions) ? state.safehouseIncursions : [];
+  const trackedAlerts = Array.isArray(safehouseAlerts)
+    ? safehouseAlerts.filter((entry) => entry && entry.id)
+    : [];
+  const nextAlertSignature = trackedAlerts.length
+    ? trackedAlerts
+        .map((entry) => {
+          const status = typeof entry.status === 'string' ? entry.status.trim().toLowerCase() : 'alert';
+          const cooldownEndsOnDay = Number.isFinite(entry.cooldownEndsOnDay)
+            ? entry.cooldownEndsOnDay
+            : '';
+          const updatedAt = Number.isFinite(entry.updatedAt) ? entry.updatedAt : '';
+          return `${entry.id}:${status}:${cooldownEndsOnDay}:${updatedAt}`;
+        })
+        .join('|')
+    : 'none';
+  if (nextAlertSignature !== missionControls.lastSafehouseAlertSignature) {
+    if (
+      missionControls.lastSafehouseAlertSignature !== null &&
+      trackedAlerts.some((entry) => {
+        const status = typeof entry.status === 'string' ? entry.status.trim().toLowerCase() : 'alert';
+        return status === 'alert';
+      })
+    ) {
+      soundboard.playSafehouseAlert();
+    }
+    missionControls.lastSafehouseAlertSignature = nextAlertSignature;
+  }
   const alertRenderResult = renderSafehouseAlerts(safehouseAlerts, { day: dayValue });
   alertSummaryLine = alertRenderResult?.summaryLine ?? '';
 
@@ -7209,10 +7240,20 @@ const updateMissionStatusText = () => {
   const missionSystem = getMissionSystem();
   if (!missionSystem) {
     missionControls.statusText.textContent = 'Game initializing…';
+    missionControls.lastMissionStatusKey = null;
     return;
   }
 
   const activeMission = missionSystem.state.activeMission;
+  const missionStatusKey = activeMission
+    ? `${activeMission.id ?? 'mission'}:${activeMission.status ?? 'active'}`
+    : 'none';
+  if (missionStatusKey !== missionControls.lastMissionStatusKey) {
+    if (missionControls.lastMissionStatusKey !== null) {
+      soundboard.playMissionUpdate();
+    }
+    missionControls.lastMissionStatusKey = missionStatusKey;
+  }
   let statusMessage = formatMissionStatusMessage(activeMission);
 
   const crackdownInfo = describeCrackdownPolicy();
@@ -7236,9 +7277,17 @@ const updateCrackdownIndicator = () => {
   const crackdownInfo = describeCrackdownPolicy();
   if (!crackdownInfo) {
     crackdownText.textContent = 'Crackdown systems calibrating…';
+    missionControls.lastCrackdownTierName = null;
     return;
   }
 
+  const tierName = crackdownInfo.tierName ?? crackdownInfo.label ?? 'calm';
+  if (tierName !== missionControls.lastCrackdownTierName) {
+    if (missionControls.lastCrackdownTierName !== null) {
+      soundboard.playCrackdownShift();
+    }
+    missionControls.lastCrackdownTierName = tierName;
+  }
   crackdownText.textContent = `Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`;
 };
 
