@@ -93,6 +93,15 @@ const missionControls = {
   cityIntelPoiPerks: null,
   cityIntelCanvas: null,
   cityIntelCanvasContext: null,
+  reconCrewSelect: null,
+  reconDistrictSelect: null,
+  reconDurationSelect: null,
+  reconAssignButton: null,
+  reconStatus: null,
+  reconList: null,
+  reconStatusDetail: '',
+  reconSelectedCrewIds: [],
+  lastReconCompletionKey: null,
   crewList: null,
   vehicleList: null,
   crackdownText: null,
@@ -612,9 +621,16 @@ const HEAT_MANAGEMENT_ACTIONS = {
   },
 };
 
+const RECON_DURATION_OPTIONS = [
+  { value: 'quick', label: 'Quick sweep — 30s', seconds: 30 },
+  { value: 'standard', label: 'Standard sweep — 45s', seconds: 45 },
+  { value: 'deep', label: 'Deep infiltration — 60s', seconds: 60 },
+];
+
 const getMissionSystem = () => gameInstance?.systems?.mission ?? null;
 const getEconomySystem = () => gameInstance?.systems?.economy ?? null;
 const getHeatSystem = () => gameInstance?.systems?.heat ?? null;
+const getReconSystem = () => gameInstance?.systems?.recon ?? null;
 const getSharedState = () => gameInstance?.state ?? getMissionSystem()?.state ?? null;
 
 const triggerHudRender = () => {
@@ -1504,12 +1520,288 @@ const setTrainingStatus = (message) => {
   missionControls.trainingStatus.textContent = message ?? '';
 };
 
+const setReconStatus = (message) => {
+  if (!missionControls.reconStatus) {
+    missionControls.reconStatusDetail = message ?? '';
+    return;
+  }
+
+  missionControls.reconStatus.textContent = message ?? '';
+  missionControls.reconStatusDetail = message ?? '';
+};
+
 const setPlayerStatus = (message) => {
   if (!missionControls.playerStatus) {
     return;
   }
 
   missionControls.playerStatus.textContent = message ?? '';
+};
+
+const resolveReconDurationOption = (value) => {
+  if (!value) {
+    return RECON_DURATION_OPTIONS.find((option) => option.value === 'standard') ?? RECON_DURATION_OPTIONS[0];
+  }
+
+  return RECON_DURATION_OPTIONS.find((option) => option.value === value)
+    ?? RECON_DURATION_OPTIONS.find((option) => option.value === 'standard')
+    ?? RECON_DURATION_OPTIONS[0];
+};
+
+const buildReconAssignmentLabel = (assignment, crewById) => {
+  if (!assignment) {
+    return 'Recon assignment';
+  }
+
+  const districtLabel = assignment.districtName ?? 'District';
+  if (assignment.status === 'completed') {
+    const summaryLabel = assignment.resultSummary ?? 'Recon completed.';
+    const timeLabel = Number.isFinite(assignment.completedAt)
+      ? new Date(assignment.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : null;
+    return timeLabel ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}` : `${districtLabel} — ${summaryLabel}`;
+  }
+
+  if (assignment.status === 'cancelled') {
+    const progressPercent = Math.round((assignment.progress ?? 0) * 100);
+    const remainingSeconds = Number.isFinite(assignment.remainingSeconds)
+      ? Math.ceil(Math.max(0, assignment.remainingSeconds))
+      : null;
+    const statusSegments = [
+      'Cancelled',
+      progressPercent ? `${progressPercent}% complete` : null,
+      remainingSeconds !== null ? `${remainingSeconds}s early` : null,
+    ].filter(Boolean);
+    return `${districtLabel} — ${statusSegments.join(' — ')}`;
+  }
+
+  const progressPercent = Math.round((assignment.progress ?? 0) * 100);
+  const remainingSeconds = Number.isFinite(assignment.remainingSeconds)
+    ? Math.ceil(Math.max(0, assignment.remainingSeconds))
+    : null;
+  const statusSegments = [
+    'In progress',
+    progressPercent ? `${progressPercent}%` : null,
+    remainingSeconds !== null ? `${remainingSeconds}s remaining` : null,
+  ].filter(Boolean);
+
+  const crewNames = Array.isArray(assignment.crewIds)
+    ? assignment.crewIds
+        .map((crewId) => crewById.get(crewId)?.name ?? null)
+        .filter(Boolean)
+    : [];
+
+  const crewSegment = crewNames.length ? `Crew: ${crewNames.join(', ')}` : null;
+  return [districtLabel, ...statusSegments, crewSegment].filter(Boolean).join(' — ');
+};
+
+const updateReconPanel = () => {
+  const {
+    reconCrewSelect,
+    reconDistrictSelect,
+    reconDurationSelect,
+    reconAssignButton,
+    reconStatus,
+    reconList,
+  } = missionControls;
+
+  if (!reconCrewSelect || !reconDistrictSelect || !reconDurationSelect || !reconAssignButton || !reconStatus || !reconList) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const reconSystem = getReconSystem();
+  const state = reconSystem?.state ?? missionSystem?.state ?? getSharedState();
+  const systemsReady = Boolean(reconSystem && missionSystem && state);
+
+  const crewRoster = Array.isArray(state?.crew) ? state.crew : [];
+  const previousSelection = new Set(missionControls.reconSelectedCrewIds ?? []);
+
+  reconCrewSelect.innerHTML = '';
+
+  if (!crewRoster.length) {
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.disabled = true;
+    placeholder.textContent = systemsReady ? 'No crew recruited yet.' : 'Recon systems offline.';
+    reconCrewSelect.appendChild(placeholder);
+  } else {
+    crewRoster.forEach((member) => {
+      if (!member) {
+        return;
+      }
+
+      const option = document.createElement('option');
+      option.value = member.id;
+      const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
+      const readinessSummary = typeof member.getReadinessState === 'function'
+        ? member.getReadinessState()
+        : null;
+      const readinessLabel = readinessSummary && readinessSummary !== 'ready' ? ` • ${readinessSummary}` : '';
+      option.textContent = `${member.name} — ${member.specialty} • ${statusLabel}${readinessLabel}`;
+      const available = typeof member.isMissionReady === 'function'
+        ? member.isMissionReady()
+        : (member.status ?? 'idle').toLowerCase() === 'idle';
+      option.disabled = !available;
+      if (!option.disabled && previousSelection.has(member.id)) {
+        option.selected = true;
+      }
+      reconCrewSelect.appendChild(option);
+    });
+  }
+
+  reconCrewSelect.size = Math.min(Math.max(crewRoster.length, 1), 6);
+  reconCrewSelect.disabled = !systemsReady || !crewRoster.length;
+  if (!systemsReady) {
+    reconCrewSelect.title = 'Recon systems offline.';
+  } else if (!crewRoster.length) {
+    reconCrewSelect.title = 'Recruit crew before deploying recon teams.';
+  } else {
+    reconCrewSelect.title = 'Select idle crew to deploy.';
+  }
+
+  const selectedCrewIds = Array.from(reconCrewSelect.selectedOptions ?? [])
+    .map((option) => option.value)
+    .filter(Boolean);
+  missionControls.reconSelectedCrewIds = selectedCrewIds;
+
+  const previousDistrict = reconDistrictSelect.value;
+  reconDistrictSelect.innerHTML = '';
+  const districtPlaceholder = document.createElement('option');
+  districtPlaceholder.value = '';
+  districtPlaceholder.disabled = true;
+  districtPlaceholder.textContent = systemsReady ? 'Select a district' : 'Recon systems offline';
+  reconDistrictSelect.appendChild(districtPlaceholder);
+
+  const districts = Array.isArray(state?.city?.districts) ? state.city.districts : [];
+  districts.forEach((district) => {
+    if (!district) {
+      return;
+    }
+    const option = document.createElement('option');
+    option.value = district.id;
+    option.textContent = district.name ?? 'District';
+    if (previousDistrict && district.id === previousDistrict) {
+      option.selected = true;
+    }
+    reconDistrictSelect.appendChild(option);
+  });
+
+  if (previousDistrict && reconDistrictSelect.querySelector(`option[value="${previousDistrict}"]`)) {
+    reconDistrictSelect.value = previousDistrict;
+  }
+
+  reconDistrictSelect.disabled = !systemsReady || !districts.length;
+  reconDistrictSelect.title = !systemsReady
+    ? 'Recon systems offline.'
+    : !districts.length
+      ? 'No districts catalogued.'
+      : '';
+
+  const previousDuration = reconDurationSelect.value;
+  reconDurationSelect.innerHTML = '';
+  RECON_DURATION_OPTIONS.forEach((option) => {
+    const node = document.createElement('option');
+    node.value = option.value;
+    node.textContent = option.label;
+    node.selected = option.value === previousDuration;
+    reconDurationSelect.appendChild(node);
+  });
+  reconDurationSelect.value = resolveReconDurationOption(reconDurationSelect.value).value;
+  reconDurationSelect.disabled = !systemsReady;
+  reconDurationSelect.title = systemsReady ? '' : 'Recon systems offline.';
+
+  const durationOption = resolveReconDurationOption(reconDurationSelect.value);
+  const canSchedule = systemsReady && selectedCrewIds.length > 0 && reconDistrictSelect.value;
+
+  reconAssignButton.disabled = !canSchedule;
+  reconAssignButton.textContent = durationOption
+    ? `Deploy Recon (${durationOption.seconds}s)`
+    : 'Deploy Recon';
+  reconAssignButton.title = (() => {
+    if (!systemsReady) {
+      return 'Recon systems offline.';
+    }
+    if (!selectedCrewIds.length) {
+      return 'Select idle crew for the recon team.';
+    }
+    if (!reconDistrictSelect.value) {
+      return 'Select a district to scout.';
+    }
+    return '';
+  })();
+
+  const crewById = new Map(crewRoster.map((member) => [member?.id, member]));
+  const reconAssignments = reconSystem?.state?.reconAssignments ?? state?.reconAssignments ?? [];
+
+  reconList.innerHTML = '';
+
+  if (!Array.isArray(reconAssignments) || !reconAssignments.length) {
+    const item = document.createElement('li');
+    item.textContent = systemsReady ? 'No recon assignments scheduled.' : 'Recon network idle.';
+    reconList.appendChild(item);
+  } else {
+    const sortedAssignments = reconAssignments
+      .slice()
+      .sort((a, b) => {
+        if ((a?.status === 'in-progress') !== (b?.status === 'in-progress')) {
+          return a?.status === 'in-progress' ? -1 : 1;
+        }
+        const timeA = a?.updatedAt ?? a?.startedAt ?? 0;
+        const timeB = b?.updatedAt ?? b?.startedAt ?? 0;
+        return timeB - timeA;
+      });
+
+    sortedAssignments.slice(0, 8).forEach((assignment) => {
+      if (!assignment) {
+        return;
+      }
+
+      const item = document.createElement('li');
+      item.textContent = buildReconAssignmentLabel(assignment, crewById);
+
+      if (assignment.status === 'completed' && assignment.resultSummary) {
+        item.title = assignment.resultSummary;
+      }
+
+      if (assignment.status === 'in-progress') {
+        const cancelButton = document.createElement('button');
+        cancelButton.type = 'button';
+        cancelButton.className = 'mission-recon__cancel-btn';
+        cancelButton.dataset.reconCancel = assignment.id;
+        cancelButton.textContent = 'Cancel';
+        cancelButton.title = `Abort recon in ${assignment.districtName ?? 'district'}`;
+        item.appendChild(document.createTextNode(' '));
+        item.appendChild(cancelButton);
+      }
+
+      reconList.appendChild(item);
+    });
+  }
+
+  const latestCompleted = Array.isArray(reconAssignments)
+    ? reconAssignments
+        .filter((assignment) => assignment?.status === 'completed')
+        .sort((a, b) => (b?.completedAt ?? 0) - (a?.completedAt ?? 0))[0]
+    : null;
+  const completionKey = latestCompleted ? `${latestCompleted.id}-${latestCompleted.completedAt ?? 0}` : null;
+
+  if (completionKey && completionKey !== missionControls.lastReconCompletionKey) {
+    const summaryLabel = latestCompleted.resultSummary ?? 'Recon completed.';
+    const districtLabel = latestCompleted.districtName ?? 'District';
+    setReconStatus(`Recon in ${districtLabel} complete — ${summaryLabel}.`);
+    missionControls.lastReconCompletionKey = completionKey;
+  } else if (!completionKey) {
+    missionControls.lastReconCompletionKey = null;
+  }
+
+  const statusMessage = systemsReady
+    ? missionControls.reconStatusDetail ?? ''
+    : 'Recon systems offline.';
+  reconStatus.textContent = statusMessage;
+  if (!systemsReady) {
+    missionControls.reconStatusDetail = statusMessage;
+  }
 };
 
 const setMissionEventStatus = (message) => {
@@ -4363,7 +4655,7 @@ const updateTrainingOptions = () => {
   const restEligible = restingSelection
     ? typeof restingSelection.isRestEligible === 'function'
       ? restingSelection.isRestEligible()
-      : !['on-mission', 'captured'].includes((restingSelection.status ?? '').toLowerCase())
+      : !['on-mission', 'on-recon', 'captured'].includes((restingSelection.status ?? '').toLowerCase())
     : false;
 
   const previousRestDuration = restDurationSelect.value;
@@ -4513,7 +4805,7 @@ const handleCrewRestScheduling = () => {
 
   const eligible = typeof member.isRestEligible === 'function'
     ? member.isRestEligible()
-    : !['on-mission', 'captured'].includes((member.status ?? '').toLowerCase());
+    : !['on-mission', 'on-recon', 'captured'].includes((member.status ?? '').toLowerCase());
   if (!eligible) {
     setTrainingStatus(`${member.name} cannot stand down right now.`);
     return;
@@ -4539,6 +4831,135 @@ const handleCrewRestScheduling = () => {
   updateCrewSelectionOptions();
   updateMissionControls();
   triggerHudRender();
+};
+
+const handleReconCrewSelectionChange = () => {
+  const select = missionControls.reconCrewSelect;
+  if (!select) {
+    return;
+  }
+
+  missionControls.reconSelectedCrewIds = Array.from(select.selectedOptions ?? [])
+    .map((option) => option.value)
+    .filter(Boolean);
+  updateReconPanel();
+};
+
+const handleReconSchedule = () => {
+  const reconSystem = getReconSystem();
+  const missionSystem = getMissionSystem();
+  const state = reconSystem?.state ?? missionSystem?.state ?? getSharedState();
+
+  if (!reconSystem || !state) {
+    setReconStatus('Recon systems offline.');
+    updateReconPanel();
+    return;
+  }
+
+  const crewIds = Array.isArray(missionControls.reconSelectedCrewIds)
+    ? missionControls.reconSelectedCrewIds.filter(Boolean)
+    : [];
+
+  if (!crewIds.length) {
+    setReconStatus('Select idle crew to deploy.');
+    updateReconPanel();
+    return;
+  }
+
+  const crewRoster = Array.isArray(state.crew) ? state.crew : [];
+  const unavailableMember = crewRoster
+    .filter((member) => crewIds.includes(member?.id))
+    .find((member) => {
+      if (!member) {
+        return false;
+      }
+      if (typeof member.isMissionReady === 'function') {
+        return !member.isMissionReady();
+      }
+      return (member.status ?? '').toLowerCase() !== 'idle';
+    });
+
+  if (unavailableMember) {
+    setReconStatus(`${unavailableMember.name ?? 'Crew member'} is unavailable for recon duty.`);
+    updateReconPanel();
+    return;
+  }
+
+  const districtSelect = missionControls.reconDistrictSelect;
+  const districtId = districtSelect?.value;
+  if (!districtId) {
+    setReconStatus('Select a district to scout.');
+    updateReconPanel();
+    return;
+  }
+
+  const durationOption = resolveReconDurationOption(missionControls.reconDurationSelect?.value);
+  const result = reconSystem.scheduleAssignment({
+    crewIds,
+    districtId,
+    durationSeconds: durationOption?.seconds,
+  });
+
+  if (!result?.success) {
+    setReconStatus(result?.message ?? 'Unable to deploy recon team.');
+    updateReconPanel();
+    return;
+  }
+
+  missionControls.reconSelectedCrewIds = [];
+  if (missionControls.reconCrewSelect) {
+    Array.from(missionControls.reconCrewSelect.options).forEach((option) => {
+      option.selected = false;
+    });
+  }
+
+  setReconStatus(result.message ?? 'Recon team deployed.');
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleReconCancel = (assignmentId) => {
+  if (!assignmentId) {
+    return;
+  }
+
+  const reconSystem = getReconSystem();
+  if (!reconSystem) {
+    setReconStatus('Recon systems offline.');
+    updateReconPanel();
+    return;
+  }
+
+  const result = reconSystem.cancelAssignment(assignmentId);
+  if (!result?.success) {
+    setReconStatus(result?.message ?? 'Unable to abort recon assignment.');
+    updateReconPanel();
+    return;
+  }
+
+  setReconStatus(result.message ?? 'Recon assignment cancelled.');
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleReconListClick = (event) => {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (!target) {
+    return;
+  }
+
+  const button = target.closest('[data-recon-cancel]');
+  if (!button) {
+    return;
+  }
+
+  event.preventDefault();
+  const assignmentId = button.getAttribute('data-recon-cancel');
+  if (!assignmentId) {
+    return;
+  }
+
+  handleReconCancel(assignmentId);
 };
 
 const handleLoyaltyTraining = () => {
@@ -5731,6 +6152,14 @@ const renderMissionLog = () => {
     if (followUpSummary && !summary.includes(followUpSummary)) {
       details.push(`Follow-up: ${followUpSummary}`);
     }
+    const crewSummary = entry?.crewSummary ?? null;
+    if (crewSummary && !summary.includes(crewSummary)) {
+      details.push(crewSummary);
+    }
+    const reconSummary = entry?.reconSummary ?? null;
+    if (reconSummary && !summary.includes(reconSummary)) {
+      details.push(`Recon: ${reconSummary}`);
+    }
     const timestamp = Number.isFinite(entry?.timestamp) ? new Date(entry.timestamp) : null;
     const timeLabel = timestamp ? ` @ ${timestamp.toLocaleTimeString([], options)}` : '';
     item.textContent = `${details.join(' — ')}${timeLabel}`;
@@ -5906,6 +6335,12 @@ const updateMissionControls = () => {
     cityIntelPoiName,
     cityIntelPoiDescription,
     cityIntelPoiPerks,
+    reconCrewSelect,
+    reconDistrictSelect,
+    reconDurationSelect,
+    reconAssignButton,
+    reconStatus,
+    reconList,
     eventPrompt,
     eventChoices,
     eventHistory,
@@ -5981,6 +6416,12 @@ const updateMissionControls = () => {
     cityIntelPoiName,
     cityIntelPoiDescription,
     cityIntelPoiPerks,
+    reconCrewSelect,
+    reconDistrictSelect,
+    reconDurationSelect,
+    reconAssignButton,
+    reconStatus,
+    reconList,
     eventPrompt,
     eventChoices,
     eventHistory,
@@ -6048,6 +6489,7 @@ const updateMissionControls = () => {
   updateMaintenancePanel();
   updateDebtPanel();
   updateOperationsDashboard();
+  updateReconPanel();
 
   const isReady = Boolean(missionSystem && economySystem);
   controls.forEach((control) => {
@@ -6750,6 +7192,12 @@ const setupMissionControls = () => {
   missionControls.cityIntelPoiName = document.getElementById('mission-city-intel-poi-name');
   missionControls.cityIntelPoiDescription = document.getElementById('mission-city-intel-poi-description');
   missionControls.cityIntelPoiPerks = document.getElementById('mission-city-intel-poi-perks');
+  missionControls.reconCrewSelect = document.getElementById('mission-recon-crew');
+  missionControls.reconDistrictSelect = document.getElementById('mission-recon-district');
+  missionControls.reconDurationSelect = document.getElementById('mission-recon-duration');
+  missionControls.reconAssignButton = document.getElementById('mission-recon-deploy-btn');
+  missionControls.reconStatus = document.getElementById('mission-recon-status');
+  missionControls.reconList = document.getElementById('mission-recon-list');
   missionControls.operationsSection = document.querySelector('.mission-operations');
   missionControls.operationsExpensesValue = document.getElementById('mission-ops-expenses');
   missionControls.operationsExpensesStatus = document.getElementById('mission-ops-expenses-status');
@@ -6892,6 +7340,12 @@ const setupMissionControls = () => {
     cityIntelPoiName,
     cityIntelPoiDescription,
     cityIntelPoiPerks,
+    missionControls.reconCrewSelect,
+    missionControls.reconDistrictSelect,
+    missionControls.reconDurationSelect,
+    missionControls.reconAssignButton,
+    missionControls.reconStatus,
+    missionControls.reconList,
     crewList,
     vehicleList,
     crackdownText,
@@ -6935,6 +7389,11 @@ const setupMissionControls = () => {
   }
 
   startButton.addEventListener('click', handleMissionStart);
+  missionControls.reconCrewSelect.addEventListener('change', handleReconCrewSelectionChange);
+  missionControls.reconDistrictSelect.addEventListener('change', updateReconPanel);
+  missionControls.reconDurationSelect.addEventListener('change', updateReconPanel);
+  missionControls.reconAssignButton.addEventListener('click', handleReconSchedule);
+  missionControls.reconList.addEventListener('click', handleReconListClick);
   select.addEventListener('change', () => {
     missionControls.selectedCrewIds = [];
     missionControls.selectedVehicleId = null;
@@ -6971,6 +7430,9 @@ const setupMissionControls = () => {
 
   setRecruitStatus('');
   setTrainingStatus('');
+  missionControls.reconSelectedCrewIds = [];
+  missionControls.lastReconCompletionKey = null;
+  setReconStatus('');
   setPlayerStatus('');
   setMissionEventStatus('');
   missionControls.debtStatusDetail = '';

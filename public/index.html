@@ -267,6 +267,52 @@
             role="img"
             aria-label="City district overview"
           ></canvas>
+          <article class="mission-recon" aria-labelledby="mission-recon-title">
+            <h4 id="mission-recon-title" class="mission-details__subtitle">Field Recon</h4>
+            <p class="mission-details__hint">
+              Deploy idle crew to scout districts and stabilize influence before launching a heist.
+            </p>
+            <div class="mission-recon__controls">
+              <label for="mission-recon-crew" class="mission-recon__label">Crew Detail</label>
+              <select
+                id="mission-recon-crew"
+                class="mission-recon__select"
+                name="mission-recon-crew"
+                multiple
+                size="4"
+                aria-describedby="mission-recon-status"
+              >
+                <option value="" disabled>Idle crew required</option>
+              </select>
+              <label for="mission-recon-district" class="mission-recon__label">Target District</label>
+              <select
+                id="mission-recon-district"
+                class="mission-recon__select"
+                name="mission-recon-district"
+              >
+                <option value="" selected disabled>Select a district</option>
+              </select>
+              <label for="mission-recon-duration" class="mission-recon__label">Operation Focus</label>
+              <select
+                id="mission-recon-duration"
+                class="mission-recon__select"
+                name="mission-recon-duration"
+              >
+                <option value="quick">Quick sweep — 30s</option>
+                <option value="standard" selected>Standard sweep — 45s</option>
+                <option value="deep">Deep infiltration — 60s</option>
+              </select>
+              <button id="mission-recon-deploy-btn" type="button" class="mission-recon__action">
+                Deploy Recon
+              </button>
+            </div>
+            <p id="mission-recon-status" class="mission-recon__status" role="status" aria-live="polite">
+              Recon network calibrating.
+            </p>
+            <ul id="mission-recon-list" class="mission-details__list mission-recon__list">
+              <li>No recon assignments scheduled.</li>
+            </ul>
+          </article>
         </section>
         <section class="mission-events" aria-labelledby="mission-events-title">
           <h3 id="mission-events-title" class="mission-details__title">Mission Events</h3>
