@@ -9,6 +9,7 @@ import {
   getNextNotorietyProfile,
 } from './game/carThief/systems/missionSystem.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
+import { getAvailableCrewStorylineMissions } from './game/carThief/systems/crewStorylines.js';
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
 import { computeSafehouseFacilityBonuses, getFacilityEffectConfig } from './game/carThief/world/safehouseEffects.js';
 
@@ -75,6 +76,9 @@ const missionControls = {
   trainingRestDurationSelect: null,
   trainingRestButton: null,
   trainingStatus: null,
+  crewStorylineSection: null,
+  crewStorylineList: null,
+  crewStorylineStatus: null,
   playerStatsList: null,
   playerSkillSelect: null,
   playerSkillButton: null,
@@ -4080,6 +4084,15 @@ const updateCrewSelectionOptions = () => {
     return;
   }
 
+  const storylineTemplates = getAvailableCrewStorylineMissions(crewRoster);
+  const storylineByCrewId = new Map();
+  storylineTemplates.forEach((template) => {
+    const crewId = template?.storyline?.crewId;
+    if (crewId) {
+      storylineByCrewId.set(crewId, template);
+    }
+  });
+
   crewRoster.forEach((member) => {
     if (!member) {
       return;
@@ -4118,15 +4131,29 @@ const updateCrewSelectionOptions = () => {
     const statusLabel = (member.status ?? 'idle').replace(/-/g, ' ');
     const readiness = summarizeCrewReadiness(member);
     const readinessLabel = readiness?.label ? ` • ${readiness.label}` : '';
+    const nextStoryMission = storylineByCrewId.get(member.id) ?? null;
+    const storySummary = summarizeCrewStorylineProgress(member, nextStoryMission);
+    const storyLabel = storySummary?.label ? ` • ${storySummary.label}` : '';
     const backgroundName = member.background?.name || member.background?.perkLabel || '';
     const backgroundLabel = backgroundName ? ` • ${backgroundName}` : '';
     const traitSummary = formatCrewTraitSummary(member, 3);
     const traitsLabel = traitSummary ? ` • ${traitSummary}` : '';
-    const descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${readinessLabel}${backgroundLabel}${traitsLabel}`;
+    const descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${readinessLabel}${storyLabel}${backgroundLabel}${traitsLabel}`;
     descriptor.textContent = descriptorText;
+    const tooltipParts = [];
     if (readiness?.tooltip) {
-      descriptor.title = readiness.tooltip;
-      checkbox.title = readiness.tooltip;
+      tooltipParts.push(readiness.tooltip);
+    }
+    if (storySummary?.tooltip) {
+      tooltipParts.push(storySummary.tooltip);
+    }
+    const combinedTooltip = tooltipParts.join('\n\n');
+    if (combinedTooltip) {
+      descriptor.title = combinedTooltip;
+      checkbox.title = combinedTooltip;
+    } else {
+      descriptor.removeAttribute('title');
+      checkbox.removeAttribute('title');
     }
 
     optionLabel.appendChild(checkbox);
@@ -4135,6 +4162,149 @@ const updateCrewSelectionOptions = () => {
   });
 
   missionControls.selectedCrewIds = Array.from(selectedSet);
+};
+
+const summarizeCrewStorylineProgress = (member, nextMission = null) => {
+  if (!member) {
+    return { label: '', tooltip: '' };
+  }
+
+  const completedSteps = Array.isArray(member.storyProgress?.completedSteps)
+    ? member.storyProgress.completedSteps.length
+    : 0;
+  const crewName = member.name ?? 'Crew member';
+
+  const tooltipParts = [
+    `${crewName} has completed ${completedSteps} storyline step${completedSteps === 1 ? '' : 's'}.`,
+  ];
+
+  if (nextMission) {
+    const missionLabel = (() => {
+      const fullName = nextMission.name ?? 'Storyline mission';
+      if (crewName && fullName.startsWith(`${crewName}: `)) {
+        return fullName.slice(crewName.length + 2).trim();
+      }
+      return fullName;
+    })();
+    if (nextMission.description) {
+      tooltipParts.push(nextMission.description);
+    }
+    tooltipParts.push(`Next mission: ${missionLabel}.`);
+    return {
+      label: 'Story: Next mission ready',
+      tooltip: tooltipParts.join(' '),
+    };
+  }
+
+  if (completedSteps > 0) {
+    tooltipParts.push('No storyline mission is currently queued.');
+    return {
+      label: `Story: ${completedSteps} completed`,
+      tooltip: tooltipParts.join(' '),
+    };
+  }
+
+  tooltipParts.push('Earn loyalty to unlock the first storyline mission.');
+  return {
+    label: 'Story: Not started',
+    tooltip: tooltipParts.join(' '),
+  };
+};
+
+const updateCrewStorylinePanel = () => {
+  const list = missionControls.crewStorylineList;
+  if (!list) {
+    return;
+  }
+
+  list.innerHTML = '';
+
+  const statusNode = missionControls.crewStorylineStatus;
+  if (statusNode) {
+    statusNode.textContent = '';
+  }
+
+  const missionSystem = getMissionSystem();
+  if (!missionSystem) {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'Storyline intel syncing…';
+    list.appendChild(placeholder);
+    if (statusNode) {
+      statusNode.textContent = 'Crew storylines will appear once mission control is online.';
+    }
+    return;
+  }
+
+  const crewRoster = Array.isArray(missionSystem.state?.crew) ? missionSystem.state.crew : [];
+  if (!crewRoster.length) {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'Recruit specialists to unlock crew storylines.';
+    list.appendChild(placeholder);
+    if (statusNode) {
+      statusNode.textContent = 'No crew available — hire specialists to begin their story arcs.';
+    }
+    return;
+  }
+
+  const storylineMissions = getAvailableCrewStorylineMissions(crewRoster);
+  if (!storylineMissions.length) {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'No storyline missions ready. Raise loyalty to unlock new chapters.';
+    list.appendChild(placeholder);
+    if (statusNode) {
+      statusNode.textContent = 'Boost crew loyalty to surface the next storyline opportunities.';
+    }
+    return;
+  }
+
+  storylineMissions
+    .slice()
+    .sort((a, b) => {
+      const nameA = a?.storyline?.crewName ?? '';
+      const nameB = b?.storyline?.crewName ?? '';
+      return nameA.localeCompare(nameB);
+    })
+    .forEach((mission) => {
+      const crewName = mission.storyline?.crewName ?? 'Crew member';
+      const member = crewRoster.find((entry) => entry?.id === mission.storyline?.crewId) ?? null;
+      const completedSteps = Array.isArray(member?.storyProgress?.completedSteps)
+        ? member.storyProgress.completedSteps.length
+        : 0;
+      const missionLabel = (() => {
+        const fullName = mission.name ?? 'Storyline mission';
+        if (crewName && fullName.startsWith(`${crewName}: `)) {
+          return fullName.slice(crewName.length + 2).trim();
+        }
+        return fullName;
+      })();
+
+      const detailParts = [];
+      if (Number.isFinite(mission.payout)) {
+        detailParts.push(`Payout ${mission.payout > 0 ? formatCurrency(mission.payout) : 'Support'}`);
+      }
+      if (Number.isFinite(mission.duration)) {
+        detailParts.push(`Duration ${formatSeconds(mission.duration)}`);
+      }
+      if (Number.isFinite(mission.heat)) {
+        detailParts.push(`Heat ${formatHeatValue(mission.heat)}`);
+      }
+      detailParts.push(`Progress ${completedSteps} step${completedSteps === 1 ? '' : 's'} completed`);
+
+      const item = document.createElement('li');
+      item.className = 'mission-storyline__item';
+      const summary = detailParts.length
+        ? `${crewName} — ${missionLabel} (${detailParts.join(' • ')})`
+        : `${crewName} — ${missionLabel}`;
+      item.textContent = summary;
+      if (mission.description) {
+        item.title = mission.description;
+      }
+      list.appendChild(item);
+    });
+
+  if (statusNode) {
+    statusNode.textContent = 'Storyline missions refresh automatically after each chapter resolves.';
+  }
 };
 
 const updateVehicleSelectionOptions = () => {
@@ -4717,6 +4887,8 @@ const updateMissionControls = () => {
     maintenanceUpgradeButton,
     maintenanceUpgradeList,
     maintenanceStatus,
+    crewStorylineList,
+    crewStorylineStatus,
     playerStatsList,
     playerSkillSelect,
     playerSkillButton,
@@ -4776,6 +4948,8 @@ const updateMissionControls = () => {
     maintenanceUpgradeButton,
     maintenanceUpgradeList,
     maintenanceStatus,
+    crewStorylineList,
+    crewStorylineStatus,
     playerStatsList,
     playerSkillSelect,
     playerSkillButton,
@@ -4790,6 +4964,7 @@ const updateMissionControls = () => {
   }
 
   updateCrewSelectionOptions();
+  updateCrewStorylinePanel();
   updateVehicleSelectionOptions();
   updateRecruitmentOptions();
   updateTrainingOptions();
@@ -5466,6 +5641,9 @@ const setupMissionControls = () => {
   missionControls.trainingRestDurationSelect = document.getElementById('mission-training-rest-duration');
   missionControls.trainingRestButton = document.getElementById('mission-training-rest-btn');
   missionControls.trainingStatus = document.getElementById('mission-training-status');
+  missionControls.crewStorylineSection = document.querySelector('.mission-storyline');
+  missionControls.crewStorylineList = document.getElementById('mission-storyline-list');
+  missionControls.crewStorylineStatus = document.getElementById('mission-storyline-status');
   missionControls.playerStatsList = document.getElementById('mission-player-stats');
   missionControls.playerSkillSelect = document.getElementById('mission-player-skill');
   missionControls.playerSkillButton = document.getElementById('mission-player-train-btn');
@@ -5529,6 +5707,8 @@ const setupMissionControls = () => {
     trainingRestDurationSelect,
     trainingRestButton,
     trainingStatus,
+    crewStorylineList,
+    crewStorylineStatus,
     playerStatsList,
     playerSkillSelect,
     playerSkillButton,
