@@ -536,6 +536,118 @@ body {
   grid-column: 1 / -1;
 }
 
+.control-panel__tutorial-toggle {
+  margin-block: 0.5rem 1rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 190, 255, 0.45);
+  background: rgba(35, 53, 78, 0.45);
+  color: rgba(227, 239, 255, 0.95);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.control-panel__tutorial-toggle:hover,
+.control-panel__tutorial-toggle:focus-visible {
+  background: rgba(120, 190, 255, 0.2);
+  border-color: rgba(120, 190, 255, 0.8);
+  color: #ffffff;
+  outline: none;
+}
+
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  display: block;
+  background: rgba(7, 11, 18, 0.72);
+  z-index: 9999;
+  pointer-events: auto;
+  backdrop-filter: blur(2px);
+}
+
+.tutorial-overlay[hidden] {
+  display: none;
+}
+
+.tutorial-highlight {
+  position: fixed;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 200, 87, 0.95);
+  box-shadow: 0 0 0 4px rgba(255, 200, 87, 0.3), 0 20px 48px rgba(0, 0, 0, 0.55);
+  background: rgba(15, 22, 36, 0.35);
+  pointer-events: none;
+  transition: top 120ms ease, left 120ms ease, width 120ms ease, height 120ms ease, opacity 120ms ease;
+  opacity: 0;
+}
+
+.tutorial-tooltip {
+  position: fixed;
+  max-width: min(340px, 90vw);
+  background: rgba(12, 18, 28, 0.98);
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  color: #f5f7ff;
+  line-height: 1.5;
+}
+
+.tutorial-tooltip__title {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.tutorial-tooltip__body {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  color: rgba(235, 243, 255, 0.9);
+}
+
+.tutorial-tooltip__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.tutorial-tooltip__button {
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.tutorial-tooltip__button--muted {
+  background: rgba(66, 82, 108, 0.2);
+  color: rgba(220, 232, 255, 0.85);
+}
+
+.tutorial-tooltip__button--muted:hover,
+.tutorial-tooltip__button--muted:focus-visible {
+  background: rgba(66, 82, 108, 0.4);
+  color: #f1f5ff;
+  border-color: rgba(99, 132, 178, 0.6);
+  outline: none;
+}
+
+.tutorial-tooltip__button--primary {
+  background: rgba(120, 190, 255, 0.95);
+  color: #061020;
+  border-color: rgba(120, 190, 255, 1);
+}
+
+.tutorial-tooltip__button--primary:hover,
+.tutorial-tooltip__button--primary:focus-visible {
+  background: #a3d3ff;
+  color: #02060f;
+  outline: none;
+}
+
 @media (min-width: 520px) {
   .mission-details__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

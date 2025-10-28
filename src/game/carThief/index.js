@@ -1092,4 +1092,4 @@ const createCarThiefGame = ({ canvas, context }) => {
   };
 };
 
-export { createCarThiefGame };
+export { createCarThiefGame, createGameSerializer };
