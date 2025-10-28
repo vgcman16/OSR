@@ -90,6 +90,7 @@ const missionControls = {
   detailVehicleReward: null,
   detailCrewImpact: null,
   detailPlayerImpact: null,
+  detailBreakdown: null,
   cityIntelSection: null,
   cityIntelDistrictName: null,
   cityIntelDistrictDescription: null,
@@ -1173,6 +1174,332 @@ const resolveCrackdownEffectsForMission = (missionId) => {
   return null;
 };
 
+const appendUniqueBreakdownLine = (collection, line) => {
+  const normalized = typeof line === 'string' ? line.trim() : '';
+  if (!normalized) {
+    return;
+  }
+
+  const alreadyPresent = collection.some((entry) => {
+    if (typeof entry !== 'string') {
+      return false;
+    }
+    return entry.trim().toLowerCase() === normalized.toLowerCase();
+  });
+
+  if (!alreadyPresent) {
+    collection.push(normalized);
+  }
+};
+
+const describeDurationDelta = (multiplier) => {
+  if (!Number.isFinite(multiplier)) {
+    return null;
+  }
+
+  const deltaPercent = Math.round((1 - multiplier) * 100);
+  if (Math.abs(deltaPercent) < 1) {
+    return null;
+  }
+
+  return `${Math.abs(deltaPercent)}% ${deltaPercent > 0 ? 'faster' : 'slower'}`;
+};
+
+const describePercentDelta = (multiplier) => {
+  if (!Number.isFinite(multiplier)) {
+    return null;
+  }
+
+  const deltaPercent = Math.round((multiplier - 1) * 100);
+  if (Math.abs(deltaPercent) < 1) {
+    return null;
+  }
+
+  return `${deltaPercent > 0 ? '+' : ''}${deltaPercent}%`;
+};
+
+const buildMissionBreakdown = ({
+  summaryLines = [],
+  perkSummary = [],
+  vehicleImpact = null,
+  playerImpact = null,
+  chemistry = null,
+} = {}) => {
+  const crewModifiers = [];
+  const vehicleEffects = [];
+  const safehousePerks = [];
+  const playerBoosts = [];
+  const chemistryWarnings = [];
+
+  const normalizedSummary = Array.isArray(summaryLines) ? summaryLines : [];
+  normalizedSummary.forEach((rawLine) => {
+    const trimmed = typeof rawLine === 'string' ? rawLine.trim() : '';
+    if (!trimmed) {
+      return;
+    }
+
+    if (/^safehouse:/i.test(trimmed)) {
+      const cleanLine = trimmed.replace(/^Safehouse:\s*/i, '');
+      appendUniqueBreakdownLine(safehousePerks, cleanLine);
+      return;
+    }
+
+    if (/^vehicle(\b|\s)/i.test(trimmed) || /^vehicle upgrades:/i.test(trimmed)) {
+      appendUniqueBreakdownLine(vehicleEffects, trimmed);
+      return;
+    }
+
+    if (/chemistry/i.test(trimmed)) {
+      return;
+    }
+
+    appendUniqueBreakdownLine(crewModifiers, trimmed);
+  });
+
+  const normalizedPerks = Array.isArray(perkSummary) ? perkSummary : [];
+  normalizedPerks.forEach((line) => {
+    appendUniqueBreakdownLine(crewModifiers, line);
+  });
+
+  const playerImpactSummary = Array.isArray(playerImpact?.summary)
+    ? playerImpact.summary
+    : [];
+  playerImpactSummary.forEach((line) => {
+    appendUniqueBreakdownLine(playerBoosts, line);
+  });
+
+  if (playerImpact && typeof playerImpact === 'object') {
+    const durationLine = describeDurationDelta(playerImpact.durationMultiplier);
+    if (durationLine) {
+      appendUniqueBreakdownLine(playerBoosts, `Timeline: ${durationLine}.`);
+    }
+
+    const payoutLine = describePercentDelta(playerImpact.payoutMultiplier);
+    if (payoutLine) {
+      appendUniqueBreakdownLine(playerBoosts, `Payout modifier: ${payoutLine}.`);
+    }
+
+    const successBonusPercent = Number.isFinite(playerImpact.successBonus)
+      ? Math.round(playerImpact.successBonus * 100)
+      : 0;
+    if (successBonusPercent) {
+      const successLabel = successBonusPercent > 0 ? '+' : '';
+      appendUniqueBreakdownLine(
+        playerBoosts,
+        `Success bonus: ${successLabel}${successBonusPercent}%.`,
+      );
+    }
+
+    const heatLine = describePercentDelta(playerImpact.heatMultiplier);
+    if (heatLine) {
+      appendUniqueBreakdownLine(playerBoosts, `Heat modifier: ${heatLine}.`);
+    }
+
+    if (Array.isArray(playerImpact.skillsApplied) && playerImpact.skillsApplied.length) {
+      const skillLabels = playerImpact.skillsApplied.map((entry) => {
+        const config = PLAYER_SKILL_CONFIG?.[entry?.key];
+        const label = typeof config?.label === 'string' ? config.label : `${entry?.key ?? 'Skill'}`;
+        const levelValue = Number.isFinite(entry?.level)
+          ? entry.level
+          : Number.isFinite(config?.baseLevel)
+            ? config.baseLevel
+            : 1;
+        return `${label} (Lv ${levelValue})`;
+      });
+      appendUniqueBreakdownLine(playerBoosts, `Skills leveraged: ${skillLabels.join(', ')}.`);
+    }
+
+    if (Array.isArray(playerImpact.gearApplied) && playerImpact.gearApplied.length) {
+      const gearLabels = playerImpact.gearApplied.map((gearId) => {
+        const gearEntry = PLAYER_GEAR_CATALOG?.[gearId];
+        return typeof gearEntry?.label === 'string' ? gearEntry.label : `${gearId}`;
+      });
+      appendUniqueBreakdownLine(playerBoosts, `Gear readied: ${gearLabels.join(', ')}.`);
+    }
+  }
+
+  if (vehicleImpact && typeof vehicleImpact === 'object') {
+    if (vehicleImpact.model) {
+      appendUniqueBreakdownLine(
+        vehicleEffects,
+        `Assigned vehicle: ${vehicleImpact.model}.`,
+      );
+    }
+
+    const vehicleDuration = describeDurationDelta(vehicleImpact.durationMultiplier);
+    if (vehicleDuration) {
+      appendUniqueBreakdownLine(
+        vehicleEffects,
+        `Timeline impact: ${vehicleDuration}.`,
+      );
+    }
+
+    const vehicleSuccessPercent = Number.isFinite(vehicleImpact.successContribution)
+      ? Math.round(vehicleImpact.successContribution * 100)
+      : 0;
+    if (vehicleSuccessPercent) {
+      const label = vehicleSuccessPercent > 0 ? '+' : '';
+      appendUniqueBreakdownLine(
+        vehicleEffects,
+        `Success odds: ${label}${vehicleSuccessPercent}%.`,
+      );
+    }
+
+    if (Number.isFinite(vehicleImpact.heatAdjustment) && Math.abs(vehicleImpact.heatAdjustment) >= 0.05) {
+      const heatLabel = vehicleImpact.heatAdjustment > 0 ? '+' : '';
+      appendUniqueBreakdownLine(
+        vehicleEffects,
+        `Heat adjustment: ${heatLabel}${vehicleImpact.heatAdjustment.toFixed(1)}.`,
+      );
+    }
+
+    if (
+      Number.isFinite(vehicleImpact.wearOnSuccess)
+      && Number.isFinite(vehicleImpact.wearOnFailure)
+    ) {
+      appendUniqueBreakdownLine(
+        vehicleEffects,
+        `Wear: ${(vehicleImpact.wearOnSuccess * 100).toFixed(0)}% on success, ${(vehicleImpact.wearOnFailure * 100).toFixed(0)}% on failure.`,
+      );
+    }
+
+    if (
+      Number.isFinite(vehicleImpact.heatGainOnSuccess)
+      && Number.isFinite(vehicleImpact.heatGainOnFailure)
+    ) {
+      appendUniqueBreakdownLine(
+        vehicleEffects,
+        `Heat gain: ${vehicleImpact.heatGainOnSuccess.toFixed(1)} on success, ${vehicleImpact.heatGainOnFailure.toFixed(1)} on failure.`,
+      );
+    }
+
+    if (Array.isArray(vehicleImpact.installedMods) && vehicleImpact.installedMods.length) {
+      const modLabels = vehicleImpact.installedMods.map((modId) => {
+        const modEntry = VEHICLE_UPGRADE_CATALOG?.[modId];
+        return typeof modEntry?.label === 'string' ? modEntry.label : `${modId}`;
+      });
+      appendUniqueBreakdownLine(
+        vehicleEffects,
+        `Installed upgrades: ${modLabels.join(', ')}.`,
+      );
+    }
+  }
+
+  if (chemistry && typeof chemistry === 'object') {
+    if (chemistry.summary) {
+      appendUniqueBreakdownLine(chemistryWarnings, `Status: ${chemistry.summary}`);
+    }
+    if (chemistry.highlight) {
+      appendUniqueBreakdownLine(chemistryWarnings, `Boost: ${chemistry.highlight}`);
+    }
+    if (chemistry.warning) {
+      appendUniqueBreakdownLine(chemistryWarnings, `⚠️ Warning: ${chemistry.warning}`);
+    }
+  }
+
+  return {
+    crewModifiers,
+    vehicleEffects,
+    safehousePerks,
+    playerBoosts,
+    chemistryWarnings,
+  };
+};
+
+const renderMissionBreakdown = (breakdown) => {
+  const { detailBreakdown } = missionControls;
+  if (!detailBreakdown) {
+    return;
+  }
+
+  detailBreakdown.innerHTML = '';
+
+  const normalized = breakdown && typeof breakdown === 'object' ? breakdown : {};
+  const getLines = (key) => {
+    const value = normalized[key];
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .map((line) => (typeof line === 'string' ? line.trim() : ''))
+      .filter(Boolean);
+  };
+
+  const sections = [
+    {
+      key: 'crewModifiers',
+      label: 'Crew modifiers',
+      hint: 'Trait boosts, loadouts, and situational crew effects applied to this mission.',
+      empty: 'No crew modifiers applied yet.',
+    },
+    {
+      key: 'vehicleEffects',
+      label: 'Vehicle effects',
+      hint: 'Vehicle condition, upgrades, and performance adjustments currently in play.',
+      empty: 'No vehicle assigned or no vehicle effects detected.',
+    },
+    {
+      key: 'safehousePerks',
+      label: 'Safehouse perks',
+      hint: 'Facility bonuses impacting timeline, payout, success, or heat.',
+      empty: 'No safehouse perks influencing this mission.',
+    },
+    {
+      key: 'playerBoosts',
+      label: 'Player boosts',
+      hint: 'Training and gear modifiers contributed by the player character.',
+      empty: 'No player boosts active.',
+    },
+    {
+      key: 'chemistryWarnings',
+      label: 'Chemistry alerts',
+      hint: 'Team chemistry highlights, boosts, or warnings to monitor.',
+      empty: 'No chemistry alerts detected.',
+    },
+  ];
+
+  sections.forEach((section) => {
+    const lines = getLines(section.key);
+    const sectionElement = document.createElement('section');
+    sectionElement.className = 'mission-breakdown__section';
+    sectionElement.setAttribute('role', 'group');
+
+    const headingId = `${detailBreakdown.id}-${section.key}-label`;
+    const heading = document.createElement('h4');
+    heading.className = 'mission-breakdown__heading';
+    heading.id = headingId;
+    heading.textContent = section.label;
+    if (section.hint) {
+      heading.title = section.hint;
+      heading.setAttribute('aria-label', `${section.label}. ${section.hint}`);
+    }
+    sectionElement.appendChild(heading);
+
+    sectionElement.setAttribute('aria-labelledby', headingId);
+
+    const list = document.createElement('ul');
+    list.className = 'mission-breakdown__list';
+    list.setAttribute('role', 'list');
+
+    if (!lines.length) {
+      const emptyItem = document.createElement('li');
+      emptyItem.className = 'mission-breakdown__item mission-breakdown__item--empty';
+      emptyItem.textContent = section.empty;
+      list.appendChild(emptyItem);
+    } else {
+      lines.forEach((line) => {
+        const item = document.createElement('li');
+        item.className = 'mission-breakdown__item';
+        item.textContent = line;
+        list.appendChild(item);
+      });
+    }
+
+    sectionElement.appendChild(list);
+    detailBreakdown.appendChild(sectionElement);
+  });
+};
+
 const setMissionDetails = ({
   description,
   payout,
@@ -1185,6 +1512,7 @@ const setMissionDetails = ({
   playerImpact,
   crackdownEffects,
   crackdownEffectsSummary,
+  breakdown = null,
 }) => {
   const {
     detailDescription,
@@ -1196,6 +1524,7 @@ const setMissionDetails = ({
     detailVehicleReward,
     detailCrewImpact,
     detailPlayerImpact,
+    detailBreakdown,
   } = missionControls;
 
   if (
@@ -1208,7 +1537,8 @@ const setMissionDetails = ({
       detailRestriction &&
       detailVehicleReward &&
       detailCrewImpact &&
-      detailPlayerImpact
+      detailPlayerImpact &&
+      detailBreakdown
     )
   ) {
     return;
@@ -1334,6 +1664,8 @@ const setMissionDetails = ({
     item.textContent = line;
     detailPlayerImpact.appendChild(item);
   });
+
+  renderMissionBreakdown(breakdown);
 };
 
 const resetMissionDetails = (descriptionText) => {
@@ -1347,6 +1679,7 @@ const resetMissionDetails = (descriptionText) => {
     vehicleReward: ['Vehicle reward intel pending.'],
     crewImpact: ['No crew assigned.', 'No vehicle selected.'],
     playerImpact: ['Player expertise steady — train to unlock bonuses.'],
+    breakdown: null,
   });
 };
 
@@ -9547,6 +9880,7 @@ const updateMissionControls = () => {
     detailVehicleReward,
     detailCrewImpact,
     detailPlayerImpact,
+    detailBreakdown,
     cityIntelDistrictName,
     cityIntelDistrictDescription,
     cityIntelRisk,
@@ -9633,6 +9967,7 @@ const updateMissionControls = () => {
     detailVehicleReward,
     detailCrewImpact,
     detailPlayerImpact,
+    detailBreakdown,
     cityIntelDistrictName,
     cityIntelDistrictDescription,
     cityIntelRisk,
@@ -9811,7 +10146,17 @@ const updateMissionControls = () => {
       startButton.title = `Chemistry warning: ${preview.chemistry.warning}`;
     }
 
+    const impactDetails = (() => {
+      if (selectedMission.status === 'available') {
+        return preview ?? null;
+      }
+      return selectedMission.assignedCrewImpact ?? null;
+    })();
+
     const chemistryDetails = (() => {
+      if (impactDetails?.chemistry) {
+        return impactDetails.chemistry;
+      }
       if (selectedMission.status === 'available') {
         return preview?.chemistry ?? null;
       }
@@ -9865,21 +10210,39 @@ const updateMissionControls = () => {
       restrictionMessage = 'All contracts are open.';
     }
 
+    const storedCrewSummary = Array.isArray(selectedMission.crewEffectSummary)
+      ? selectedMission.crewEffectSummary
+      : [];
+
+    const summaryForBreakdown = Array.isArray(impactDetails?.summary)
+      ? impactDetails.summary
+      : selectedMission.status === 'available'
+        ? Array.isArray(preview?.summary)
+          ? preview.summary
+          : []
+        : storedCrewSummary;
+
     const crewImpactSummary = (() => {
-      if (selectedMission.status === 'available') {
-        const summary = Array.isArray(preview?.summary) ? preview.summary : [];
-        return summary.length ? summary : ['No crew bonuses applied.'];
+      if (summaryForBreakdown.length) {
+        return summaryForBreakdown;
       }
 
-      const summary = Array.isArray(selectedMission.crewEffectSummary)
-        ? selectedMission.crewEffectSummary
-        : [];
-      return summary.length
-        ? summary
-        : ['Crew assignments locked in.', 'Vehicle assignment locked in.'];
+      if (selectedMission.status === 'available') {
+        return ['No crew bonuses applied.'];
+      }
+
+      if (storedCrewSummary.length) {
+        return storedCrewSummary;
+      }
+
+      return ['Crew assignments locked in.', 'Vehicle assignment locked in.'];
     })();
 
     const crewPerkSummary = (() => {
+      if (Array.isArray(impactDetails?.perkSummary) && impactDetails.perkSummary.length) {
+        return impactDetails.perkSummary;
+      }
+
       if (selectedMission.status === 'available') {
         return Array.isArray(preview?.perkSummary) ? preview.perkSummary : [];
       }
@@ -9921,21 +10284,36 @@ const updateMissionControls = () => {
       crewImpact = crewImpact.concat(['Perk bonuses triggered:'], crewPerkSummary);
     }
 
-    let playerImpact = (() => {
-      if (selectedMission.status === 'available') {
-        const summary = Array.isArray(preview?.playerImpact?.summary)
-          ? preview.playerImpact.summary
-          : [];
-        return summary.length
-          ? summary
-          : ['Player influence steady — train to unlock bonuses.'];
+    const playerImpactDetails = (() => {
+      if (impactDetails?.playerImpact) {
+        return impactDetails.playerImpact;
       }
 
-      const summary = Array.isArray(selectedMission.playerEffectSummary)
-        ? selectedMission.playerEffectSummary
+      if (selectedMission.status === 'available') {
+        return preview?.playerImpact ?? null;
+      }
+
+      if (Array.isArray(selectedMission.playerEffectSummary)) {
+        return { summary: selectedMission.playerEffectSummary };
+      }
+
+      return null;
+    })();
+
+    const vehicleImpactDetails = impactDetails?.vehicleImpact
+      ?? (selectedMission.status !== 'available' ? selectedMission.assignedVehicleImpact ?? null : null);
+
+    let playerImpact = (() => {
+      const summary = Array.isArray(playerImpactDetails?.summary)
+        ? playerImpactDetails.summary
         : [];
-      return summary.length
-        ? summary
+
+      if (summary.length) {
+        return summary;
+      }
+
+      return selectedMission.status === 'available'
+        ? ['Player influence steady — train to unlock bonuses.']
         : ['Player expertise locked for this operation.'];
     })();
 
@@ -10030,6 +10408,13 @@ const updateMissionControls = () => {
       vehicleReward: vehicleRewardDetails,
       crewImpact,
       playerImpact,
+      breakdown: buildMissionBreakdown({
+        summaryLines: summaryForBreakdown,
+        perkSummary: crewPerkSummary,
+        vehicleImpact: vehicleImpactDetails,
+        playerImpact: playerImpactDetails,
+        chemistry: chemistryDetails,
+      }),
       crackdownEffects: selectedMission.crackdownEffects ?? null,
     });
 
@@ -10525,6 +10910,7 @@ const setupMissionControls = () => {
   missionControls.detailVehicleReward = document.getElementById('mission-detail-vehicle-reward');
   missionControls.detailCrewImpact = document.getElementById('mission-detail-crew-impact');
   missionControls.detailPlayerImpact = document.getElementById('mission-detail-player-impact');
+  missionControls.detailBreakdown = document.getElementById('mission-detail-breakdown');
   missionControls.cityIntelSection = document.querySelector('.mission-city-intel');
   missionControls.cityIntelDistrictName = document.getElementById('mission-city-intel-district-name');
   missionControls.cityIntelDistrictDescription = document.getElementById(
