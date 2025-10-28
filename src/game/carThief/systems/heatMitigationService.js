@@ -40,7 +40,7 @@ const executeHeatMitigation = ({
     metadata,
   });
 
-  missionSystem?.syncHeatTier?.();
+  missionSystem?.syncHeatTier?.('heat-mitigation');
 
   return {
     success: true,

@@ -1173,6 +1173,10 @@ class MissionSystem {
       this.state.garageActivityLog = [];
     }
 
+    if (!Array.isArray(this.state.crackdownHistory)) {
+      this.state.crackdownHistory = [];
+    }
+
     this.refreshContractPoolFromCity();
     this.ensureCrewStorylineContracts();
     this.ensureCrackdownOperations(this.currentCrackdownTier);
@@ -2925,7 +2929,7 @@ class MissionSystem {
       return null;
     }
 
-    this.syncHeatTier();
+    this.syncHeatTier('mission-start');
     this.state.lastVehicleReport = null;
 
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
@@ -3076,7 +3080,7 @@ class MissionSystem {
   }
 
   resolveMission(missionId, outcome) {
-    this.syncHeatTier();
+    this.syncHeatTier(`mission-outcome-${outcome ?? 'resolved'}`);
 
     const mission = this.availableMissions.find((entry) => entry.id === missionId);
     if (!mission || mission.status === 'available' || mission.status === 'completed') {
@@ -3507,7 +3511,7 @@ class MissionSystem {
     }
 
     if (mission.category === 'crackdown-operation') {
-      this.syncHeatTier();
+      this.syncHeatTier('crackdown-operation');
     }
 
     const notorietyChange = computeMissionNotorietyDelta(mission, outcome, crackdownPolicy);
@@ -4437,7 +4441,7 @@ class MissionSystem {
   }
 
   update(delta) {
-    this.syncHeatTier();
+    this.syncHeatTier('mission-tick');
 
     const mission = this.state.activeMission;
     if (!mission || mission.status === 'completed') {
@@ -4484,14 +4488,36 @@ MissionSystem.prototype.getCurrentCrackdownPolicy = function getCurrentCrackdown
   return crackdownPolicies[tier] ?? crackdownPolicies.calm;
 };
 
-MissionSystem.prototype.syncHeatTier = function syncHeatTier() {
+MissionSystem.prototype.syncHeatTier = function syncHeatTier(reason = 'system-sync') {
   const latestTier = this.heatSystem.getCurrentTier();
   if (this.currentCrackdownTier !== latestTier) {
-    const previousTier = this.currentCrackdownTier;
+    const previousTier = typeof this.currentCrackdownTier === 'string'
+      ? this.currentCrackdownTier.toLowerCase()
+      : 'unknown';
     this.currentCrackdownTier = latestTier;
     this.ensureCrackdownOperations(latestTier);
     this.applyHeatRestrictions();
     this.applyCrackdownNotorietyShift(previousTier, latestTier);
+
+    if (!Array.isArray(this.state.crackdownHistory)) {
+      this.state.crackdownHistory = [];
+    }
+
+    const normalizedReason = typeof reason === 'string' && reason.trim()
+      ? reason.trim()
+      : 'system-sync';
+    const normalizedLatestTier = typeof latestTier === 'string' ? latestTier.toLowerCase() : 'unknown';
+
+    this.state.crackdownHistory.unshift({
+      timestamp: Date.now(),
+      previousTier,
+      newTier: normalizedLatestTier,
+      reason: normalizedReason,
+    });
+
+    if (this.state.crackdownHistory.length > 30) {
+      this.state.crackdownHistory.length = 30;
+    }
   } else {
     this.ensureCrackdownOperations(latestTier);
   }

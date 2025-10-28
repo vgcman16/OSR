@@ -107,6 +107,9 @@ const missionControls = {
   crewList: null,
   vehicleList: null,
   crackdownText: null,
+  crackdownHistoryList: null,
+  crackdownHistoryDetail: '',
+  lastCrackdownHistorySignature: null,
   logList: null,
   recruitList: null,
   recruitStatus: null,
@@ -3397,6 +3400,135 @@ const renderHeatMitigationHistory = (historyEntries) => {
   });
 };
 
+const CRACKDOWN_REASON_LABELS = {
+  'system-sync': 'System update',
+  'mission-start': 'Mission launched',
+  'mission-outcome-success': 'Mission success',
+  'mission-outcome-failure': 'Mission failure',
+  'mission-outcome-resolved': 'Mission resolved',
+  'crackdown-operation': 'Crackdown operation',
+  'mission-tick': 'City patrol shift',
+  'heat-mitigation': 'Heat mitigation',
+};
+
+const describeCrackdownHistoryReason = (reason) => {
+  if (!reason && reason !== 0) {
+    return 'Update recorded';
+  }
+
+  const normalized = `${reason}`.trim().toLowerCase();
+  if (!normalized) {
+    return 'Update recorded';
+  }
+
+  if (CRACKDOWN_REASON_LABELS[normalized]) {
+    return CRACKDOWN_REASON_LABELS[normalized];
+  }
+
+  return normalized
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
+const describeCrackdownHistoryTier = (tierName, fallback = 'Unknown') => {
+  if (typeof tierName === 'string' && tierName.trim()) {
+    const normalized = tierName.trim().toLowerCase();
+    if (!normalized) {
+      return fallback;
+    }
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }
+
+  return fallback;
+};
+
+const buildCrackdownHistoryAnnouncement = (entry) => {
+  if (!entry) {
+    return '';
+  }
+
+  const fromLabel = describeCrackdownHistoryTier(entry.previousTier, 'Unknown');
+  const toLabel = describeCrackdownHistoryTier(entry.newTier, 'Unknown');
+  const reasonLabel = describeCrackdownHistoryReason(entry.reason);
+  return `Crackdown shift: ${fromLabel} → ${toLabel} — ${reasonLabel}.`;
+};
+
+const renderCrackdownHistory = (historyEntries) => {
+  const list = missionControls.crackdownHistoryList;
+  if (!list) {
+    return;
+  }
+
+  list.innerHTML = '';
+
+  const entries = Array.isArray(historyEntries) ? historyEntries.slice(0, 5) : [];
+
+  if (!entries.length) {
+    const placeholder = document.createElement('li');
+    placeholder.className =
+      'mission-crackdown-history__item mission-crackdown-history__item--empty';
+    placeholder.textContent = 'No crackdown shifts recorded yet.';
+    list.appendChild(placeholder);
+    missionControls.lastCrackdownHistorySignature = null;
+    missionControls.crackdownHistoryDetail = '';
+    return;
+  }
+
+  const timestampOptions = { hour: '2-digit', minute: '2-digit' };
+
+  entries.forEach((entry) => {
+    if (!entry) {
+      return;
+    }
+
+    const item = document.createElement('li');
+    item.className = 'mission-crackdown-history__item';
+
+    const header = document.createElement('div');
+    header.className = 'mission-crackdown-history__header';
+
+    const timestampLabel = document.createElement('span');
+    timestampLabel.className = 'mission-crackdown-history__timestamp';
+    const timestampValue = Number.isFinite(entry.timestamp) ? entry.timestamp : null;
+    timestampLabel.textContent = timestampValue
+      ? new Date(timestampValue).toLocaleTimeString([], timestampOptions)
+      : '—';
+
+    const shiftLabel = document.createElement('span');
+    shiftLabel.className = 'mission-crackdown-history__shift';
+    const fromLabel = describeCrackdownHistoryTier(entry.previousTier, 'Unknown');
+    const toLabel = describeCrackdownHistoryTier(entry.newTier, 'Unknown');
+    shiftLabel.textContent = `${fromLabel} → ${toLabel}`;
+
+    header.append(timestampLabel, shiftLabel);
+    item.appendChild(header);
+
+    const reason = document.createElement('div');
+    reason.className = 'mission-crackdown-history__reason';
+    reason.textContent = describeCrackdownHistoryReason(entry.reason);
+    item.appendChild(reason);
+
+    list.appendChild(item);
+  });
+
+  const latestEntry = entries[0] ?? null;
+  const latestSignature = latestEntry
+    ? `${Number.isFinite(latestEntry.timestamp) ? latestEntry.timestamp : Date.now()}:${
+        latestEntry.newTier ?? ''
+      }:${latestEntry.reason ?? ''}`
+    : null;
+
+  if (latestSignature && latestSignature !== missionControls.lastCrackdownHistorySignature) {
+    missionControls.lastCrackdownHistorySignature = latestSignature;
+    missionControls.crackdownHistoryDetail = buildCrackdownHistoryAnnouncement(latestEntry);
+  } else if (!latestSignature) {
+    missionControls.lastCrackdownHistorySignature = null;
+    missionControls.crackdownHistoryDetail = '';
+  }
+};
+
 const handleDebtPayment = (debtId, requestedPayment = null) => {
   const missionSystem = getMissionSystem();
   const economySystem = getEconomySystem();
@@ -4026,6 +4158,11 @@ const updateHeatManagementPanel = () => {
     : Array.isArray(heatSystem?.state?.heatMitigationLog)
       ? heatSystem.state.heatMitigationLog
       : [];
+  const crackdownHistory = Array.isArray(state?.crackdownHistory)
+    ? state.crackdownHistory
+    : Array.isArray(heatSystem?.state?.crackdownHistory)
+      ? heatSystem.state.crackdownHistory
+      : [];
 
   const layLowConfig = HEAT_MANAGEMENT_ACTIONS.layLow;
   const bribeConfig = HEAT_MANAGEMENT_ACTIONS.bribeOfficials;
@@ -4070,16 +4207,21 @@ const updateHeatManagementPanel = () => {
     }
   }
 
+  renderHeatMitigationHistory(mitigationLog);
+  renderCrackdownHistory(crackdownHistory);
+
   const crackdownInfo = describeCrackdownPolicy();
+  const historyDetail = missionControls.crackdownHistoryDetail?.trim();
   const crackdownMessage = crackdownInfo
-    ? `Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`
-    : 'Crackdown status unavailable.';
+    ? [`Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`, historyDetail]
+        .filter(Boolean)
+        .join(' ')
+    : ['Crackdown status unavailable.', historyDetail].filter(Boolean).join(' ');
 
   const detail = missionControls.heatStatusDetail?.trim();
   const leadMessage = detail || summaryMessage;
 
   heatStatus.textContent = [leadMessage, crackdownMessage].filter(Boolean).join(' ');
-  renderHeatMitigationHistory(mitigationLog);
 };
 
 const updateMaintenancePanel = () => {
@@ -7317,7 +7459,12 @@ const updateCrackdownIndicator = () => {
     }
     missionControls.lastCrackdownTierName = tierName;
   }
-  crackdownText.textContent = `Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`;
+  const historyDetail = missionControls.crackdownHistoryDetail?.trim();
+  const messageParts = [`Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`];
+  if (historyDetail) {
+    messageParts.push(historyDetail);
+  }
+  crackdownText.textContent = messageParts.join(' ');
 };
 
 const renderMissionLog = () => {
@@ -7629,6 +7776,7 @@ const updateMissionControls = () => {
     crewList,
     vehicleList,
     crackdownText,
+    crackdownHistoryList,
     logList,
     recruitList,
     safehouseName,
@@ -7713,6 +7861,7 @@ const updateMissionControls = () => {
     crewList,
     vehicleList,
     crackdownText,
+    crackdownHistoryList,
     logList,
     recruitList,
     safehouseName,
@@ -7786,6 +7935,11 @@ const updateMissionControls = () => {
       highlightedMission: null,
       activeMission: missionSystem?.state?.activeMission ?? null,
     });
+    const fallbackState = missionSystem?.state ?? getSharedState() ?? {};
+    const fallbackHistory = Array.isArray(fallbackState.crackdownHistory)
+      ? fallbackState.crackdownHistory
+      : [];
+    renderCrackdownHistory(fallbackHistory);
     updateMissionStatusText();
     updateCrackdownIndicator();
     updateDebtPanel();
@@ -7795,6 +7949,7 @@ const updateMissionControls = () => {
     return;
   }
 
+  renderCrackdownHistory(missionSystem.state.crackdownHistory);
   updateCrackdownIndicator();
 
   const selectedMissionId = select.value;
@@ -8563,6 +8718,7 @@ const setupMissionControls = () => {
   missionControls.crewList = document.getElementById('mission-crew-list');
   missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
+  missionControls.crackdownHistoryList = document.getElementById('mission-crackdown-history-list');
   missionControls.logList = document.getElementById('mission-log-list');
   missionControls.recruitList = document.getElementById('mission-recruit-list');
   missionControls.recruitStatus = document.getElementById('mission-recruit-status');
