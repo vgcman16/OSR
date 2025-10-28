@@ -71,11 +71,12 @@ const buildVehicleRewardProfile = (district, poi, riskTier) => {
   })();
 
   const summary = `Secure a high-end ride seized from ${territoryLabel}.`;
+  const storageRequired = riskTier === 'high' ? 2 : 1;
 
   return {
     label: modelLabel,
     summary,
-    storageRequired: 1,
+    storageRequired,
     vehicleBlueprint: {
       model: modelLabel,
       topSpeed: preset.topSpeed,

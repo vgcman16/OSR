@@ -108,6 +108,7 @@ const missionControls = {
   safehouseAlertStatus: null,
   selectedCrewIds: [],
   selectedVehicleId: null,
+  lastGarageStatusTimestamp: 0,
 };
 
 let missionControlSyncHandle = null;
@@ -605,9 +606,75 @@ const setMissionDetails = ({
   detailDuration.textContent = duration;
   detailSuccess.textContent = success;
   detailRestriction.textContent = restriction;
-  detailVehicleReward.textContent = Array.isArray(vehicleReward)
-    ? vehicleReward.join(' ')
-    : vehicleReward ?? 'Vehicle reward intel pending.';
+
+  const rewardLines = (() => {
+    if (!vehicleReward) {
+      return [];
+    }
+
+    if (Array.isArray(vehicleReward)) {
+      return vehicleReward;
+    }
+
+    if (typeof vehicleReward === 'string') {
+      return [vehicleReward];
+    }
+
+    if (typeof vehicleReward === 'object') {
+      const lines = [];
+      const label = typeof vehicleReward.label === 'string' ? vehicleReward.label.trim() : '';
+      if (label) {
+        lines.push(label);
+      }
+
+      if (Array.isArray(vehicleReward.lines)) {
+        vehicleReward.lines.forEach((entry) => {
+          if (typeof entry === 'string' && entry.trim()) {
+            lines.push(entry.trim());
+          }
+        });
+      }
+
+      if (typeof vehicleReward.storage === 'string' && vehicleReward.storage.trim()) {
+        lines.push(vehicleReward.storage.trim());
+      } else if (Number.isFinite(vehicleReward.storageRequired)) {
+        const storageRequired = Math.max(1, Math.round(vehicleReward.storageRequired));
+        const storageLabel = storageRequired === 1
+          ? 'Storage: requires 1 garage slot.'
+          : `Storage: requires ${storageRequired} garage slots.`;
+        lines.push(storageLabel);
+      }
+
+      const summaryLine = typeof vehicleReward.summary === 'string' ? vehicleReward.summary.trim() : '';
+      if (summaryLine) {
+        lines.push(summaryLine);
+      }
+
+      const statusLine = typeof vehicleReward.status === 'string' ? vehicleReward.status.trim() : '';
+      if (statusLine) {
+        lines.push(statusLine);
+      }
+
+      return lines;
+    }
+
+    return [];
+  })();
+
+  const normalizedRewardLines = rewardLines
+    .map((line) => (typeof line === 'string' ? line.trim() : ''))
+    .filter(Boolean);
+
+  const fallbackRewardLines = normalizedRewardLines.length
+    ? normalizedRewardLines
+    : ['Vehicle reward intel pending.'];
+
+  detailVehicleReward.innerHTML = '';
+  fallbackRewardLines.forEach((line) => {
+    const item = document.createElement('li');
+    item.textContent = line;
+    detailVehicleReward.appendChild(item);
+  });
 
   detailCrewImpact.innerHTML = '';
   const impactItems = Array.isArray(crewImpact) ? crewImpact : [crewImpact ?? 'No crew assigned.'];
@@ -636,7 +703,7 @@ const resetMissionDetails = (descriptionText) => {
     duration: '—',
     success: '—',
     restriction: 'All contracts are currently open.',
-    vehicleReward: 'Vehicle reward intel pending.',
+    vehicleReward: ['Vehicle reward intel pending.'],
     crewImpact: ['No crew assigned.', 'No vehicle selected.'],
     playerImpact: ['Player expertise steady — train to unlock bonuses.'],
   });
@@ -2048,6 +2115,26 @@ const updateMaintenancePanel = () => {
     : null;
   const funds = Number.isFinite(state?.funds) ? state.funds : 0;
   const latestVehicleReport = missionSystem?.state?.lastVehicleReport ?? null;
+
+  if (latestVehicleReport) {
+    const toastOutcomes = new Set(['vehicle-acquired', 'storage-blocked']);
+    let eventTimestamp = Number.isFinite(latestVehicleReport.timestamp)
+      ? latestVehicleReport.timestamp
+      : null;
+    const lastToast = Number.isFinite(missionControls.lastGarageStatusTimestamp)
+      ? missionControls.lastGarageStatusTimestamp
+      : 0;
+    if (!eventTimestamp) {
+      eventTimestamp = lastToast || Date.now();
+    }
+    if (toastOutcomes.has(latestVehicleReport.outcome) && eventTimestamp > lastToast) {
+      const reportSummary = describeVehicleReportOutcome(latestVehicleReport);
+      if (reportSummary) {
+        missionControls.maintenanceStatusDetail = reportSummary;
+        missionControls.lastGarageStatusTimestamp = eventTimestamp;
+      }
+    }
+  }
 
   const resolvedCapacity = (() => {
     if (economySystem && typeof economySystem.getActiveStorageCapacity === 'function') {
@@ -4905,32 +4992,58 @@ const updateMissionControls = () => {
     }
 
     const vehicleRewardProfile = selectedMission.vehicleReward ?? null;
-    const vehicleRewardLabel = (() => {
+    const vehicleRewardDetails = (() => {
       if (!vehicleRewardProfile) {
         if (selectedMission.falloutRecovery) {
-          return 'Support response — no vehicle reward.';
+          return ['Support response — no vehicle reward.'];
         }
         if ((selectedMission.category ?? '').toLowerCase() === 'vehicle-heist') {
-          return 'Vehicle reward intel unavailable.';
+          return ['Vehicle reward intel unavailable.'];
         }
-        return 'No vehicle reward for this mission.';
+        return ['No vehicle reward for this mission.'];
       }
 
       const storageRequired = Number.isFinite(vehicleRewardProfile.storageRequired)
         ? Math.max(1, Math.round(vehicleRewardProfile.storageRequired))
         : null;
-      const storageLabel = storageRequired !== null
-        ? `requires ${storageRequired === 1 ? '1 garage slot' : `${storageRequired} garage slots`}`
-        : 'storage requirement unknown';
       const baseLabel = vehicleRewardProfile.label ?? 'Vehicle reward';
-      const summarySegment = vehicleRewardProfile.summary ? ` — ${vehicleRewardProfile.summary}` : '';
-      let statusSegment = '';
-      if (selectedMission.vehicleRewardOutcome === 'blocked') {
-        statusSegment = ' [Blocked: garage full]';
-      } else if (selectedMission.vehicleRewardOutcome === 'acquired') {
-        statusSegment = ' [Secured]';
-      }
-      return `${baseLabel} (${storageLabel})${summarySegment}${statusSegment}`;
+      const summaryLine = typeof vehicleRewardProfile.summary === 'string'
+        ? vehicleRewardProfile.summary
+        : '';
+      const storageLine = storageRequired === null
+        ? 'Storage: requirement unknown — gather more intel.'
+        : '';
+
+      const statusLine = (() => {
+        const outcome = selectedMission.vehicleRewardOutcome ?? '';
+        if (outcome === 'blocked') {
+          const state = missionSystem?.state ?? {};
+          const capacity = getActiveStorageCapacityFromState(state);
+          const garage = Array.isArray(state?.garage) ? state.garage : [];
+          if (Number.isFinite(capacity)) {
+            return `Status: Blocked — garage capacity ${garage.length}/${capacity}.`;
+          }
+          return 'Status: Blocked — garage full.';
+        }
+        if (outcome === 'acquired') {
+          return 'Status: Secured in garage.';
+        }
+        if (selectedMission.status === 'in-progress') {
+          return 'Status: Mission in progress — reward pending.';
+        }
+        if (selectedMission.status === 'awaiting-resolution') {
+          return 'Status: Awaiting resolution — reward pending.';
+        }
+        return 'Status: Secure on mission success.';
+      })();
+
+      return {
+        label: baseLabel,
+        storageRequired,
+        storage: storageLine,
+        summary: summaryLine,
+        status: statusLine,
+      };
     })();
 
     setMissionDetails({
@@ -4940,7 +5053,7 @@ const updateMissionControls = () => {
       duration: missionDuration,
       success: missionSuccess,
       restriction: restrictionMessage,
-      vehicleReward: vehicleRewardLabel,
+      vehicleReward: vehicleRewardDetails,
       crewImpact,
       playerImpact,
     });
