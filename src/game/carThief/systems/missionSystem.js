@@ -5324,4 +5324,5 @@ export {
   NOTORIETY_LEVELS,
   getNotorietyProfile,
   getNextNotorietyProfile,
+  CRACKDOWN_NOTORIETY_PRESSURE,
 };

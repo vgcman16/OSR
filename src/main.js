@@ -15,6 +15,7 @@ import {
   VEHICLE_UPGRADE_CATALOG,
   getNotorietyProfile,
   getNextNotorietyProfile,
+  CRACKDOWN_NOTORIETY_PRESSURE,
 } from './game/carThief/systems/missionSystem.js';
 import { getVehicleModRecipes, assessVehicleModAffordability } from './game/carThief/systems/vehicleModRecipes.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
@@ -122,6 +123,8 @@ const missionControls = {
   crewChemistryList: null,
   vehicleList: null,
   crackdownText: null,
+  crackdownForecast: null,
+  crackdownForecastSummary: '',
   crackdownHistoryList: null,
   crackdownHistoryDetail: '',
   lastCrackdownHistorySignature: null,
@@ -4971,6 +4974,8 @@ const renderCrackdownHistory = (historyEntries) => {
 
   const timestampOptions = { hour: '2-digit', minute: '2-digit' };
 
+  const forecastSummary = missionControls.crackdownForecastSummary?.trim();
+
   entries.forEach((entry) => {
     if (!entry) {
       return;
@@ -4978,6 +4983,11 @@ const renderCrackdownHistory = (historyEntries) => {
 
     const item = document.createElement('li');
     item.className = 'mission-crackdown-history__item';
+    const announcement = buildCrackdownHistoryAnnouncement(entry);
+    const tooltipParts = [announcement, forecastSummary].filter(Boolean);
+    if (tooltipParts.length) {
+      item.title = tooltipParts.join(' ');
+    }
 
     const header = document.createElement('div');
     header.className = 'mission-crackdown-history__header';
@@ -5906,11 +5916,22 @@ const updateHeatManagementPanel = () => {
 
   const crackdownInfo = describeCrackdownPolicy();
   const historyDetail = missionControls.crackdownHistoryDetail?.trim();
+  const forecastSummary = missionControls.crackdownForecastSummary?.trim();
   const crackdownMessage = crackdownInfo
-    ? [`Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`, historyDetail]
+    ? [
+        `Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`,
+        forecastSummary ? `Forecast — ${forecastSummary}` : null,
+        historyDetail,
+      ]
         .filter(Boolean)
         .join(' ')
-    : ['Crackdown status unavailable.', historyDetail].filter(Boolean).join(' ');
+    : [
+        'Crackdown status unavailable.',
+        forecastSummary ? `Forecast — ${forecastSummary}` : null,
+        historyDetail,
+      ]
+        .filter(Boolean)
+        .join(' ');
 
   const detail = missionControls.heatStatusDetail?.trim();
   const leadMessage = detail || summaryMessage;
@@ -9417,6 +9438,215 @@ const describeCrackdownPolicy = () => {
   };
 };
 
+const formatApproximateDays = (value) => {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const rounded = Math.max(1, Math.round(value));
+  return `~${rounded} day${rounded === 1 ? '' : 's'}`;
+};
+
+const computeCrackdownForecast = () => {
+  const heatSystem = getHeatSystem();
+  if (!heatSystem) {
+    return null;
+  }
+
+  const tiers = Array.isArray(heatSystem?.tiers) ? [...heatSystem.tiers] : [];
+  if (!tiers.length) {
+    return null;
+  }
+
+  tiers.sort((a, b) => (a?.threshold ?? 0) - (b?.threshold ?? 0));
+
+  const heatValue = Number.isFinite(heatSystem?.state?.heat) ? heatSystem.state.heat : 0;
+
+  let currentTierConfig = typeof heatSystem.getCurrentTierConfig === 'function'
+    ? heatSystem.getCurrentTierConfig()
+    : null;
+
+  if (!currentTierConfig) {
+    currentTierConfig = tiers.reduce((active, tier) => (heatValue >= tier.threshold ? tier : active), tiers[0]);
+  }
+
+  let currentTierIndex = tiers.findIndex((tier) => tier?.name === currentTierConfig?.name);
+  if (currentTierIndex === -1) {
+    currentTierIndex = tiers.reduce(
+      (activeIndex, tier, index) => (heatValue >= tier.threshold ? index : activeIndex),
+      0,
+    );
+  }
+
+  const normalizedIndex = Math.max(0, currentTierIndex);
+  const currentTier = tiers[normalizedIndex] ?? tiers[0];
+  const nextTier = tiers[normalizedIndex + 1] ?? null;
+  const previousTier = normalizedIndex > 0 ? tiers[normalizedIndex - 1] : null;
+
+  const safehouseMitigation = typeof heatSystem.getSafehouseHeatReduction === 'function'
+    ? heatSystem.getSafehouseHeatReduction()
+    : 0;
+  const mitigationPerDay = Math.max(0, Number.isFinite(safehouseMitigation) ? safehouseMitigation : 0);
+
+  const passiveBleed = Number.isFinite(heatSystem.decayRate) && Number.isFinite(heatSystem.dayLengthSeconds)
+    ? Math.max(0, heatSystem.decayRate * heatSystem.dayLengthSeconds)
+    : 0;
+  const totalMitigationPerDay = mitigationPerDay + passiveBleed;
+
+  const state = getSharedState();
+  const notorietyValue = Number.isFinite(state?.player?.notoriety) ? state.player.notoriety : 0;
+  const notorietyProfile = getNotorietyProfile(notorietyValue);
+  const notorietyPressurePerDay = Number.isFinite(notorietyProfile?.crackdownPressure)
+    ? notorietyProfile.crackdownPressure
+    : 0;
+
+  const netPressurePerDay = notorietyPressurePerDay - totalMitigationPerDay;
+  const roundedNetPressure = Math.abs(netPressurePerDay) < 0.05
+    ? 0
+    : Math.round(netPressurePerDay * 10) / 10;
+
+  const currentHeat = Math.max(0, Number.isFinite(heatValue) ? heatValue : 0);
+  const nextThreshold = Number.isFinite(nextTier?.threshold) ? nextTier.threshold : null;
+  const distanceToNextTier = nextThreshold !== null ? Math.max(0, nextThreshold - currentHeat) : null;
+  const currentThreshold = Number.isFinite(currentTier?.threshold) ? currentTier.threshold : 0;
+  const distanceToPreviousTier = previousTier
+    ? Math.max(0, currentHeat - currentThreshold)
+    : null;
+
+  const baselineTimeToNext = nextTier && notorietyPressurePerDay > 0
+    ? distanceToNextTier / notorietyPressurePerDay
+    : nextTier
+      ? Infinity
+      : null;
+
+  const netTimeToNext = nextTier && netPressurePerDay > 0
+    ? distanceToNextTier / netPressurePerDay
+    : nextTier
+      ? Infinity
+      : null;
+
+  const mitigationDelay = (() => {
+    if (!nextTier || !Number.isFinite(baselineTimeToNext)) {
+      return 0;
+    }
+    if (!Number.isFinite(netTimeToNext)) {
+      return baselineTimeToNext;
+    }
+    return Math.max(0, netTimeToNext - baselineTimeToNext);
+  })();
+
+  const coolingTime = netPressurePerDay < 0 && distanceToPreviousTier !== null && netPressurePerDay !== 0
+    ? distanceToPreviousTier / Math.abs(netPressurePerDay)
+    : null;
+
+  const currentTierName = typeof currentTier?.name === 'string'
+    ? currentTier.name.toLowerCase()
+    : `${currentTier?.label ?? 'calm'}`.toLowerCase();
+  const nextTierName = typeof nextTier?.name === 'string'
+    ? nextTier.name.toLowerCase()
+    : null;
+  const previousTierName = typeof previousTier?.name === 'string'
+    ? previousTier.name.toLowerCase()
+    : null;
+
+  const currentTierPressure = CRACKDOWN_NOTORIETY_PRESSURE[currentTierName] ?? 0;
+  const nextTierPressure = nextTierName
+    ? CRACKDOWN_NOTORIETY_PRESSURE[nextTierName] ?? currentTierPressure
+    : currentTierPressure;
+  const notorietySpike = Math.max(0, nextTierPressure - currentTierPressure);
+
+  const nextTierLabel = nextTier ? formatCrackdownTierLabel(nextTier.name).label : null;
+  const previousTierLabel = previousTier ? formatCrackdownTierLabel(previousTier.name).label : null;
+
+  const pressureLabel = roundedNetPressure === 0
+    ? '±0.0 pressure/day'
+    : `${roundedNetPressure > 0 ? '+' : ''}${roundedNetPressure.toFixed(1)} pressure/day`;
+
+  const summary = {
+    headline: '',
+    detail: '',
+    netPressurePerDay: Math.round(netPressurePerDay * 10) / 10,
+    notorietyPressurePerDay: Math.round(notorietyPressurePerDay * 10) / 10,
+    mitigationPerDay: Math.round(totalMitigationPerDay * 10) / 10,
+    nextTier: nextTierName,
+    notorietySpike,
+  };
+
+  if (nextTier && netPressurePerDay > 0) {
+    const approxDaysLabel = formatApproximateDays(netTimeToNext);
+    const tierLabelLower = nextTierLabel?.toLowerCase() ?? 'the next crackdown';
+    const positivePressureLabel = pressureLabel === '±0.0 pressure/day' ? '+0.0 pressure/day' : pressureLabel;
+    summary.headline = `${positivePressureLabel} — ${tierLabelLower} in ${approxDaysLabel ?? '~a few days'}`;
+
+    const detailParts = ['at current notoriety'];
+    if (mitigationDelay > 0.5) {
+      const pushedDays = Math.max(1, Math.round(mitigationDelay));
+      detailParts.push(`safehouse bleed slows escalation by ${pushedDays} day${pushedDays === 1 ? '' : 's'}`);
+    }
+    if (notorietySpike > 0) {
+      detailParts.push(`escalation adds +${notorietySpike} notoriety`);
+    }
+    summary.detail = detailParts.join('; ');
+    return summary;
+  }
+
+  if (nextTier && netPressurePerDay <= 0 && notorietyPressurePerDay > 0) {
+    const pushedDays = Math.max(1, Math.round(Math.max(mitigationDelay, baselineTimeToNext || 0)));
+    const tierLabelLower = nextTierLabel?.toLowerCase() ?? 'the next crackdown';
+    summary.headline = `Cooling — safehouse bleed pushes ${tierLabelLower} back ${pushedDays} day${
+      pushedDays === 1 ? '' : 's'
+    }.`;
+
+    const detailParts = [];
+    if (totalMitigationPerDay > 0) {
+      detailParts.push(`Net change ${pressureLabel}`);
+    }
+    if (notorietySpike > 0) {
+      detailParts.push(`Escalation would add +${notorietySpike} notoriety`);
+    }
+    summary.detail = detailParts.join(' — ');
+    return summary;
+  }
+
+  if (!nextTier && netPressurePerDay < 0) {
+    const approxDaysLabel = formatApproximateDays(coolingTime);
+    const fallbackLabel = previousTierLabel?.toLowerCase() ?? 'lower tiers';
+    const coolingLabel = pressureLabel === '±0.0 pressure/day' ? '-0.0 pressure/day' : pressureLabel;
+    summary.headline = `Cooling — ${coolingLabel}`;
+    summary.detail = approxDaysLabel
+      ? `${fallbackLabel} in ${approxDaysLabel}`
+      : 'Crackdown easing toward calmer patrols.';
+    return summary;
+  }
+
+  if (!nextTier && netPressurePerDay >= 0) {
+    const tierLabelLower = formatCrackdownTierLabel(currentTier?.name ?? 'lockdown').label.toLowerCase();
+    const holdingLabel = pressureLabel === '±0.0 pressure/day' ? '+0.0 pressure/day' : pressureLabel;
+    summary.headline = `${holdingLabel} — holding at ${tierLabelLower}`;
+    summary.detail = notorietySpike > 0
+      ? `Relief would still dump +${notorietySpike} notoriety when it hits.`
+      : 'Maintain mitigation to unlock a lower crackdown.';
+    return summary;
+  }
+
+  if (netPressurePerDay < 0 && previousTier) {
+    const approxDaysLabel = formatApproximateDays(coolingTime);
+    const coolingLabel = pressureLabel === '±0.0 pressure/day' ? '-0.0 pressure/day' : pressureLabel;
+    summary.headline = `Cooling — ${coolingLabel}`;
+    summary.detail = approxDaysLabel
+      ? `${formatCrackdownTierLabel(previousTier.name).label.toLowerCase()} in ${approxDaysLabel}`
+      : 'Crackdown pressure is draining away.';
+    return summary;
+  }
+
+  summary.headline = 'Forecast steady — crackdown pressure balanced.';
+  summary.detail = totalMitigationPerDay > 0
+    ? `Mitigation ${totalMitigationPerDay.toFixed(1)} vs notoriety ${notorietyPressurePerDay.toFixed(1)}.`
+    : 'Minimal pressure registered.';
+
+  return summary;
+};
+
 const updateMissionStatusText = () => {
   if (!missionControls.statusText) {
     return;
@@ -9454,16 +9684,33 @@ const updateMissionStatusText = () => {
 };
 
 const updateCrackdownIndicator = () => {
-  const { crackdownText } = missionControls;
-  if (!crackdownText) {
+  const { crackdownText, crackdownForecast } = missionControls;
+  if (!crackdownText && !crackdownForecast) {
     return;
   }
 
   const crackdownInfo = describeCrackdownPolicy();
+  const forecast = computeCrackdownForecast();
+  const forecastSummary = forecast
+    ? [forecast.headline, forecast.detail].filter(Boolean).join(' ')
+    : '';
+  missionControls.crackdownForecastSummary = forecastSummary;
+
   if (!crackdownInfo) {
-    crackdownText.textContent = 'Crackdown systems calibrating…';
+    if (crackdownText) {
+      crackdownText.textContent = 'Crackdown systems calibrating…';
+    }
+    if (crackdownForecast) {
+      crackdownForecast.textContent = 'Forecast — calibrating crackdown telemetry…';
+    }
     missionControls.lastCrackdownTierName = null;
     return;
+  }
+
+  if (crackdownForecast) {
+    crackdownForecast.textContent = forecastSummary
+      ? `Forecast — ${forecastSummary}`
+      : 'Forecast — monitoring crackdown drift.';
   }
 
   const tierName = crackdownInfo.tierName ?? crackdownInfo.label ?? 'calm';
@@ -9473,12 +9720,18 @@ const updateCrackdownIndicator = () => {
     }
     missionControls.lastCrackdownTierName = tierName;
   }
-  const historyDetail = missionControls.crackdownHistoryDetail?.trim();
-  const messageParts = [`Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`];
-  if (historyDetail) {
-    messageParts.push(historyDetail);
+
+  if (crackdownText) {
+    const historyDetail = missionControls.crackdownHistoryDetail?.trim();
+    const messageParts = [`Crackdown level: ${crackdownInfo.label} — ${crackdownInfo.impact}`];
+    if (forecast?.headline) {
+      messageParts.push(forecast.headline);
+    }
+    if (historyDetail) {
+      messageParts.push(historyDetail);
+    }
+    crackdownText.textContent = messageParts.join(' ');
   }
-  crackdownText.textContent = messageParts.join(' ');
 };
 
 const renderMissionLog = () => {
@@ -10970,6 +11223,7 @@ const setupMissionControls = () => {
   missionControls.crewChemistryList = document.getElementById('mission-crew-chemistry');
   missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
+  missionControls.crackdownForecast = document.getElementById('mission-crackdown-forecast');
   missionControls.crackdownHistoryList = document.getElementById('mission-crackdown-history-list');
   missionControls.logList = document.getElementById('mission-log-list');
   missionControls.recruitList = document.getElementById('mission-recruit-list');
