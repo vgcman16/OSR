@@ -1601,6 +1601,10 @@ class MissionSystem {
         return;
       }
 
+      const existingIndex = indexMap.has(alert.id) ? indexMap.get(alert.id) : null;
+      const existingEntry =
+        existingIndex !== null && existingIndex !== undefined ? normalized[existingIndex] : null;
+
       const payload = {
         id: alert.id,
         label: typeof alert.label === 'string' ? alert.label : alert.id,
@@ -1619,7 +1623,38 @@ class MissionSystem {
           typeof alert.lastResolutionSummary === 'string' ? alert.lastResolutionSummary : null,
       };
 
-      if (payload.status === 'alert') {
+      const cooldownIsActive = (() => {
+        if (!existingEntry || existingEntry.status !== 'cooldown') {
+          return false;
+        }
+
+        const endDay = Number.isFinite(existingEntry.cooldownEndsOnDay)
+          ? existingEntry.cooldownEndsOnDay
+          : null;
+
+        if (endDay === null) {
+          return true;
+        }
+
+        if (!Number.isFinite(currentDay)) {
+          return true;
+        }
+
+        return currentDay < endDay;
+      })();
+
+      if (cooldownIsActive && payload.status === 'alert') {
+        payload.status = 'cooldown';
+        payload.cooldownEndsOnDay = Number.isFinite(existingEntry.cooldownEndsOnDay)
+          ? existingEntry.cooldownEndsOnDay
+          : null;
+        payload.resolvedAt = Number.isFinite(existingEntry.resolvedAt)
+          ? existingEntry.resolvedAt
+          : null;
+        if (typeof existingEntry.lastResolutionSummary === 'string') {
+          payload.lastResolutionSummary = existingEntry.lastResolutionSummary;
+        }
+      } else if (payload.status === 'alert') {
         payload.resolvedAt = null;
         payload.cooldownEndsOnDay = null;
       } else if (payload.status === 'cooldown') {
@@ -1634,6 +1669,10 @@ class MissionSystem {
         payload.cooldownEndsOnDay = Number.isFinite(alert.cooldownEndsOnDay)
           ? alert.cooldownEndsOnDay
           : null;
+      }
+
+      if (existingEntry && Number.isFinite(existingEntry.triggeredAt)) {
+        payload.triggeredAt = existingEntry.triggeredAt;
       }
 
       if (indexMap.has(payload.id)) {
@@ -1731,15 +1770,53 @@ class MissionSystem {
       heatTier,
     });
 
+    let safehouseAlertEntries = null;
     if (Array.isArray(safehouseEventPayload?.alerts) && safehouseEventPayload.alerts.length) {
-      this.upsertSafehouseAlerts(safehouseEventPayload.alerts);
+      safehouseAlertEntries = this.upsertSafehouseAlerts(safehouseEventPayload.alerts);
     }
 
     const combinedDeck = Array.isArray(baseDeck) ? baseDeck.slice() : [];
+    const alertStatusById = new Map();
+    if (Array.isArray(safehouseAlertEntries)) {
+      safehouseAlertEntries.forEach((entry) => {
+        if (entry?.id) {
+          alertStatusById.set(entry.id, entry);
+        }
+      });
+    }
+
+    const currentDay = Number.isFinite(this.state?.day) ? this.state.day : null;
     if (Array.isArray(safehouseEventPayload?.events)) {
       safehouseEventPayload.events.forEach((event) => {
         if (!event || typeof event !== 'object') {
           return;
+        }
+
+        if (event.safehouseAlertId && alertStatusById.has(event.safehouseAlertId)) {
+          const alertEntry = alertStatusById.get(event.safehouseAlertId);
+          const coolingDown = (() => {
+            if (!alertEntry || alertEntry.status !== 'cooldown') {
+              return false;
+            }
+
+            const cooldownEndsOnDay = Number.isFinite(alertEntry.cooldownEndsOnDay)
+              ? alertEntry.cooldownEndsOnDay
+              : null;
+
+            if (cooldownEndsOnDay === null) {
+              return true;
+            }
+
+            if (!Number.isFinite(currentDay)) {
+              return true;
+            }
+
+            return currentDay < cooldownEndsOnDay;
+          })();
+
+          if (coolingDown) {
+            return;
+          }
         }
 
         const cloned = {
