@@ -28,6 +28,64 @@ const determineRiskTier = (securityScore) => {
   return 'low';
 };
 
+const VEHICLE_REWARD_PRESETS = Object.freeze({
+  low: {
+    model: 'Street-Tuned Coupe',
+    topSpeed: 142,
+    acceleration: 5.6,
+    handling: 5.8,
+    heat: 0.6,
+  },
+  moderate: {
+    model: 'Interceptor Sedan',
+    topSpeed: 154,
+    acceleration: 6.1,
+    handling: 6.2,
+    heat: 0.8,
+  },
+  high: {
+    model: 'Prototype Hypercar',
+    topSpeed: 168,
+    acceleration: 6.7,
+    handling: 6.5,
+    heat: 1.1,
+  },
+});
+
+const buildVehicleRewardProfile = (district, poi, riskTier) => {
+  const preset = VEHICLE_REWARD_PRESETS[riskTier] ?? VEHICLE_REWARD_PRESETS.low;
+  const districtLabel = typeof district?.name === 'string' ? district.name.trim() : '';
+  const poiLabel = typeof poi?.name === 'string' ? poi.name.trim() : '';
+  const territoryLabel = poiLabel || districtLabel || 'the district';
+  const modelLabel = (() => {
+    if (poiLabel && districtLabel) {
+      return `${poiLabel} ${preset.model}`;
+    }
+    if (poiLabel) {
+      return `${poiLabel} ${preset.model}`;
+    }
+    if (districtLabel) {
+      return `${districtLabel} ${preset.model}`;
+    }
+    return preset.model;
+  })();
+
+  const summary = `Secure a high-end ride seized from ${territoryLabel}.`;
+
+  return {
+    label: modelLabel,
+    summary,
+    storageRequired: 1,
+    vehicleBlueprint: {
+      model: modelLabel,
+      topSpeed: preset.topSpeed,
+      acceleration: preset.acceleration,
+      handling: preset.handling,
+      heat: preset.heat,
+    },
+  };
+};
+
 const clonePointOfInterest = (poi) => {
   if (!poi || typeof poi !== 'object') {
     return null;
@@ -156,6 +214,8 @@ const buildContractFromDistrict = (district) => {
     crackdownPressure: Math.round(crackdownScore),
   };
 
+  const vehicleReward = buildVehicleRewardProfile(district, poi, riskTier);
+
   return {
     id: createContractId(district),
     name: missionName,
@@ -169,6 +229,8 @@ const buildContractFromDistrict = (district) => {
     description: missionDescription,
     pointOfInterest: poi,
     districtIntel,
+    category: 'vehicle-heist',
+    vehicleReward,
   };
 };
 

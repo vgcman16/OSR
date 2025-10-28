@@ -802,6 +802,14 @@ const createCarThiefGame = ({ canvas, context }) => {
           } else {
             outcomeLabel = 'Maintenance';
           }
+        } else if (lastVehicleReport.outcome === 'vehicle-acquired') {
+          const storageRequired = Number.isFinite(lastVehicleReport.storageRequired)
+            ? Math.max(1, Math.round(lastVehicleReport.storageRequired))
+            : null;
+          const storageLabel = storageRequired !== null
+            ? ` (${storageRequired === 1 ? '1 slot' : `${storageRequired} slots`})`
+            : '';
+          outcomeLabel = `Vehicle secured${storageLabel}`;
         } else {
           outcomeLabel = lastVehicleReport.outcome;
         }

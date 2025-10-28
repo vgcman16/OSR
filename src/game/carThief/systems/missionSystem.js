@@ -166,6 +166,72 @@ const cloneDistrictIntel = (intel) => {
   return Object.keys(snapshot).length ? snapshot : null;
 };
 
+const cloneVehicleBlueprint = (blueprint) => {
+  if (!blueprint || typeof blueprint !== 'object') {
+    return null;
+  }
+
+  const sanitized = {};
+  const copyIfDefined = (key) => {
+    if (blueprint[key] !== undefined) {
+      sanitized[key] = blueprint[key];
+    }
+  };
+
+  copyIfDefined('model');
+  copyIfDefined('topSpeed');
+  copyIfDefined('acceleration');
+  copyIfDefined('handling');
+  copyIfDefined('heat');
+
+  if (Array.isArray(blueprint.installedMods)) {
+    sanitized.installedMods = blueprint.installedMods.slice();
+  }
+
+  return Object.keys(sanitized).length ? sanitized : null;
+};
+
+const cloneVehicleRewardProfile = (reward) => {
+  if (!reward || typeof reward !== 'object') {
+    return null;
+  }
+
+  const storageRequired = Number.isFinite(reward.storageRequired) && reward.storageRequired > 0
+    ? Math.max(1, Math.round(reward.storageRequired))
+    : 1;
+  const label = typeof reward.label === 'string' ? reward.label.trim() : '';
+  const summary = typeof reward.summary === 'string' ? reward.summary.trim() : '';
+  const blueprintSource =
+    typeof reward.vehicleBlueprint === 'object' && reward.vehicleBlueprint !== null
+      ? reward.vehicleBlueprint
+      : typeof reward.vehicle === 'object' && reward.vehicle !== null
+        ? reward.vehicle
+        : reward;
+
+  const vehicleBlueprint = cloneVehicleBlueprint(blueprintSource);
+
+  const profile = {
+    storageRequired,
+  };
+
+  if (label) {
+    profile.label = label;
+  }
+
+  if (summary) {
+    profile.summary = summary;
+  }
+
+  if (vehicleBlueprint) {
+    profile.vehicleBlueprint = vehicleBlueprint;
+    if (!profile.label && typeof vehicleBlueprint.model === 'string') {
+      profile.label = vehicleBlueprint.model;
+    }
+  }
+
+  return profile;
+};
+
 const applyNotorietyModifiersToMission = (missionValues, notorietyProfile, crackdownPolicy) => {
   if (!notorietyProfile) {
     return {
@@ -914,6 +980,19 @@ const defaultMissionTemplates = [
     heat: 2,
     duration: 40,
     description: 'Swipe a prototype from a downtown showroom under heavy surveillance.',
+    category: 'vehicle-heist',
+    vehicleReward: {
+      label: 'Showroom Prototype',
+      summary: 'High-acceleration prototype tuned for downtown escapes.',
+      storageRequired: 1,
+      vehicleBlueprint: {
+        model: 'Showroom Prototype',
+        topSpeed: 160,
+        acceleration: 6.4,
+        handling: 6.1,
+        heat: 1,
+      },
+    },
   },
   {
     id: 'dockyard-swap',
@@ -923,6 +1002,19 @@ const defaultMissionTemplates = [
     heat: 1,
     duration: 28,
     description: 'Intercept a shipment of luxury SUVs before it leaves the harbor.',
+    category: 'vehicle-heist',
+    vehicleReward: {
+      label: 'Dockyard Interceptor SUV',
+      summary: 'Versatile high-torque SUV intercepted before export.',
+      storageRequired: 1,
+      vehicleBlueprint: {
+        model: 'Dockyard Interceptor SUV',
+        topSpeed: 148,
+        acceleration: 5.8,
+        handling: 5.9,
+        heat: 0.8,
+      },
+    },
   },
   {
     id: 'collector-estate',
@@ -932,6 +1024,19 @@ const defaultMissionTemplates = [
     heat: 3,
     duration: 55,
     description: 'Infiltrate a fortified mansion and extract a mint condition classic.',
+    category: 'vehicle-heist',
+    vehicleReward: {
+      label: "Collector's Classic Supercar",
+      summary: 'Concours-ready classic with clandestine performance mods.',
+      storageRequired: 1,
+      vehicleBlueprint: {
+        model: "Collector's Classic Supercar",
+        topSpeed: 165,
+        acceleration: 6.6,
+        handling: 6.4,
+        heat: 1.1,
+      },
+    },
   },
 ];
 
@@ -1049,6 +1154,10 @@ class MissionSystem {
         ? { ...reference.falloutRecovery }
         : undefined;
 
+    const vehicleReward = reference.vehicleReward
+      ? cloneVehicleRewardProfile(reference.vehicleReward)
+      : undefined;
+
     const districtIntel = this.getDistrictIntelSnapshot(reference);
 
     return {
@@ -1057,6 +1166,7 @@ class MissionSystem {
       storyline,
       crackdownEffects,
       falloutRecovery,
+      vehicleReward,
       districtIntel,
     };
   }
@@ -1131,6 +1241,12 @@ class MissionSystem {
       }
       if (template.category) {
         storedTemplate.category = template.category;
+      }
+      if (template.vehicleReward) {
+        const rewardProfile = cloneVehicleRewardProfile(template.vehicleReward);
+        if (rewardProfile) {
+          storedTemplate.vehicleReward = rewardProfile;
+        }
       }
       if (template.ignoreCrackdownRestrictions) {
         storedTemplate.ignoreCrackdownRestrictions = Boolean(template.ignoreCrackdownRestrictions);
@@ -1207,10 +1323,24 @@ class MissionSystem {
       typeof template.crackdownEffects === 'object' && template.crackdownEffects !== null
         ? { ...template.crackdownEffects }
         : null;
-    const vehicleConfig =
-      typeof template.vehicle === 'object' && template.vehicle !== null
-        ? template.vehicle
-        : { model: 'Target Vehicle' };
+    const templateVehicleBlueprint = cloneVehicleBlueprint(template.vehicle ?? null);
+
+    let vehicleRewardProfile = cloneVehicleRewardProfile(template.vehicleReward ?? null);
+    if (vehicleRewardProfile && !vehicleRewardProfile.vehicleBlueprint && templateVehicleBlueprint) {
+      vehicleRewardProfile.vehicleBlueprint = templateVehicleBlueprint;
+      if (!vehicleRewardProfile.label && templateVehicleBlueprint?.model) {
+        vehicleRewardProfile.label = templateVehicleBlueprint.model;
+      }
+    }
+
+    if (!vehicleRewardProfile && (template.category ?? '').toLowerCase() === 'vehicle-heist') {
+      const fallbackBlueprint = templateVehicleBlueprint ?? { model: 'Target Vehicle' };
+      vehicleRewardProfile = cloneVehicleRewardProfile({
+        vehicleBlueprint: fallbackBlueprint,
+        label: fallbackBlueprint?.model ?? 'Target Vehicle',
+        storageRequired: 1,
+      });
+    }
 
     const districtIntel = this.getDistrictIntelSnapshot(template);
 
@@ -1229,7 +1359,12 @@ class MissionSystem {
       riskTier: notorietyAdjusted.riskTier,
       notorietyLevel: notorietyAdjusted.notorietyLevelId ?? null,
       notorietyModifiers: notorietyAdjusted.notorietyModifiers,
-      vehicle: new Vehicle(vehicleConfig),
+      vehicle: null,
+      vehicleReward: vehicleRewardProfile ?? null,
+      vehicleRewardGranted: false,
+      vehicleRewardOutcome: null,
+      vehicleRewardDeliveredAt: null,
+      vehicleRewardVehicleId: null,
       status: 'available',
       restricted: false,
       restrictionReason: null,
@@ -2773,6 +2908,8 @@ class MissionSystem {
         : null;
 
     let storageBlockedReport = null;
+    let rewardVehicleSummary = null;
+    let rewardVehicleReport = null;
     const crewFalloutRecords = [];
     const falloutByCrewId = new Map();
     let queuedFollowUps = [];
@@ -2787,6 +2924,11 @@ class MissionSystem {
       let netPayout = grossPayout;
       const pendingDebts = Array.isArray(this.state.pendingDebts) ? this.state.pendingDebts : [];
       const updatedDebts = [];
+
+      mission.vehicleRewardGranted = false;
+      mission.vehicleRewardOutcome = null;
+      mission.vehicleRewardDeliveredAt = null;
+      mission.vehicleRewardVehicleId = null;
 
       pendingDebts.forEach((debt) => {
         const outstanding = Number.isFinite(debt?.remaining)
@@ -2846,28 +2988,88 @@ class MissionSystem {
         }
       }
       let rewardVehicleAdded = false;
+      const rewardProfile = mission.vehicleReward ?? null;
       const storageCapacity = getActiveStorageCapacityFromState(this.state);
       const hasFiniteCapacity = Number.isFinite(storageCapacity) && storageCapacity >= 0;
       const capacityLimit = hasFiniteCapacity ? storageCapacity : Infinity;
       const garageSize = garage.length;
 
-      if (mission.vehicle) {
-        if (!hasFiniteCapacity || garageSize < capacityLimit) {
-          this.state.garage.push(mission.vehicle);
+      if (rewardProfile) {
+        const storageRequired = Number.isFinite(rewardProfile.storageRequired)
+          ? Math.max(1, Math.round(rewardProfile.storageRequired))
+          : 1;
+        const projectedSize = garageSize + storageRequired;
+        const vehicleBlueprint =
+          cloneVehicleBlueprint(rewardProfile.vehicleBlueprint ?? null) ??
+          { model: rewardProfile.label ?? 'Target Vehicle' };
+        const rewardLabel = rewardProfile.label ?? vehicleBlueprint?.model ?? 'Vehicle';
+
+        if (!hasFiniteCapacity || projectedSize <= capacityLimit) {
+          const rewardVehicle = new Vehicle(vehicleBlueprint);
           rewardVehicleAdded = true;
+
+          const mechanicScore = assignedCrew
+            .filter((member) => (member.specialty ?? '').toLowerCase() === 'mechanic')
+            .reduce((total, member) => total + (Number(member.loyalty) || 0), 0);
+          const wearReduction = Math.min(0.08, mechanicScore * 0.01);
+          const wearAmount = Math.max(0.05, 0.18 - wearReduction);
+          if (typeof rewardVehicle.applyWear === 'function') {
+            rewardVehicle.applyWear(wearAmount);
+          } else if (Number.isFinite(rewardVehicle.condition)) {
+            rewardVehicle.condition = Math.max(0, Math.min(1, rewardVehicle.condition - wearAmount));
+          }
+
+          if (typeof rewardVehicle.setStatus === 'function') {
+            rewardVehicle.setStatus('idle');
+          } else {
+            rewardVehicle.status = 'idle';
+            rewardVehicle.inUse = false;
+          }
+          if (typeof rewardVehicle.markStolen === 'function') {
+            rewardVehicle.markStolen();
+          } else {
+            rewardVehicle.isStolen = true;
+          }
+
+          this.state.garage.push(rewardVehicle);
+
+          const updatedGarageSize = this.state.garage.length;
+          const timestamp = Date.now();
+          rewardVehicleReport = {
+            outcome: 'vehicle-acquired',
+            vehicleId: rewardVehicle.id ?? null,
+            vehicleModel: rewardLabel,
+            missionId: mission.id ?? null,
+            missionName: mission.name ?? null,
+            garageSize: updatedGarageSize,
+            storageCapacity,
+            storageRequired,
+            timestamp,
+            summary: `${rewardLabel} secured from ${mission.name ?? 'the operation'}. ` +
+              `${storageRequired === 1 ? 'Requires 1 garage slot.' : `Requires ${storageRequired} garage slots.`}`,
+          };
+          rewardVehicleSummary = rewardVehicleReport.summary;
+          mission.vehicleRewardGranted = true;
+          mission.vehicleRewardDeliveredAt = timestamp;
+          mission.vehicleRewardVehicleId = rewardVehicle.id ?? null;
         } else {
-          const vehicleModel = mission.vehicle.model ?? 'Vehicle';
-          const summary = `${vehicleModel} couldn't enter the garage — capacity ${garageSize}/${storageCapacity} reached. ` +
-            'Sell or scrap a vehicle to free space.';
+          const storageNote = storageRequired === 1
+            ? 'Requires 1 garage slot.'
+            : `Requires ${storageRequired} garage slots.`;
+          const summary = `${rewardLabel} couldn't enter the garage — capacity ${garageSize}/${storageCapacity} reached. ` +
+            `${storageNote} Sell or scrap a vehicle to free space.`;
           storageBlockedReport = {
             outcome: 'storage-blocked',
-            vehicleId: mission.vehicle.id ?? null,
-            vehicleModel,
+            vehicleId: null,
+            vehicleModel: rewardLabel,
             garageSize,
             storageCapacity,
+            storageRequired,
             summary,
             timestamp: Date.now(),
           };
+          rewardVehicleSummary = summary;
+          mission.vehicleRewardOutcome = 'blocked';
         }
       }
 
@@ -2877,22 +3079,8 @@ class MissionSystem {
         }
       });
 
-      if (rewardVehicleAdded && mission.vehicle && typeof mission.vehicle.applyWear === 'function') {
-        const mechanicScore = assignedCrew
-          .filter((member) => (member.specialty ?? '').toLowerCase() === 'mechanic')
-          .reduce((total, member) => total + (Number(member.loyalty) || 0), 0);
-        const wearReduction = Math.min(0.08, mechanicScore * 0.01);
-        const wearAmount = Math.max(0.05, 0.18 - wearReduction);
-        mission.vehicle.applyWear(wearAmount);
-      }
-      if (rewardVehicleAdded && mission.vehicle && typeof mission.vehicle.setStatus === 'function') {
-        mission.vehicle.setStatus('idle');
-      } else if (rewardVehicleAdded && mission.vehicle) {
-        mission.vehicle.status = 'idle';
-        mission.vehicle.inUse = false;
-      }
-      if (rewardVehicleAdded && typeof mission.vehicle?.markStolen === 'function') {
-        mission.vehicle.markStolen();
+      if (rewardVehicleAdded) {
+        mission.vehicleRewardOutcome = 'acquired';
       }
 
       const recoveryTarget = mission.falloutRecovery ?? null;
@@ -3301,6 +3489,9 @@ class MissionSystem {
     if (districtSummary) {
       telemetryExtras.districtSummary = districtSummary;
     }
+    if (rewardVehicleSummary) {
+      telemetryExtras.vehicleRewardSummary = rewardVehicleSummary;
+    }
 
     this.recordMissionTelemetry(mission, outcome, telemetryExtras);
 
@@ -3321,6 +3512,10 @@ class MissionSystem {
 
     if (vehicleReport) {
       this.state.lastVehicleReport = vehicleReport;
+    }
+
+    if (rewardVehicleReport) {
+      this.state.lastVehicleReport = rewardVehicleReport;
     }
 
     if (storageBlockedReport) {
