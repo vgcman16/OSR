@@ -16,6 +16,11 @@ const createContractId = (district) => {
   return `contract-${String(baseId).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`.replace(/-+/g, '-');
 };
 
+const slugifyId = (value, fallback = 'campaign') => {
+  const raw = typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-');
+};
+
 const determineRiskTier = (securityScore) => {
   if (securityScore >= 4) {
     return 'high';
@@ -244,12 +249,30 @@ const generateContractsFromDistricts = (districts = []) => {
   const templates = [];
 
   districts.forEach((district) => {
-    const contract = buildContractFromDistrict(district);
-    if (!contract || !contract.id) {
+    if (!district) {
       return;
     }
 
-    if (seenIds.has(contract.id)) {
+    let campaignSnapshot = null;
+    if (typeof district.getCampaignSnapshot === 'function') {
+      campaignSnapshot = district.getCampaignSnapshot();
+    }
+
+    const activeMilestone =
+      typeof district.getActiveCampaignMilestone === 'function'
+        ? district.getActiveCampaignMilestone()
+        : null;
+
+    let contract = null;
+    if (activeMilestone && campaignSnapshot?.activeMilestone?.ready) {
+      contract = buildCampaignContractTemplate(district, activeMilestone);
+    }
+
+    if (!contract) {
+      contract = buildContractFromDistrict(district);
+    }
+
+    if (!contract || !contract.id || seenIds.has(contract.id)) {
       return;
     }
 
@@ -258,6 +281,71 @@ const generateContractsFromDistricts = (districts = []) => {
   });
 
   return templates;
+};
+
+const cloneVehicleReward = (reward) => {
+  if (!reward || typeof reward !== 'object') {
+    return undefined;
+  }
+
+  const vehicleBlueprint =
+    reward.vehicleBlueprint && typeof reward.vehicleBlueprint === 'object'
+      ? { ...reward.vehicleBlueprint }
+      : undefined;
+
+  return {
+    ...reward,
+    vehicleBlueprint,
+  };
+};
+
+const buildCampaignContractTemplate = (district, milestone) => {
+  if (!district || !milestone || typeof milestone !== 'object') {
+    return null;
+  }
+
+  const blueprint = milestone.contract ?? {};
+  const baseId = blueprint.id ?? `${district.id ?? district.name ?? 'district'}-${milestone.id ?? 'campaign'}`;
+  const id = `campaign-${slugifyId(baseId)}`;
+  const name = blueprint.name ?? milestone.name ?? `${district.name ?? 'District'} Campaign`;
+  const description = blueprint.description ?? milestone.description ?? 'Coordinate a bespoke district campaign operation.';
+  const difficulty = normalizeNumber(blueprint.difficulty, Math.max(2, milestone.stage + 2), 1);
+  const payout = normalizeNumber(blueprint.payout, 25000, 0);
+  const heat = normalizeNumber(blueprint.heat, 2, 0);
+  const duration = normalizeNumber(blueprint.duration, 48, 20);
+  const category = blueprint.category ?? 'campaign-operation';
+  const riskTier = blueprint.riskTier ?? 'high';
+
+  const explicitPoi = blueprint.pointOfInterest ? clonePointOfInterest(blueprint.pointOfInterest) : null;
+  const pointOfInterest = explicitPoi ?? pickPointOfInterest(district);
+
+  const vehicleReward = cloneVehicleReward(blueprint.vehicleReward);
+
+  return {
+    id,
+    name,
+    description,
+    difficulty,
+    payout,
+    heat,
+    duration,
+    districtId: district.id ?? null,
+    districtName: district.name ?? 'Unknown District',
+    riskTier,
+    category,
+    pointOfInterest,
+    vehicleReward:
+      vehicleReward || (category === 'vehicle-heist' ? buildVehicleRewardProfile(district, pointOfInterest, riskTier) : undefined),
+    campaignMilestone: {
+      districtId: district.id ?? null,
+      districtName: district.name ?? null,
+      milestoneId: milestone.id,
+      stage: milestone.stage,
+      name: milestone.name ?? null,
+      rewardPreview: milestone.rewardPreview ?? null,
+      requirements: milestone.requirements ?? {},
+    },
+  };
 };
 
 const buildFalloutContractIdFactory = (createId) => {

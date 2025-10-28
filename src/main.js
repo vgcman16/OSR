@@ -931,6 +931,134 @@ const describeDistrictCrackdown = (value) =>
     'Crackdown telemetry pending.',
   );
 
+const CAMPAIGN_REQUIREMENT_LABELS = {
+  influence: 'Influence',
+  intelLevel: 'Intel',
+  crackdownPressure: 'Crackdown',
+};
+
+const formatCampaignRequirementLine = (entry) => {
+  if (!entry) {
+    return null;
+  }
+
+  const label = CAMPAIGN_REQUIREMENT_LABELS[entry.key] ?? entry.key;
+  const required = Number.isFinite(entry.required) ? Math.round(entry.required) : null;
+  const current = Number.isFinite(entry.current) ? Math.round(entry.current) : null;
+
+  if (required === null || current === null) {
+    return `${label}: intel unavailable`;
+  }
+
+  if (entry.key === 'crackdownPressure') {
+    if (entry.met) {
+      return `${label} ${current} ≤ ${required}`;
+    }
+    const reduction = Number.isFinite(entry.delta)
+      ? Math.max(1, Math.round(entry.delta))
+      : Math.max(1, current - required);
+    return `${label} ${current} → reduce by ${reduction} to ${required}`;
+  }
+
+  if (entry.met) {
+    return `${label} ${current}/${required}`;
+  }
+
+  const delta = Number.isFinite(entry.delta)
+    ? Math.max(1, Math.round(entry.delta))
+    : Math.max(1, required - current);
+
+  return `${label} ${current}/${required} (needs +${delta})`;
+};
+
+const buildCampaignIntelLines = ({ district, mission }) => {
+  let snapshot = null;
+  if (district && typeof district.getCampaignSnapshot === 'function') {
+    snapshot = district.getCampaignSnapshot();
+  }
+
+  if (!snapshot && mission?.campaignMilestone) {
+    const milestone = mission.campaignMilestone;
+    snapshot = {
+      stage: Number.isFinite(milestone?.stage) ? milestone.stage : null,
+      totalStages: null,
+      status: 'active',
+      activeMilestone: {
+        stage: Number.isFinite(milestone?.stage) ? milestone.stage : null,
+        name: milestone?.name ?? null,
+        rewardPreview: milestone?.rewardPreview ?? null,
+        readiness: 1,
+        ready: true,
+        requirements: Object.entries(milestone?.requirements ?? {}).map(([key, value]) => ({
+          key,
+          required: Number.isFinite(value) ? value : null,
+          current: null,
+          met: true,
+          delta: 0,
+        })),
+      },
+    };
+  }
+
+  if (!snapshot) {
+    return [];
+  }
+
+  if (snapshot.status === 'complete') {
+    return ['Campaign: All milestones cleared — district fully liberated.'];
+  }
+
+  const milestone = snapshot.activeMilestone;
+  if (!milestone) {
+    return [];
+  }
+
+  const stageIndex = Number.isFinite(milestone.stage) ? milestone.stage : null;
+  const totalStages = Number.isFinite(snapshot.totalStages) ? snapshot.totalStages : null;
+  const headerParts = [];
+  if (stageIndex !== null) {
+    const stageLabel = stageIndex + 1;
+    headerParts.push(`Stage ${totalStages ? `${stageLabel}/${totalStages}` : stageLabel}`);
+  }
+  if (milestone.name) {
+    headerParts.push(milestone.name);
+  }
+
+  const header = headerParts.length ? headerParts.join(' — ') : 'Campaign milestone';
+  const lines = [`Campaign: ${header}`];
+
+  if (milestone.rewardPreview) {
+    lines.push(`Campaign reward: ${milestone.rewardPreview}`);
+  }
+
+  if (milestone.ready) {
+    lines.push('Milestone ready — special contract available now.');
+    return lines;
+  }
+
+  const readinessPercent = Number.isFinite(milestone.readiness)
+    ? Math.round(Math.min(1, Math.max(0, milestone.readiness)) * 100)
+    : null;
+  if (readinessPercent !== null) {
+    lines.push(`Progress: ${readinessPercent}% toward unlock.`);
+  }
+
+  const requirements = Array.isArray(milestone.requirements) ? milestone.requirements : [];
+  requirements.forEach((requirement) => {
+    const formatted = formatCampaignRequirementLine(requirement);
+    if (!formatted) {
+      return;
+    }
+    if (requirement.met) {
+      lines.push(`Ready: ${formatted}`);
+    } else {
+      lines.push(`Needs ${formatted}`);
+    }
+  });
+
+  return lines;
+};
+
 const setCityIntelDetails = ({
   districtName,
   districtDescription,
@@ -1223,6 +1351,15 @@ const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission
   const poiName = poi?.name ?? 'No special target flagged.';
   const poiDescription = poi?.description ?? 'No notable point of interest for this contract.';
   const poiPerks = describePoiModifiers(poi?.modifiers ?? {});
+  const campaignIntelLines = buildCampaignIntelLines({ district, mission });
+  let poiDetails = Array.isArray(poiPerks) ? [...poiPerks] : [];
+  if (poiDetails.length === 1 && poiDetails[0] === 'No unique perks detected.' && campaignIntelLines.length) {
+    poiDetails = [];
+  }
+  poiDetails.push(...campaignIntelLines);
+  if (!poiDetails.length) {
+    poiDetails = ['No unique perks detected.'];
+  }
 
   const districtIntelSnapshot = (() => {
     if (district && typeof district.getIntelSnapshot === 'function') {
@@ -1253,7 +1390,7 @@ const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission
     crackdownPressure: crackdownLabel,
     poiName,
     poiDescription,
-    poiPerks,
+    poiPerks: poiDetails,
   });
 
   renderCityIntelMap({ districts, highlightedMission: mission, activeMission });
