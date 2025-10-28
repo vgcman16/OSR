@@ -68,6 +68,147 @@ const CREW_REST_CONFIG = {
   recoveryMultiplier: 1.6,
 };
 
+const CREW_RELATIONSHIP_CONFIG = {
+  minAffinity: -100,
+  maxAffinity: 100,
+  neutralAffinity: 0,
+  synergyThreshold: 35,
+  strongSynergyThreshold: 60,
+  strainThreshold: -35,
+  severeStrainThreshold: -65,
+  missionSuccessDelta: 6,
+  missionFailureDelta: -9,
+  missionStressPenaltyFactor: 1.5,
+  missionFalloutPenalty: -12,
+  missionPeerFalloutPenalty: -6,
+  missionFailureExtraPenalty: -4,
+  minimumTraitMultiplier: 0.6,
+  maximumTraitMultiplier: 1.3,
+  positiveImpactScale: 0.3,
+  negativeImpactScale: 0.45,
+};
+
+const clampNumber = (value, min, max) => {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  if (value < min) {
+    return min;
+  }
+
+  if (value > max) {
+    return max;
+  }
+
+  return value;
+};
+
+const normalizeCrewId = (crewId) => {
+  if (!crewId && crewId !== 0) {
+    return null;
+  }
+
+  const normalized = String(crewId).trim();
+  if (!normalized || normalized === '__proto__' || normalized === 'constructor') {
+    return null;
+  }
+
+  return normalized;
+};
+
+const clampAffinityScore = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  const min = Number.isFinite(CREW_RELATIONSHIP_CONFIG.minAffinity)
+    ? CREW_RELATIONSHIP_CONFIG.minAffinity
+    : -100;
+  const max = Number.isFinite(CREW_RELATIONSHIP_CONFIG.maxAffinity)
+    ? CREW_RELATIONSHIP_CONFIG.maxAffinity
+    : 100;
+
+  return clampNumber(Math.round(numeric), min, max);
+};
+
+const normalizeRelationshipMap = (relationships) => {
+  if (!relationships) {
+    return {};
+  }
+
+  const normalized = {};
+  const applyEntry = (crewId, affinity) => {
+    const normalizedId = normalizeCrewId(crewId);
+    if (!normalizedId) {
+      return;
+    }
+
+    const score = clampAffinityScore(affinity);
+    normalized[normalizedId] = score;
+  };
+
+  if (relationships instanceof Map) {
+    relationships.forEach((value, key) => {
+      if (Number.isFinite(value)) {
+        applyEntry(key, value);
+      }
+    });
+    return normalized;
+  }
+
+  if (Array.isArray(relationships)) {
+    relationships.forEach((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return;
+      }
+
+      const crewId = normalizeCrewId(entry.crewId ?? entry.id ?? entry.targetId);
+      const affinity = Number(entry.affinity ?? entry.score ?? entry.value);
+      if (!crewId || !Number.isFinite(affinity)) {
+        return;
+      }
+
+      applyEntry(crewId, affinity);
+    });
+    return normalized;
+  }
+
+  if (typeof relationships === 'object') {
+    Object.keys(relationships).forEach((key) => {
+      const affinity = Number(relationships[key]);
+      if (Number.isFinite(affinity)) {
+        applyEntry(key, affinity);
+      }
+    });
+  }
+
+  return normalized;
+};
+
+const computeRelationshipMultiplier = (affinity) => {
+  const clamped = clampAffinityScore(affinity);
+  const maxAffinity = Math.max(1, Math.abs(CREW_RELATIONSHIP_CONFIG.maxAffinity ?? 100));
+  const normalized = clamped / maxAffinity;
+  const positiveScale = Number.isFinite(CREW_RELATIONSHIP_CONFIG.positiveImpactScale)
+    ? CREW_RELATIONSHIP_CONFIG.positiveImpactScale
+    : 0.3;
+  const negativeScale = Number.isFinite(CREW_RELATIONSHIP_CONFIG.negativeImpactScale)
+    ? CREW_RELATIONSHIP_CONFIG.negativeImpactScale
+    : 0.4;
+  const minMultiplier = Number.isFinite(CREW_RELATIONSHIP_CONFIG.minimumTraitMultiplier)
+    ? CREW_RELATIONSHIP_CONFIG.minimumTraitMultiplier
+    : 0.6;
+  const maxMultiplier = Number.isFinite(CREW_RELATIONSHIP_CONFIG.maximumTraitMultiplier)
+    ? CREW_RELATIONSHIP_CONFIG.maximumTraitMultiplier
+    : 1.3;
+
+  const scale = normalized >= 0 ? positiveScale : negativeScale;
+  const rawMultiplier = 1 + normalized * scale;
+  return clampNumber(rawMultiplier, minMultiplier, maxMultiplier);
+};
+
 const clampFatigue = (value) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -374,6 +515,8 @@ const createCrewTemplate = ({
   storyProgress = null,
   gearInventory = null,
   equippedGear = null,
+  relationships = null,
+  relationshipMap = null,
 } = {}) => {
   const resolvedSpecialty = specialty ?? 'wheelman';
   const resolvedBackground = background
@@ -400,6 +543,7 @@ const createCrewTemplate = ({
   const resolvedStoryProgress = normalizeStoryProgress(storyProgress ?? {});
   const resolvedGearInventory = normalizeGearList(gearInventory ?? []);
   const resolvedEquippedGear = normalizeEquippedGearList(equippedGear ?? [], resolvedGearInventory);
+  const resolvedRelationships = normalizeRelationshipMap(relationships ?? relationshipMap ?? {});
 
   return {
     id: id ?? generateId(),
@@ -413,6 +557,7 @@ const createCrewTemplate = ({
     storyProgress: resolvedStoryProgress,
     gearInventory: resolvedGearInventory,
     equippedGear: resolvedEquippedGear,
+    relationships: resolvedRelationships,
   };
 };
 
@@ -430,6 +575,9 @@ class CrewMember {
     this.storyProgress = normalizeStoryProgress(options.storyProgress ?? template.storyProgress ?? {});
     this.gearInventory = [];
     this.equippedGear = [];
+    this.relationships = normalizeRelationshipMap(
+      options.relationships ?? options.relationshipMap ?? template.relationships ?? {},
+    );
     this.status = 'idle';
     this.falloutStatus = options.falloutStatus ?? null;
     this.falloutDetails =
@@ -926,6 +1074,138 @@ class CrewMember {
     return this.getEquippedGearIds();
   }
 
+  getRelationshipSnapshot() {
+    const normalized = normalizeRelationshipMap(this.relationships ?? {});
+    this.relationships = normalized;
+    return { ...normalized };
+  }
+
+  getAffinityForCrewmate(crewId) {
+    const normalizedId = normalizeCrewId(crewId);
+    if (!normalizedId) {
+      return 0;
+    }
+
+    const relationships = typeof this.relationships === 'object' && this.relationships !== null
+      ? this.relationships
+      : {};
+    const rawValue = Number(relationships[normalizedId]);
+    if (!Number.isFinite(rawValue)) {
+      return 0;
+    }
+
+    return clampAffinityScore(rawValue);
+  }
+
+  setAffinityForCrewmate(crewId, affinity) {
+    const normalizedId = normalizeCrewId(crewId);
+    if (!normalizedId) {
+      return this.getRelationshipSnapshot();
+    }
+
+    if (!this.relationships || typeof this.relationships !== 'object') {
+      this.relationships = {};
+    }
+
+    this.relationships[normalizedId] = clampAffinityScore(affinity);
+    return this.getRelationshipSnapshot();
+  }
+
+  adjustAffinityForCrewmate(crewId, delta = 0) {
+    const normalizedId = normalizeCrewId(crewId);
+    const numericDelta = Number(delta);
+    if (!normalizedId || !Number.isFinite(numericDelta)) {
+      return this.getRelationshipSnapshot();
+    }
+
+    if (!this.relationships || typeof this.relationships !== 'object') {
+      this.relationships = {};
+    }
+
+    const current = Number(this.relationships[normalizedId]);
+    const currentScore = Number.isFinite(current) ? current : 0;
+    const nextScore = clampAffinityScore(currentScore + numericDelta);
+    this.relationships[normalizedId] = nextScore;
+    return this.getRelationshipSnapshot();
+  }
+
+  applyMissionRelationshipShift({
+    crewIds = [],
+    outcome = 'success',
+    falloutByCrewId = null,
+    stressLevel = 0,
+  } = {}) {
+    if (!Array.isArray(crewIds) || crewIds.length <= 1) {
+      return this.getRelationshipSnapshot();
+    }
+
+    const peers = crewIds
+      .map((crewId) => normalizeCrewId(crewId))
+      .filter((crewId) => crewId && crewId !== this.id);
+    if (!peers.length) {
+      return this.getRelationshipSnapshot();
+    }
+
+    const baseSuccessDelta = Number.isFinite(CREW_RELATIONSHIP_CONFIG.missionSuccessDelta)
+      ? CREW_RELATIONSHIP_CONFIG.missionSuccessDelta
+      : 6;
+    const baseFailureDelta = Number.isFinite(CREW_RELATIONSHIP_CONFIG.missionFailureDelta)
+      ? CREW_RELATIONSHIP_CONFIG.missionFailureDelta
+      : -9;
+    const stressFactor = Number.isFinite(CREW_RELATIONSHIP_CONFIG.missionStressPenaltyFactor)
+      ? Math.abs(CREW_RELATIONSHIP_CONFIG.missionStressPenaltyFactor)
+      : 1;
+    const falloutPenalty = Number.isFinite(CREW_RELATIONSHIP_CONFIG.missionFalloutPenalty)
+      ? CREW_RELATIONSHIP_CONFIG.missionFalloutPenalty
+      : -10;
+    const peerFalloutPenalty = Number.isFinite(CREW_RELATIONSHIP_CONFIG.missionPeerFalloutPenalty)
+      ? CREW_RELATIONSHIP_CONFIG.missionPeerFalloutPenalty
+      : -5;
+    const failureExtraPenalty = Number.isFinite(CREW_RELATIONSHIP_CONFIG.missionFailureExtraPenalty)
+      ? CREW_RELATIONSHIP_CONFIG.missionFailureExtraPenalty
+      : -2;
+
+    const lookupFallout = (crewId) => {
+      if (!crewId || !falloutByCrewId) {
+        return null;
+      }
+      if (falloutByCrewId instanceof Map) {
+        return falloutByCrewId.get(crewId) ?? null;
+      }
+      if (Array.isArray(falloutByCrewId)) {
+        return falloutByCrewId.find((entry) => entry?.crewId === crewId) ?? null;
+      }
+      if (typeof falloutByCrewId === 'object') {
+        return falloutByCrewId[crewId] ?? null;
+      }
+      return null;
+    };
+
+    const baseDelta = outcome === 'success' ? baseSuccessDelta : baseFailureDelta;
+    const normalizedStress = Number.isFinite(stressLevel) ? Math.max(0, stressLevel) : 0;
+    const stressPenalty = -normalizedStress * stressFactor;
+    const selfFallout = lookupFallout(this.id);
+    const selfPenalty = selfFallout ? falloutPenalty : 0;
+
+    peers.forEach((peerId) => {
+      const peerFallout = lookupFallout(peerId);
+      const peerPenalty = peerFallout ? peerFalloutPenalty : 0;
+
+      let delta = baseDelta + stressPenalty + selfPenalty + peerPenalty;
+      if (peerFallout && selfFallout && outcome !== 'success') {
+        delta += failureExtraPenalty;
+      }
+
+      if (delta === 0) {
+        return;
+      }
+
+      this.adjustAffinityForCrewmate(peerId, delta);
+    });
+
+    return this.getRelationshipSnapshot();
+  }
+
   toJSON() {
     return {
       id: this.id,
@@ -950,6 +1230,7 @@ class CrewMember {
       storyProgress: this.getStoryProgressSnapshot(),
       gearInventory: this.getGearInventory(),
       equippedGear: this.getEquippedGearIds(),
+      relationships: this.getRelationshipSnapshot(),
     };
   }
 
@@ -975,6 +1256,14 @@ class CrewMember {
           : undefined,
       gearInventory: Array.isArray(data.gearInventory) ? [...data.gearInventory] : [],
       equippedGear: Array.isArray(data.equippedGear) ? [...data.equippedGear] : [],
+      relationships:
+        data.relationships && typeof data.relationships === 'object'
+          ? { ...data.relationships }
+          : undefined,
+      relationshipMap:
+        data.relationshipMap && typeof data.relationshipMap === 'object'
+          ? { ...data.relationshipMap }
+          : undefined,
     });
   }
 }
@@ -988,4 +1277,7 @@ export {
   getBackgroundById,
   CREW_FATIGUE_CONFIG,
   CREW_REST_CONFIG,
+  CREW_RELATIONSHIP_CONFIG,
+  clampAffinityScore,
+  computeRelationshipMultiplier,
 };

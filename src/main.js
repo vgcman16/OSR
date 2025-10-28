@@ -1,6 +1,13 @@
 import { createCarThiefGame, createGameSerializer } from './game/carThief/index.js';
 import { createSoundboard } from './game/carThief/audio/soundboard.js';
-import { CrewMember, CREW_TRAIT_CONFIG, CREW_FATIGUE_CONFIG } from './game/carThief/entities/crewMember.js';
+import {
+  CrewMember,
+  CREW_TRAIT_CONFIG,
+  CREW_FATIGUE_CONFIG,
+  CREW_RELATIONSHIP_CONFIG,
+  clampAffinityScore,
+  computeRelationshipMultiplier,
+} from './game/carThief/entities/crewMember.js';
 import {
   GARAGE_MAINTENANCE_CONFIG,
   PLAYER_SKILL_CONFIG,
@@ -277,6 +284,92 @@ const formatCrewTraitSummary = (entity, limit = 3) => {
   return selection
     .map((entry) => `${entry.label} ${entry.value}`)
     .join(', ');
+};
+
+const summarizeSelectedChemistry = (member, squadMembers = []) => {
+  if (!member) {
+    return null;
+  }
+
+  const memberId = member.id !== undefined && member.id !== null ? String(member.id).trim() : null;
+  if (!memberId) {
+    return null;
+  }
+
+  const peers = Array.isArray(squadMembers)
+    ? squadMembers
+        .map((peer) => {
+          if (!peer || peer === member) {
+            return null;
+          }
+          const peerId = peer.id !== undefined && peer.id !== null ? String(peer.id).trim() : null;
+          return peerId ? { id: peerId, entity: peer } : null;
+        })
+        .filter(Boolean)
+    : [];
+
+  if (!peers.length) {
+    return null;
+  }
+
+  const affinityScores = peers
+    .map((peer) => {
+      if (typeof member.getAffinityForCrewmate === 'function') {
+        const score = member.getAffinityForCrewmate(peer.id);
+        if (Number.isFinite(score)) {
+          return score;
+        }
+      }
+      return null;
+    })
+    .filter((value) => Number.isFinite(value));
+
+  if (!affinityScores.length) {
+    const crewName = member.name ?? 'Crew member';
+    return {
+      label: 'Chemistry intel pending',
+      tooltip: `${crewName} has no recorded rapport with the selected crew yet.`,
+      isWarning: false,
+      affinity: 0,
+      multiplier: 1,
+    };
+  }
+
+  const averageAffinity = affinityScores.reduce((sum, value) => sum + value, 0) / affinityScores.length;
+  const clampedAffinity = clampAffinityScore(averageAffinity);
+  const multiplier = computeRelationshipMultiplier(clampedAffinity);
+  const percentShift = Math.round((multiplier - 1) * 100);
+  const percentLabel = percentShift > 0 ? `+${percentShift}%` : `${percentShift}%`;
+  const synergyThreshold = Number.isFinite(CREW_RELATIONSHIP_CONFIG.synergyThreshold)
+    ? CREW_RELATIONSHIP_CONFIG.synergyThreshold
+    : 35;
+  const strainThreshold = Number.isFinite(CREW_RELATIONSHIP_CONFIG.strainThreshold)
+    ? CREW_RELATIONSHIP_CONFIG.strainThreshold
+    : -35;
+
+  let label;
+  let isWarning = false;
+  if (clampedAffinity >= synergyThreshold) {
+    label = `Chemistry strong (${percentLabel})`;
+  } else if (clampedAffinity <= strainThreshold) {
+    label = `Chemistry strained (${percentLabel})`;
+    isWarning = true;
+  } else if (Math.abs(percentShift) >= 1) {
+    label = `Chemistry shifting (${percentLabel})`;
+  } else {
+    label = 'Chemistry steady';
+  }
+
+  const crewName = member.name ?? 'Crew member';
+  const tooltip = `${crewName} rapport average ${Math.round(clampedAffinity)} — trait impact ${percentLabel}.`;
+
+  return {
+    label,
+    tooltip,
+    isWarning,
+    affinity: clampedAffinity,
+    multiplier,
+  };
 };
 
 const getCrewGearInventory = (member) => {
@@ -7622,7 +7715,14 @@ const updateCrewSelectionOptions = () => {
     const traitSummary = formatCrewTraitSummary(member, 3);
     const traitsLabel = traitSummary ? ` • ${traitSummary}` : '';
     const gearLabel = ` • ${describeCrewGearLoadout(member)}`;
-    const descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${readinessLabel}${storyLabel}${backgroundLabel}${traitsLabel}${gearLabel}`;
+    const squadSnapshot = crewRoster.filter((entry) => selectedSet.has(entry.id));
+    const chemistrySummary = selectedSet.has(member.id)
+      ? summarizeSelectedChemistry(member, squadSnapshot)
+      : null;
+    let descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${readinessLabel}${storyLabel}${backgroundLabel}${traitsLabel}${gearLabel}`;
+    if (chemistrySummary?.label) {
+      descriptorText = `${descriptorText} • ${chemistrySummary.label}`;
+    }
     descriptor.textContent = descriptorText;
     const tooltipParts = [];
     if (readiness?.tooltip) {
@@ -7631,6 +7731,9 @@ const updateCrewSelectionOptions = () => {
     if (storySummary?.tooltip) {
       tooltipParts.push(storySummary.tooltip);
     }
+    if (chemistrySummary?.tooltip) {
+      tooltipParts.push(chemistrySummary.tooltip);
+    }
     const combinedTooltip = tooltipParts.join('\n\n');
     if (combinedTooltip) {
       descriptor.title = combinedTooltip;
@@ -7638,6 +7741,10 @@ const updateCrewSelectionOptions = () => {
     } else {
       descriptor.removeAttribute('title');
       checkbox.removeAttribute('title');
+    }
+
+    if (chemistrySummary?.isWarning) {
+      optionLabel.classList.add('mission-crew__option--chemistry-warning');
     }
 
     optionLabel.appendChild(checkbox);
@@ -8619,6 +8726,10 @@ const updateMissionControls = () => {
     }
   });
 
+  if (startButton) {
+    startButton.removeAttribute('title');
+  }
+
   if (!isReady) {
     const descriptionText = missionSystem
       ? 'Select a mission to view its briefing.'
@@ -8683,6 +8794,17 @@ const updateMissionControls = () => {
             missionControls.selectedVehicleId,
           )
         : null;
+
+    if (startButton && preview?.chemistry?.warning) {
+      startButton.title = `Chemistry warning: ${preview.chemistry.warning}`;
+    }
+
+    const chemistryDetails = (() => {
+      if (selectedMission.status === 'available') {
+        return preview?.chemistry ?? null;
+      }
+      return selectedMission.assignedChemistry ?? null;
+    })();
 
     const basePayout = Number.isFinite(selectedMission.basePayout)
       ? selectedMission.basePayout
@@ -8762,6 +8884,24 @@ const updateMissionControls = () => {
     })();
 
     let crewImpact = crewImpactSummary.slice();
+    if (
+      chemistryDetails &&
+      !crewImpact.some((line) => typeof line === 'string' && line.toLowerCase().includes('chemistry'))
+    ) {
+      const chemistryLines = [];
+      if (chemistryDetails.summary) {
+        chemistryLines.push(`Chemistry — ${chemistryDetails.summary}`);
+      }
+      if (chemistryDetails.highlight) {
+        chemistryLines.push(`Chemistry boost — ${chemistryDetails.highlight}`);
+      }
+      if (chemistryDetails.warning) {
+        chemistryLines.push(`⚠️ Chemistry warning — ${chemistryDetails.warning}`);
+      }
+      if (chemistryLines.length) {
+        crewImpact = chemistryLines.concat(crewImpact);
+      }
+    }
     if (!crewImpact.length) {
       crewImpact = ['Crew impact steady.'];
     }
