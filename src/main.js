@@ -105,6 +105,7 @@ const missionControls = {
   reconCrewSelect: null,
   reconDistrictSelect: null,
   reconDurationSelect: null,
+  reconApproachSelect: null,
   reconAssignButton: null,
   reconStatus: null,
   reconList: null,
@@ -970,6 +971,30 @@ const RECON_DURATION_OPTIONS = [
   { value: 'quick', label: 'Quick sweep — 30s', seconds: 30 },
   { value: 'standard', label: 'Standard sweep — 45s', seconds: 45 },
   { value: 'deep', label: 'Deep infiltration — 60s', seconds: 60 },
+];
+
+const RECON_APPROACH_OPTIONS = [
+  {
+    value: 'stealth',
+    label: 'Stealth infiltration — safer intel haul',
+    summary: 'Stealth',
+    description: 'Lower detection risk and richer intel in exchange for longer sweeps.',
+    actionSummary: 'Stealth infiltration extends the sweep but improves intel quality and cuts setbacks.',
+  },
+  {
+    value: 'balanced',
+    label: 'Balanced sweep — standard tempo',
+    summary: 'Balanced',
+    description: 'Default pacing with an even balance of intel gains, risk, and relief.',
+    actionSummary: 'Balanced sweep keeps the default recon tempo and risk profile.',
+  },
+  {
+    value: 'aggressive',
+    label: 'Aggressive breach — fast strike',
+    summary: 'Aggressive',
+    description: 'Finish quickly while risking higher detection and lighter intel packages.',
+    actionSummary: 'Aggressive breach resolves faster but raises detection risk and trims intel.',
+  },
 ];
 
 const getMissionSystem = () => gameInstance?.systems?.mission ?? null;
@@ -2449,6 +2474,17 @@ const resolveReconDurationOption = (value) => {
     ?? RECON_DURATION_OPTIONS[0];
 };
 
+const resolveReconApproachOption = (value) => {
+  if (!value) {
+    return RECON_APPROACH_OPTIONS.find((option) => option.value === 'balanced') ?? RECON_APPROACH_OPTIONS[0];
+  }
+
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : value;
+  return RECON_APPROACH_OPTIONS.find((option) => option.value === normalized)
+    ?? RECON_APPROACH_OPTIONS.find((option) => option.value === 'balanced')
+    ?? RECON_APPROACH_OPTIONS[0];
+};
+
 const buildReconAssignmentLabel = (assignment, crewById) => {
   if (!assignment) {
     return 'Recon assignment';
@@ -2456,6 +2492,9 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
 
   const districtLabel = assignment.districtName ?? 'District';
   const statusLabel = (assignment.status ?? '').toLowerCase();
+  const approachOption = resolveReconApproachOption(assignment.approach);
+  const approachSummary = approachOption?.summary ?? approachOption?.label ?? null;
+  const withApproach = (label) => (approachSummary ? `${label} — Approach: ${approachSummary}` : label);
   if (statusLabel === 'failed') {
     const summaryLabel = assignment.resultSummary ?? 'Recon failed.';
     const timestamp = Number.isFinite(assignment.completedAt)
@@ -2466,7 +2505,10 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
     const timeLabel = Number.isFinite(timestamp)
       ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : null;
-    return timeLabel ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}` : `${districtLabel} — ${summaryLabel}`;
+    const baseLabel = timeLabel
+      ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}`
+      : `${districtLabel} — ${summaryLabel}`;
+    return withApproach(baseLabel);
   }
 
   if (statusLabel === 'completed') {
@@ -2474,7 +2516,10 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
     const timeLabel = Number.isFinite(assignment.completedAt)
       ? new Date(assignment.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : null;
-    return timeLabel ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}` : `${districtLabel} — ${summaryLabel}`;
+    const baseLabel = timeLabel
+      ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}`
+      : `${districtLabel} — ${summaryLabel}`;
+    return withApproach(baseLabel);
   }
 
   if (statusLabel === 'cancelled') {
@@ -2487,7 +2532,7 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
       progressPercent ? `${progressPercent}% complete` : null,
       remainingSeconds !== null ? `${remainingSeconds}s early` : null,
     ].filter(Boolean);
-    return `${districtLabel} — ${statusSegments.join(' — ')}`;
+    return withApproach(`${districtLabel} — ${statusSegments.join(' — ')}`);
   }
 
   const progressPercent = Math.round((assignment.progress ?? 0) * 100);
@@ -2507,7 +2552,8 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
     : [];
 
   const crewSegment = crewNames.length ? `Crew: ${crewNames.join(', ')}` : null;
-  return [districtLabel, ...statusSegments, crewSegment].filter(Boolean).join(' — ');
+  const baseLabel = [districtLabel, ...statusSegments, crewSegment].filter(Boolean).join(' — ');
+  return withApproach(baseLabel);
 };
 
 const buildReconAssignmentBadges = (assignment) => {
@@ -2516,6 +2562,19 @@ const buildReconAssignmentBadges = (assignment) => {
   }
 
   const badges = [];
+  const approachOption = resolveReconApproachOption(assignment.approach);
+  if (approachOption) {
+    const iconByApproach = {
+      stealth: '🕶️',
+      balanced: '⚖️',
+      aggressive: '⚡',
+    };
+    badges.push({
+      type: 'approach',
+      icon: iconByApproach[approachOption.value] ?? '🎯',
+      label: approachOption.summary ?? approachOption.label,
+    });
+  }
   const statusLabel = (assignment.status ?? '').toLowerCase();
   if (statusLabel === 'failed') {
     badges.push({ type: 'failed', icon: '⚠️', label: 'Failed' });
@@ -2624,12 +2683,21 @@ const updateReconPanel = () => {
     reconCrewSelect,
     reconDistrictSelect,
     reconDurationSelect,
+    reconApproachSelect,
     reconAssignButton,
     reconStatus,
     reconList,
   } = missionControls;
 
-  if (!reconCrewSelect || !reconDistrictSelect || !reconDurationSelect || !reconAssignButton || !reconStatus || !reconList) {
+  if (
+    !reconCrewSelect
+    || !reconDistrictSelect
+    || !reconDurationSelect
+    || !reconApproachSelect
+    || !reconAssignButton
+    || !reconStatus
+    || !reconList
+  ) {
     return;
   }
 
@@ -2735,12 +2803,41 @@ const updateReconPanel = () => {
   reconDurationSelect.disabled = !systemsReady;
   reconDurationSelect.title = systemsReady ? '' : 'Recon systems offline.';
 
+  const previousApproach = reconApproachSelect.value;
+  reconApproachSelect.innerHTML = '';
+  RECON_APPROACH_OPTIONS.forEach((option) => {
+    const node = document.createElement('option');
+    node.value = option.value;
+    node.textContent = option.label;
+    node.selected = option.value === previousApproach;
+    if (option.description) {
+      node.title = option.description;
+    }
+    reconApproachSelect.appendChild(node);
+  });
+  reconApproachSelect.value = resolveReconApproachOption(reconApproachSelect.value).value;
+  reconApproachSelect.disabled = !systemsReady;
+  if (!systemsReady) {
+    reconApproachSelect.title = 'Recon systems offline.';
+  } else {
+    const selectedApproach = resolveReconApproachOption(reconApproachSelect.value);
+    reconApproachSelect.title = selectedApproach?.description ?? '';
+  }
+
   const durationOption = resolveReconDurationOption(reconDurationSelect.value);
+  const approachOption = resolveReconApproachOption(reconApproachSelect.value);
   const canSchedule = systemsReady && selectedCrewIds.length > 0 && reconDistrictSelect.value;
 
   reconAssignButton.disabled = !canSchedule;
-  reconAssignButton.textContent = durationOption
-    ? `Deploy Recon (${durationOption.seconds}s)`
+  const buttonDetailSegments = [];
+  if (durationOption) {
+    buttonDetailSegments.push(`${durationOption.seconds}s`);
+  }
+  if (approachOption?.summary) {
+    buttonDetailSegments.push(approachOption.summary);
+  }
+  reconAssignButton.textContent = buttonDetailSegments.length
+    ? `Deploy Recon (${buttonDetailSegments.join(' • ')})`
     : 'Deploy Recon';
   reconAssignButton.title = (() => {
     if (!systemsReady) {
@@ -2752,7 +2849,7 @@ const updateReconPanel = () => {
     if (!reconDistrictSelect.value) {
       return 'Select a district to scout.';
     }
-    return '';
+    return approachOption?.actionSummary ?? 'Deploy recon team with the selected approach.';
   })();
 
   const crewById = new Map(crewRoster.map((member) => [member?.id, member]));
@@ -7030,10 +7127,12 @@ const handleReconSchedule = () => {
   }
 
   const durationOption = resolveReconDurationOption(missionControls.reconDurationSelect?.value);
+  const approachOption = resolveReconApproachOption(missionControls.reconApproachSelect?.value);
   const result = reconSystem.scheduleAssignment({
     crewIds,
     districtId,
     durationSeconds: durationOption?.seconds,
+    approach: approachOption?.value,
   });
 
   if (!result?.success) {
@@ -9517,6 +9616,7 @@ const setupMissionControls = () => {
   missionControls.reconCrewSelect = document.getElementById('mission-recon-crew');
   missionControls.reconDistrictSelect = document.getElementById('mission-recon-district');
   missionControls.reconDurationSelect = document.getElementById('mission-recon-duration');
+  missionControls.reconApproachSelect = document.getElementById('mission-recon-approach');
   missionControls.reconAssignButton = document.getElementById('mission-recon-deploy-btn');
   missionControls.reconStatus = document.getElementById('mission-recon-status');
   missionControls.reconList = document.getElementById('mission-recon-list');
@@ -9685,6 +9785,7 @@ const setupMissionControls = () => {
     missionControls.reconCrewSelect,
     missionControls.reconDistrictSelect,
     missionControls.reconDurationSelect,
+    missionControls.reconApproachSelect,
     missionControls.reconAssignButton,
     missionControls.reconStatus,
     missionControls.reconList,
@@ -9733,6 +9834,7 @@ const setupMissionControls = () => {
   missionControls.reconCrewSelect.addEventListener('change', handleReconCrewSelectionChange);
   missionControls.reconDistrictSelect.addEventListener('change', updateReconPanel);
   missionControls.reconDurationSelect.addEventListener('change', updateReconPanel);
+  missionControls.reconApproachSelect.addEventListener('change', updateReconPanel);
   missionControls.reconAssignButton.addEventListener('click', handleReconSchedule);
   missionControls.reconList.addEventListener('click', handleReconListClick);
   select.addEventListener('change', () => {

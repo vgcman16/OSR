@@ -3,6 +3,46 @@ import { GameState } from '../state/gameState.js';
 const DEFAULT_DURATION_SECONDS = 48;
 const MIN_DURATION_SECONDS = 20;
 const MAX_TRACKED_ASSIGNMENTS = 12;
+const DEFAULT_APPROACH_KEY = 'balanced';
+
+const RECON_APPROACH_CONFIG = {
+  stealth: {
+    key: 'stealth',
+    label: 'Stealth infiltration',
+    deploySummary: 'stealth infiltration',
+    durationMultiplier: 1.25,
+    intelMultiplier: 1.2,
+    influenceMultiplier: 1.1,
+    crackdownMultiplier: 0.85,
+    setbackChanceDelta: -0.18,
+    severityRollDelta: -0.2,
+    fatigueDelta: -1,
+  },
+  balanced: {
+    key: 'balanced',
+    label: 'Balanced sweep',
+    deploySummary: 'balanced sweep',
+    durationMultiplier: 1,
+    intelMultiplier: 1,
+    influenceMultiplier: 1,
+    crackdownMultiplier: 1,
+    setbackChanceDelta: 0,
+    severityRollDelta: 0,
+    fatigueDelta: 0,
+  },
+  aggressive: {
+    key: 'aggressive',
+    label: 'Aggressive breach',
+    deploySummary: 'aggressive breach',
+    durationMultiplier: 0.8,
+    intelMultiplier: 0.9,
+    influenceMultiplier: 0.95,
+    crackdownMultiplier: 1.25,
+    setbackChanceDelta: 0.22,
+    severityRollDelta: 0.18,
+    fatigueDelta: 3,
+  },
+};
 
 const clampNumber = (value, { min = Number.NEGATIVE_INFINITY, max = Number.POSITIVE_INFINITY } = {}) => {
   if (!Number.isFinite(value)) {
@@ -88,6 +128,11 @@ class ReconSystem {
     return districts.find((district) => district?.id === districtId) ?? null;
   }
 
+  resolveApproachConfig(value) {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return RECON_APPROACH_CONFIG[normalized] ?? RECON_APPROACH_CONFIG[DEFAULT_APPROACH_KEY];
+  }
+
   normalizeAssignment(entry = {}) {
     const district = this.getDistrictById(entry.districtId);
     const duration = Number.isFinite(entry.durationSeconds) && entry.durationSeconds > 0
@@ -95,6 +140,7 @@ class ReconSystem {
       : this.defaultDurationSeconds;
     const elapsed = clampNumber(entry.elapsedSeconds ?? 0, { min: 0, max: duration });
     const status = typeof entry.status === 'string' ? entry.status : 'in-progress';
+    const approachConfig = this.resolveApproachConfig(entry.approach);
 
     const normalized = {
       id: entry.id ?? createAssignmentId(),
@@ -120,6 +166,7 @@ class ReconSystem {
       lastLogEntryId: entry.lastLogEntryId ?? null,
       failureStates: Array.isArray(entry.failureStates) ? entry.failureStates.slice() : [],
       result: null,
+      approach: approachConfig.key,
     };
 
     if (entry.result && typeof entry.result === 'object') {
@@ -242,7 +289,7 @@ class ReconSystem {
     });
   }
 
-  scheduleAssignment({ crewIds = [], districtId, durationSeconds } = {}) {
+  scheduleAssignment({ crewIds = [], districtId, durationSeconds, approach } = {}) {
     const uniqueCrewIds = Array.from(new Set(crewIds.filter((id) => id))); // remove falsy/duplicates
     if (!uniqueCrewIds.length) {
       return { success: false, reason: 'no-crew', message: 'Select at least one idle crew member.' };
@@ -285,7 +332,8 @@ class ReconSystem {
       return { success: false, reason: 'unknown-district', message: 'Select a known district to scout.' };
     }
 
-    const operationDuration = this.computeDuration(assignedCrew, durationSeconds);
+    const approachConfig = this.resolveApproachConfig(approach);
+    const operationDuration = this.computeDuration(assignedCrew, durationSeconds, { approach: approachConfig.key });
 
     const assignment = this.insertAssignment({
       id: createAssignmentId(),
@@ -297,6 +345,7 @@ class ReconSystem {
       elapsedSeconds: 0,
       remainingSeconds: operationDuration,
       startedAt: Date.now(),
+      approach: approachConfig.key,
     });
 
     assignedCrew.forEach((member) => {
@@ -314,17 +363,19 @@ class ReconSystem {
     return {
       success: true,
       assignment: { ...assignment },
-      message: `Recon team deployed to ${district.name}.`,
+      message: `Recon team deployed to ${district.name} — ${approachConfig.label}.`,
     };
   }
 
-  computeDuration(crewMembers, requestedDuration) {
+  computeDuration(crewMembers, requestedDuration, { approach } = {}) {
+    const approachConfig = this.resolveApproachConfig(approach);
     const baseDuration = Number.isFinite(requestedDuration) && requestedDuration > 0
       ? requestedDuration
       : this.defaultDurationSeconds;
+    const approachAdjustedBase = baseDuration * (approachConfig.durationMultiplier ?? 1);
 
     if (!crewMembers.length) {
-      return Math.max(MIN_DURATION_SECONDS, Math.round(baseDuration));
+      return Math.max(MIN_DURATION_SECONDS, Math.round(approachAdjustedBase));
     }
 
     const stealthAverage = averageOf(crewMembers.map((member) => Number(member?.traits?.stealth)));
@@ -332,7 +383,7 @@ class ReconSystem {
     const tacticsAverage = averageOf(crewMembers.map((member) => Number(member?.traits?.tactics)));
 
     const speedBonus = crewMembers.length * 1.25 + (stealthAverage * 0.4 + techAverage * 0.35 + tacticsAverage * 0.35);
-    const adjusted = baseDuration - speedBonus * 1.5;
+    const adjusted = approachAdjustedBase - speedBonus * 1.5;
     const randomized = adjusted + (Math.random() - 0.5) * 4;
 
     return Math.max(MIN_DURATION_SECONDS, Math.round(randomized));
@@ -379,7 +430,7 @@ class ReconSystem {
       ? district.getIntelSnapshot()
       : null;
 
-    const outcome = this.computeAssignmentOutcome(assignedCrew, district);
+    const outcome = this.computeAssignmentOutcome(assignedCrew, district, { approach: assignment.approach });
 
     if (district) {
       district.adjustIntelLevel(outcome.intelDelta);
@@ -554,7 +605,8 @@ class ReconSystem {
     return assignment;
   }
 
-  computeAssignmentOutcome(crewMembers, district) {
+  computeAssignmentOutcome(crewMembers, district, { approach } = {}) {
+    const approachConfig = this.resolveApproachConfig(approach);
     const crewCount = crewMembers.length || 1;
     const stealthAverage = averageOf(crewMembers.map((member) => Number(member?.traits?.stealth)));
     const techAverage = averageOf(crewMembers.map((member) => Number(member?.traits?.tech)));
@@ -572,13 +624,32 @@ class ReconSystem {
       : 0;
     const securityResistance = 1 + districtSecurity * 0.15;
 
-    let intelDelta = Math.max(1, Math.round(intelGainBase / securityResistance + Math.random() * 1.2));
-    let influenceDelta = Math.max(1, Math.round(influenceGainBase / securityResistance + Math.random()));
-    let crackdownDelta = -Math.max(1, Math.round(crackdownReductionBase / securityResistance + Math.random() * 0.9));
+    const intelRandom = intelGainBase / securityResistance + Math.random() * 1.2;
+    let intelDelta = Math.max(
+      1,
+      Math.round(intelRandom * (approachConfig.intelMultiplier ?? 1)),
+    );
+
+    const influenceRandom = influenceGainBase / securityResistance + Math.random();
+    let influenceDelta = Math.max(
+      1,
+      Math.round(influenceRandom * (approachConfig.influenceMultiplier ?? 1)),
+    );
+
+    const crackdownRandom = crackdownReductionBase / securityResistance + Math.random() * 0.9;
+    const crackdownRelief = Math.max(
+      1,
+      Math.round(crackdownRandom * (approachConfig.crackdownMultiplier ?? 1)),
+    );
+    let crackdownDelta = -crackdownRelief;
 
     const detectionPressure = 0.08 + districtSecurity * 0.12 + Math.max(0, crackdownPressure) * 0.02;
     const mitigation = crewCount * 0.03 + stealthAverage * 0.025 + tacticsAverage * 0.02 + techAverage * 0.015;
-    const setbackChance = clampNumber(detectionPressure - mitigation, { min: 0, max: 0.75 });
+    const baseSetbackChance = clampNumber(detectionPressure - mitigation, { min: 0, max: 0.75 });
+    const setbackChance = clampNumber(
+      baseSetbackChance + (approachConfig.setbackChanceDelta ?? 0),
+      { min: 0, max: 0.9 },
+    );
 
     const crewIdPool = crewMembers
       .map((member) => member?.id)
@@ -609,11 +680,13 @@ class ReconSystem {
     };
 
     let success = true;
-    let fatigueImpact = Math.max(8, Math.round(10 + districtSecurity * 1.5 - crewCount));
+    const fatigueImpactBase = Math.max(8, Math.round(10 + districtSecurity * 1.5 - crewCount));
+    let fatigueImpact = Math.max(5, Math.round(fatigueImpactBase + (approachConfig.fatigueDelta ?? 0)));
 
     if (Math.random() < setbackChance) {
       setbacks.triggered = true;
       let severityRoll = Math.random() + districtSecurity * 0.15;
+      severityRoll += approachConfig.severityRollDelta ?? 0;
       severityRoll -= (stealthAverage + tacticsAverage) * 0.025;
       severityRoll = Math.max(0, severityRoll);
 
@@ -623,7 +696,11 @@ class ReconSystem {
         setbacks.capturedCrewIds = pickCrewIds(1);
         setbacks.severity = 'critical';
         setbacks.notes.push('Recon team member captured by security.');
-        intelDelta = -Math.max(1, Math.round(intelGainBase * 0.5 + Math.random() * 2));
+        const capturedIntelBase = intelGainBase * 0.5 + Math.random() * 2;
+        intelDelta = -Math.max(
+          1,
+          Math.round(capturedIntelBase * (approachConfig.intelMultiplier ?? 1)),
+        );
         influenceDelta = 0;
         crackdownDelta = Math.max(2, Math.round(districtSecurity * 1.5 + Math.random() * 2));
         success = false;
@@ -646,7 +723,11 @@ class ReconSystem {
         setbacks.intelCompromised = true;
         setbacks.severity = 'moderate';
         setbacks.notes.push('Intel sweep detected — data lost.');
-        intelDelta = -Math.max(1, Math.round(intelGainBase * 0.4 + Math.random() * 2));
+        const lostIntelBase = intelGainBase * 0.4 + Math.random() * 2;
+        intelDelta = -Math.max(
+          1,
+          Math.round(lostIntelBase * (approachConfig.intelMultiplier ?? 1)),
+        );
         influenceDelta = 0;
         crackdownDelta = Math.max(1, Math.round(districtSecurity * 1.2 + Math.random()));
         success = false;
@@ -895,7 +976,9 @@ class ReconSystem {
     const timestamp = assignment.completedAt ?? Date.now();
     const districtLabel = assignment.districtName ?? 'District';
     const reconFailed = assignment.status === 'failed';
-    const summary = `Recon sweep in ${districtLabel} — ${assignment.resultSummary ?? (reconFailed
+    const approachLabel = this.resolveApproachConfig(assignment.approach).label;
+    const summaryDistrict = approachLabel ? `${districtLabel} (${approachLabel})` : districtLabel;
+    const summary = `Recon sweep in ${summaryDistrict} — ${assignment.resultSummary ?? (reconFailed
       ? 'Recon failed.'
       : 'Field data updated.')}`;
 
