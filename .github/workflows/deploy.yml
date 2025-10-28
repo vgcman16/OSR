@@ -24,12 +24,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare static content
+        run: |
+          mkdir -p site
+          cp -a public site/public
+          cp -a src site/src
+
       - name: Upload static content
         uses: actions/upload-pages-artifact@v3
         with:
-          path: |
-            public
-            src
+          path: site
 
       - name: Deploy to GitHub Pages
         id: deployment
