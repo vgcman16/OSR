@@ -362,6 +362,68 @@ body {
   gap: 0.35rem;
 }
 
+.mission-details__row--breakdown dt {
+  display: flex;
+  align-items: flex-start;
+}
+
+.mission-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mission-breakdown__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.mission-breakdown__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 190, 255, 0.14);
+  background: rgba(12, 18, 30, 0.32);
+  box-shadow: inset 0 0 10px rgba(120, 190, 255, 0.08);
+}
+
+.mission-breakdown__heading {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(180, 215, 255, 0.75);
+}
+
+.mission-breakdown__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mission-breakdown__item {
+  font-size: 0.92rem;
+  color: rgba(227, 239, 255, 0.92);
+  line-height: 1.4;
+}
+
+.mission-breakdown__item--empty {
+  color: rgba(180, 215, 255, 0.6);
+  font-style: italic;
+}
+
+.mission-breakdown__placeholder {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(180, 215, 255, 0.6);
+}
+
 .mission-events__history {
   list-style: none;
   padding-left: 0;
