@@ -122,6 +122,46 @@ const sanitizeGarageActivityLog = (log) => {
   return entries;
 };
 
+const sanitizeCrackdownHistoryEntry = (entry) => {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const timestamp = Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now();
+  const previousTier = typeof entry.previousTier === 'string' && entry.previousTier.trim()
+    ? entry.previousTier.trim().toLowerCase()
+    : 'unknown';
+  const newTier = typeof entry.newTier === 'string' && entry.newTier.trim()
+    ? entry.newTier.trim().toLowerCase()
+    : 'unknown';
+  const reason = typeof entry.reason === 'string' && entry.reason.trim()
+    ? entry.reason.trim()
+    : 'system-sync';
+
+  return {
+    timestamp,
+    previousTier,
+    newTier,
+    reason,
+  };
+};
+
+const sanitizeCrackdownHistoryLog = (history) => {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  const entries = history
+    .map((entry) => sanitizeCrackdownHistoryEntry(entry))
+    .filter(Boolean);
+
+  if (entries.length > 30) {
+    return entries.slice(0, 30);
+  }
+
+  return entries;
+};
+
 class GameState {
   constructor({
     day = 1,
@@ -144,6 +184,7 @@ class GameState {
     reconAssignments = [],
     partsInventory = 0,
     garageActivityLog = [],
+    crackdownHistory = [],
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -181,6 +222,7 @@ class GameState {
       ? Math.max(0, Math.round(partsInventory))
       : 0;
     this.garageActivityLog = sanitizeGarageActivityLog(garageActivityLog);
+    this.crackdownHistory = sanitizeCrackdownHistoryLog(crackdownHistory);
   }
 
   toJSON() {
@@ -244,6 +286,7 @@ class GameState {
       reconAssignments: serializeArray(this.reconAssignments),
       partsInventory: this.partsInventory,
       garageActivityLog: serializeArray(this.garageActivityLog),
+      crackdownHistory: serializeArray(this.crackdownHistory),
     };
   }
 
@@ -293,6 +336,7 @@ class GameState {
         ? Math.max(0, Math.round(data.partsInventory))
         : 0,
       garageActivityLog: sanitizeGarageActivityLog(data.garageActivityLog),
+      crackdownHistory: sanitizeCrackdownHistoryLog(data.crackdownHistory),
     });
   }
 
@@ -471,6 +515,7 @@ const createInitialGameState = () => {
     reconAssignments: [],
     partsInventory: 0,
     garageActivityLog: [],
+    crackdownHistory: [],
   });
 };
 
