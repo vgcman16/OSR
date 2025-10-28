@@ -362,6 +362,36 @@ body {
   gap: 0.35rem;
 }
 
+.mission-events__history {
+  list-style: none;
+  padding-left: 0;
+  gap: 0.5rem;
+}
+
+.mission-events__history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.3rem 0.35rem;
+  border-radius: 8px;
+  background: rgba(10, 16, 28, 0.35);
+  border: 1px solid rgba(120, 190, 255, 0.12);
+  box-shadow: inset 0 0 10px rgba(120, 190, 255, 0.06);
+}
+
+.mission-events__history-meta {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(180, 215, 255, 0.65);
+}
+
+.mission-events__history-summary {
+  font-size: 0.92rem;
+  color: rgba(227, 239, 255, 0.92);
+  line-height: 1.4;
+}
+
 .mission-recon__list {
   list-style: none;
   padding-left: 0;

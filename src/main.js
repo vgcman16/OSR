@@ -9279,6 +9279,79 @@ const renderGarageActivityLog = () => {
   });
 };
 
+const MISSION_EVENT_HISTORY_DISPLAY_LIMIT = 10;
+
+const formatMissionEventClock = (timestamp, baseline) => {
+  if (!Number.isFinite(timestamp)) {
+    return null;
+  }
+
+  const baseTime = Number.isFinite(baseline) ? baseline : null;
+  const deltaMs = baseTime ? Math.max(0, timestamp - baseTime) : null;
+  const millis = Number.isFinite(deltaMs) ? deltaMs : null;
+
+  if (millis === null) {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  const totalSeconds = Math.floor(millis / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
+const formatMissionEventDuration = (milliseconds) => {
+  if (!Number.isFinite(milliseconds)) {
+    return null;
+  }
+
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes < 60) {
+    return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    if (remainingHours === 0 && remainingMinutes === 0 && seconds === 0) {
+      return `${days}d`;
+    }
+    const parts = [`${days}d`];
+    if (remainingHours) {
+      parts.push(`${remainingHours}h`);
+    }
+    if (remainingMinutes) {
+      parts.push(`${remainingMinutes}m`);
+    }
+    if (seconds) {
+      parts.push(`${seconds}s`);
+    }
+    return parts.join(' ');
+  }
+
+  const parts = [`${hours}h`];
+  if (remainingMinutes) {
+    parts.push(`${remainingMinutes}m`);
+  }
+  if (seconds) {
+    parts.push(`${seconds}s`);
+  }
+  return parts.join(' ');
+};
+
 const renderMissionEvents = () => {
   const { eventPrompt, eventChoices, eventHistory } = missionControls;
   if (!eventPrompt || !eventChoices || !eventHistory) {
@@ -9403,8 +9476,11 @@ const renderMissionEvents = () => {
     return;
   }
 
-  historyEntries.slice(-5).forEach((entry) => {
+  const missionStartedAt = Number.isFinite(mission?.startedAt) ? mission.startedAt : null;
+
+  historyEntries.slice(-MISSION_EVENT_HISTORY_DISPLAY_LIMIT).forEach((entry) => {
     const item = document.createElement('li');
+    item.className = 'mission-events__history-item';
     const progressPercent = Number.isFinite(entry?.progressAt)
       ? `[${Math.round(entry.progressAt * 100)}%] `
       : '';
@@ -9418,7 +9494,40 @@ const renderMissionEvents = () => {
       : '';
     const detail = effectSummary ? ` (${effectSummary})` : '';
     const badgeDetail = badgeSummary ? ` [${badgeSummary}]` : '';
-    item.textContent = `${progressPercent}${summary}${badgeDetail}${detail}`;
+    const metaTokens = [];
+
+    if (Number.isFinite(entry?.resolvedAt)) {
+      const resolvedLabel = formatMissionEventClock(entry.resolvedAt, missionStartedAt);
+      if (resolvedLabel) {
+        metaTokens.push(`@ ${resolvedLabel}`);
+      }
+    }
+
+    if (Number.isFinite(entry?.triggeredAt) && Number.isFinite(entry?.resolvedAt)) {
+      const durationLabel = formatMissionEventDuration(entry.resolvedAt - entry.triggeredAt);
+      if (durationLabel) {
+        metaTokens.push(`Δ ${durationLabel}`);
+      }
+    }
+
+    const metadata = metaTokens.join(' • ');
+    if (metadata) {
+      const metaEl = document.createElement('span');
+      metaEl.className = 'mission-events__history-meta';
+      metaEl.textContent = metadata;
+      item.appendChild(metaEl);
+    }
+
+    const summaryEl = document.createElement('span');
+    summaryEl.className = 'mission-events__history-summary';
+    summaryEl.textContent = `${progressPercent}${summary}${badgeDetail}${detail}`;
+    item.appendChild(summaryEl);
+    const ariaLabel = metadata
+      ? `${metadata} — ${summaryEl.textContent}`
+      : summaryEl.textContent;
+    if (ariaLabel) {
+      item.setAttribute('aria-label', ariaLabel);
+    }
     eventHistory.appendChild(item);
   });
 };
