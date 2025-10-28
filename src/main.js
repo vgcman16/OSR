@@ -1765,6 +1765,33 @@ const resolveCityIntelPointerTarget = (event) => {
   );
 };
 
+const armReconTargetFromDistrict = (district) => {
+  const districtId = district?.id ?? null;
+  if (!districtId) {
+    return;
+  }
+
+  const { reconDistrictSelect } = missionControls;
+  if (!reconDistrictSelect) {
+    return;
+  }
+
+  reconDistrictSelect.value = districtId;
+  updateReconPanel();
+
+  if (missionControls.reconDistrictSelect?.value !== districtId) {
+    return;
+  }
+
+  const reconSection = reconDistrictSelect.closest('.mission-recon');
+  if (reconSection && typeof reconSection.scrollIntoView === 'function') {
+    reconSection.scrollIntoView({ block: 'nearest' });
+  }
+
+  const districtLabel = district?.name ?? 'District';
+  setReconStatus(`Recon target armed: ${districtLabel}.`);
+};
+
 const handleCityIntelCanvasPointerMove = (event) => {
   const target = resolveCityIntelPointerTarget(event);
   if (!target) {
@@ -1792,6 +1819,7 @@ const handleCityIntelCanvasPointerDown = (event) => {
       reason: 'hover',
       index: target.index,
     });
+    armReconTargetFromDistrict(target.district);
   }
 };
 
@@ -1905,6 +1933,7 @@ const handleCityIntelCanvasKeyDown = (event) => {
   const district = cityIntelLastRenderedDistricts[nextIndex];
   if (district) {
     setCityIntelInteractionOverrideFromDistrict(district, { reason: 'keyboard', index: nextIndex });
+    armReconTargetFromDistrict(district);
   }
 };
 
