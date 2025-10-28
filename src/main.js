@@ -1009,6 +1009,152 @@ const triggerHudRender = () => {
   }
 };
 
+const formatCrackdownEffectsSummary = (effects) => {
+  if (!effects || typeof effects !== 'object') {
+    return '';
+  }
+
+  const entries = [];
+  const addEntry = (label, value, { prefix = null, decimals = 1 } = {}) => {
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    const precision = Math.max(0, Math.min(3, Math.round(decimals)));
+    const magnitude = Math.abs(value);
+    const threshold = precision > 0 ? 1 / 10 ** precision : 1;
+    if (magnitude < threshold) {
+      return;
+    }
+
+    const formattedMagnitude = magnitude.toFixed(precision);
+    const resolvedPrefix = prefix
+      ? prefix
+      : value > 0
+        ? '+'
+        : '−';
+    entries.push(`${label} ${resolvedPrefix}${formattedMagnitude}`);
+  };
+
+  const primaryHeatRelief = Number(effects.heatReduction);
+  addEntry('Heat relief', primaryHeatRelief, { prefix: '−', decimals: 1 });
+  addEntry('Failure penalty', Number(effects.heatPenaltyOnFailure), { prefix: '+', decimals: 1 });
+  if (!Number.isFinite(primaryHeatRelief)) {
+    addEntry('Heat relief', Number(effects.heatRelief), { prefix: '−', decimals: 1 });
+  }
+
+  const successBonus = Number(effects.successBonus);
+  if (Number.isFinite(successBonus)) {
+    const percentValue = successBonus * 100;
+    const decimals = Math.abs(percentValue) < 10 ? 1 : 0;
+    const threshold = decimals > 0 ? 1 / 10 ** decimals : 1;
+    if (Math.abs(percentValue) >= threshold) {
+      const formattedMagnitude = Math.abs(percentValue).toFixed(decimals);
+      const prefix = percentValue >= 0 ? '+' : '−';
+      entries.push(`Success bonus ${prefix}${formattedMagnitude}%`);
+    }
+  }
+
+  Object.entries(effects).forEach(([key, rawValue]) => {
+    if (['heatReduction', 'heatPenaltyOnFailure', 'heatRelief', 'successBonus'].includes(key)) {
+      return;
+    }
+
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    const decimals = Math.abs(value) < 10 ? 1 : 0;
+    const parts = key
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[-_]+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1));
+    if (!parts.length) {
+      return;
+    }
+
+    const label = parts.join(' ');
+    addEntry(label, value, { decimals });
+  });
+
+  return entries.join(', ');
+};
+
+const resolveCrackdownEffectsForMission = (missionId) => {
+  const missionSystem = getMissionSystem();
+  if (!missionSystem || missionId === undefined || missionId === null) {
+    return null;
+  }
+
+  const normalizedId = `${missionId}`.trim();
+  if (!normalizedId) {
+    return null;
+  }
+
+  const checkMission = (mission) => {
+    if (!mission || mission.id === undefined || mission.id === null) {
+      return null;
+    }
+    const candidateId = `${mission.id}`.trim();
+    if (!candidateId || candidateId !== normalizedId) {
+      return null;
+    }
+    if (mission.crackdownEffects && typeof mission.crackdownEffects === 'object') {
+      return mission.crackdownEffects;
+    }
+    if (mission.template && typeof mission.template === 'object') {
+      const templateEffects = mission.template.crackdownEffects;
+      if (templateEffects && typeof templateEffects === 'object') {
+        return templateEffects;
+      }
+    }
+    return null;
+  };
+
+  const inspectSource = (source) => {
+    if (!source) {
+      return null;
+    }
+    if (Array.isArray(source)) {
+      for (let index = 0; index < source.length; index += 1) {
+        const found = checkMission(source[index]);
+        if (found) {
+          return found;
+        }
+      }
+      return null;
+    }
+    return checkMission(source);
+  };
+
+  const sources = [
+    missionSystem.state?.activeMission ?? null,
+    missionSystem.availableMissions ?? null,
+    missionSystem.contractPool ?? null,
+    missionSystem.missionTemplates ?? null,
+  ];
+
+  for (let index = 0; index < sources.length; index += 1) {
+    const effects = inspectSource(sources[index]);
+    if (effects) {
+      return effects;
+    }
+  }
+
+  if (missionSystem.templateMap instanceof Map && missionSystem.templateMap.has(normalizedId)) {
+    const template = missionSystem.templateMap.get(normalizedId);
+    if (template?.crackdownEffects && typeof template.crackdownEffects === 'object') {
+      return template.crackdownEffects;
+    }
+  }
+
+  return null;
+};
+
 const setMissionDetails = ({
   description,
   payout,
@@ -1019,6 +1165,8 @@ const setMissionDetails = ({
   vehicleReward,
   crewImpact,
   playerImpact,
+  crackdownEffects,
+  crackdownEffectsSummary,
 }) => {
   const {
     detailDescription,
@@ -1125,8 +1273,35 @@ const setMissionDetails = ({
   });
 
   detailCrewImpact.innerHTML = '';
-  const impactItems = Array.isArray(crewImpact) ? crewImpact : [crewImpact ?? 'No crew assigned.'];
-  impactItems.forEach((line) => {
+  const impactItems = Array.isArray(crewImpact)
+    ? crewImpact
+    : [crewImpact ?? 'No crew assigned.'];
+  const formattedCrackdownSummary = (() => {
+    if (typeof crackdownEffectsSummary === 'string' && crackdownEffectsSummary.trim()) {
+      return crackdownEffectsSummary.trim();
+    }
+    const derived = formatCrackdownEffectsSummary(crackdownEffects);
+    return derived ? `Crackdown effects: ${derived}` : '';
+  })();
+  const normalizedImpactItems = impactItems
+    .map((line) => (typeof line === 'string' ? line.trim() : ''))
+    .filter(Boolean);
+  if (formattedCrackdownSummary) {
+    const summaryCore = formattedCrackdownSummary.replace(/^Crackdown effects:\s*/, '');
+    const alreadyCovered = normalizedImpactItems.some((line) => {
+      if (!line) {
+        return false;
+      }
+      if (line.includes(formattedCrackdownSummary)) {
+        return true;
+      }
+      return summaryCore && line.includes(summaryCore);
+    });
+    if (!alreadyCovered) {
+      normalizedImpactItems.push(formattedCrackdownSummary);
+    }
+  }
+  normalizedImpactItems.forEach((line) => {
     const item = document.createElement('li');
     item.textContent = line;
     detailCrewImpact.appendChild(item);
@@ -8430,6 +8605,21 @@ const renderMissionLog = () => {
     if (crewSummary && !summary.includes(crewSummary)) {
       details.push(crewSummary);
     }
+    const crackdownEffectsLine = (() => {
+      const directSummary = formatCrackdownEffectsSummary(entry?.crackdownEffects);
+      if (directSummary) {
+        return directSummary;
+      }
+      const effects = resolveCrackdownEffectsForMission(entry?.missionId ?? null);
+      const fallbackSummary = formatCrackdownEffectsSummary(effects);
+      return fallbackSummary;
+    })();
+    if (crackdownEffectsLine) {
+      const formattedLine = `Crackdown effects: ${crackdownEffectsLine}`;
+      if (!details.some((line) => line.includes(crackdownEffectsLine))) {
+        details.push(formattedLine);
+      }
+    }
     const reconSummary = entry?.reconSummary ?? null;
     if (reconSummary && !summary.includes(reconSummary)) {
       details.push(`Recon: ${reconSummary}`);
@@ -9117,6 +9307,7 @@ const updateMissionControls = () => {
       vehicleReward: vehicleRewardDetails,
       crewImpact,
       playerImpact,
+      crackdownEffects: selectedMission.crackdownEffects ?? null,
     });
 
     missionForIntel = selectedMission;
@@ -9195,7 +9386,17 @@ const updateMissionSelect = () => {
       categoryLabel = mission.falloutRecovery.type === 'medical' ? 'MEDICAL' : 'RESCUE';
     }
     const prefix = categoryLabel ? `[${categoryLabel}] ` : '';
-    option.textContent = `${prefix}${mission.name} — ${payoutLabel} (${statusLabel})${restrictionLabel}`;
+    let optionLabel = `${prefix}${mission.name} — ${payoutLabel} (${statusLabel})${restrictionLabel}`;
+    const crackdownEffectSummary = formatCrackdownEffectsSummary(mission.crackdownEffects);
+    if (crackdownEffectSummary) {
+      option.title = `Crackdown effects: ${crackdownEffectSummary}`;
+      if (mission.category === 'crackdown-operation') {
+        optionLabel = `${optionLabel} — ${crackdownEffectSummary}`;
+      }
+    } else {
+      option.removeAttribute('title');
+    }
+    option.textContent = optionLabel;
     option.selected = selectionStillValid && mission.id === previousSelection;
     select.appendChild(option);
   });
