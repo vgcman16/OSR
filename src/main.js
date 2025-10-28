@@ -212,9 +212,12 @@ const missionControls = {
 };
 
 const CITY_INTEL_CANVAS_ARIA_LABEL = 'City districts map — hover or use arrow keys to preview intel.';
+const RECON_COOLDOWN_WINDOW_MS = 3 * 60 * 1000;
 
 let cityIntelDistrictRects = [];
 let cityIntelLastRenderedDistricts = [];
+let cityIntelDistrictReconStatuses = new Map();
+let cityIntelLastRenderContext = { districts: [], highlightedMission: null, activeMission: null };
 let cityIntelInteractionOverride = null;
 let cityIntelKeyboardIndex = -1;
 
@@ -1850,6 +1853,32 @@ const createDistrictKeyFromMission = (mission) => {
   return null;
 };
 
+const createDistrictKeysFromReconAssignment = (assignment) => {
+  if (!assignment) {
+    return [];
+  }
+
+  const keys = [];
+  const idKey = normalizeDistrictKey(assignment.districtId);
+  if (idKey) {
+    keys.push(`id:${idKey}`);
+  }
+
+  const nameKey = normalizeDistrictKey(assignment.districtName);
+  if (nameKey) {
+    keys.push(`name:${nameKey}`);
+  }
+
+  if (!keys.length && assignment.district && typeof assignment.district === 'object') {
+    const fallbackKey = createDistrictKeyFromDistrict(assignment.district);
+    if (fallbackKey) {
+      keys.push(fallbackKey);
+    }
+  }
+
+  return [...new Set(keys)];
+};
+
 const getDistrictIndexByKey = (key) => {
   if (!key) {
     return -1;
@@ -1860,17 +1889,81 @@ const getDistrictIndexByKey = (key) => {
 
 const getCityIntelInteractionOverrideMission = () => cityIntelInteractionOverride?.mission ?? null;
 
-const updateCityIntelCanvasAriaLabel = (districtName = null) => {
+const updateCityIntelCanvasAriaLabel = ({ districtName = null, districtKey = null } = {}) => {
   const canvas = missionControls.cityIntelCanvas;
   if (!canvas) {
     return;
   }
 
-  if (districtName) {
-    canvas.setAttribute('aria-label', `${CITY_INTEL_CANVAS_ARIA_LABEL} Active district: ${districtName}.`);
-  } else {
-    canvas.setAttribute('aria-label', CITY_INTEL_CANVAS_ARIA_LABEL);
+  let resolvedName = typeof districtName === 'string' && districtName.trim() ? districtName.trim() : null;
+  let resolvedKey = districtKey ?? null;
+
+  if (!resolvedKey && cityIntelInteractionOverride?.key) {
+    resolvedKey = cityIntelInteractionOverride.key;
   }
+
+  if (!resolvedName && cityIntelInteractionOverride?.districtName) {
+    resolvedName = cityIntelInteractionOverride.districtName;
+  }
+
+  if (!resolvedKey && resolvedName) {
+    const normalizedName = normalizeDistrictKey(resolvedName);
+    if (normalizedName) {
+      const nameKey = `name:${normalizedName}`;
+      if (cityIntelDistrictReconStatuses.has(nameKey)) {
+        resolvedKey = nameKey;
+      }
+    }
+  }
+
+  if (!resolvedKey && cityIntelKeyboardIndex >= 0) {
+    const fallback = cityIntelLastRenderedDistricts[cityIntelKeyboardIndex];
+    if (fallback) {
+      resolvedKey = createDistrictKeyFromDistrict(fallback);
+      if (!resolvedName) {
+        resolvedName = fallback?.name ?? null;
+      }
+    }
+  }
+
+  if (resolvedKey && !cityIntelDistrictReconStatuses.has(resolvedKey)) {
+    const alternateKey = (() => {
+      if (!resolvedKey) {
+        return null;
+      }
+      if (resolvedKey.startsWith('id:')) {
+        const district = cityIntelLastRenderedDistricts.find(
+          (entry) => normalizeDistrictKey(entry?.id) === resolvedKey.slice(3),
+        );
+        return district ? createDistrictKeyFromDistrict(district) : null;
+      }
+      if (resolvedKey.startsWith('name:')) {
+        const district = cityIntelLastRenderedDistricts.find(
+          (entry) => normalizeDistrictKey(entry?.name) === resolvedKey.slice(5),
+        );
+        return district ? createDistrictKeyFromDistrict(district) : null;
+      }
+      return null;
+    })();
+    if (alternateKey && cityIntelDistrictReconStatuses.has(alternateKey)) {
+      resolvedKey = alternateKey;
+    }
+  }
+
+  let ariaLabel = CITY_INTEL_CANVAS_ARIA_LABEL;
+  if (resolvedName) {
+    ariaLabel = `${ariaLabel} Active district: ${resolvedName}.`;
+  }
+
+  if (resolvedKey && cityIntelDistrictReconStatuses.has(resolvedKey)) {
+    const reconStatus = cityIntelDistrictReconStatuses.get(resolvedKey);
+    const statusLabel = reconStatus?.label ?? reconStatus?.state ?? null;
+    if (statusLabel) {
+      ariaLabel = `${ariaLabel} Recon status: ${statusLabel}.`;
+    }
+  }
+
+  canvas.setAttribute('aria-label', ariaLabel.trim());
 };
 
 const createMissionPreviewFromDistrict = (district) => {
@@ -1988,7 +2081,12 @@ const determineDistrictRiskTier = (securityScore, notorietyProfile = null) => {
   return tier;
 };
 
-const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeMission = null } = {}) => {
+const renderCityIntelMap = ({
+  districts = [],
+  highlightedMission = null,
+  activeMission = null,
+  reconAssignments = [],
+} = {}) => {
   const canvas = missionControls.cityIntelCanvas;
   if (!canvas) {
     return;
@@ -2015,6 +2113,31 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
   const districtList = Array.isArray(districts) ? districts : [];
   cityIntelLastRenderedDistricts = districtList.slice();
   cityIntelDistrictRects = [];
+  cityIntelDistrictReconStatuses = new Map();
+  cityIntelLastRenderContext = { districts: districtList.slice(), highlightedMission, activeMission };
+
+  const normalizedAssignments = Array.isArray(reconAssignments)
+    ? reconAssignments.filter((entry) => entry && typeof entry === 'object')
+    : [];
+
+  const assignmentsByKey = new Map();
+  const registerAssignmentForKey = (key, assignment) => {
+    if (!key) {
+      return;
+    }
+    const bucket = assignmentsByKey.get(key) ?? [];
+    bucket.push(assignment);
+    assignmentsByKey.set(key, bucket);
+  };
+
+  normalizedAssignments.forEach((assignment) => {
+    const keys = createDistrictKeysFromReconAssignment(assignment);
+    if (!keys.length) {
+      return;
+    }
+    keys.forEach((key) => registerAssignmentForKey(key, assignment));
+  });
+
   if (!districtList.length) {
     context.fillStyle = '#9ac7ff';
     context.font = '14px "Segoe UI", sans-serif';
@@ -2029,6 +2152,102 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
 
   const highlightKey = createDistrictKeyFromMission(highlightedMission);
   const activeKey = createDistrictKeyFromMission(activeMission);
+
+  const now = Date.now();
+  const buildReconStatus = (assignments) => {
+    if (!Array.isArray(assignments) || !assignments.length) {
+      return null;
+    }
+
+    const normalized = assignments
+      .map((entry) => (entry && typeof entry === 'object' ? entry : null))
+      .filter(Boolean);
+    if (!normalized.length) {
+      return null;
+    }
+
+    const activeAssignments = normalized
+      .filter((entry) => (entry.status ?? '').toLowerCase() === 'in-progress')
+      .sort((a, b) => {
+        const timeA = a?.updatedAt ?? a?.startedAt ?? 0;
+        const timeB = b?.updatedAt ?? b?.startedAt ?? 0;
+        return timeB - timeA;
+      });
+
+    if (activeAssignments.length) {
+      return {
+        state: 'active',
+        label: 'Recon in progress',
+        icon: '▶',
+        fill: 'rgba(52, 211, 153, 0.35)',
+        stroke: '#34d399',
+      };
+    }
+
+    const sorted = normalized
+      .slice()
+      .sort((a, b) => {
+        const timeA = a?.updatedAt ?? a?.completedAt ?? a?.startedAt ?? 0;
+        const timeB = b?.updatedAt ?? b?.completedAt ?? b?.startedAt ?? 0;
+        return timeB - timeA;
+      });
+    const latest = sorted[0];
+    if (!latest) {
+      return null;
+    }
+
+    const latestStatus = (latest.status ?? '').toLowerCase();
+    if (latestStatus === 'failed') {
+      return {
+        state: 'failed',
+        label: 'Recon failed',
+        icon: '⚠',
+        fill: 'rgba(248, 113, 113, 0.35)',
+        stroke: '#f87171',
+      };
+    }
+
+    if (latestStatus === 'completed') {
+      const completedAt = latest.completedAt ?? latest.updatedAt ?? latest.startedAt ?? null;
+      const withinCooldown =
+        !Number.isFinite(completedAt) || completedAt === null
+          ? true
+          : now - completedAt <= RECON_COOLDOWN_WINDOW_MS;
+      if (withinCooldown) {
+        return {
+          state: 'cooldown',
+          label: 'Recon cooling down',
+          icon: '⏳',
+          fill: 'rgba(251, 191, 36, 0.28)',
+          stroke: '#fbbf24',
+        };
+      }
+    }
+
+    return null;
+  };
+
+  const gatherAssignmentsForKeys = (keys) => {
+    const unique = new Map();
+    keys
+      .filter(Boolean)
+      .forEach((key) => {
+        const bucket = assignmentsByKey.get(key);
+        if (!Array.isArray(bucket)) {
+          return;
+        }
+        bucket.forEach((assignment) => {
+          if (!assignment || typeof assignment !== 'object') {
+            return;
+          }
+          const identifier = assignment.id ?? `${assignment.districtId ?? 'district'}-${assignment.startedAt ?? 0}`;
+          if (!unique.has(identifier)) {
+            unique.set(identifier, assignment);
+          }
+        });
+      });
+    return Array.from(unique.values());
+  };
 
   const paddingX = 12;
   const paddingY = 18;
@@ -2051,6 +2270,31 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
     const districtKey = createDistrictKeyFromDistrict(district);
     const isHighlighted = Boolean(highlightKey && districtKey === highlightKey);
     const isActive = Boolean(activeKey && districtKey === activeKey);
+
+    const districtKeys = (() => {
+      const keys = [];
+      if (districtKey) {
+        keys.push(districtKey);
+      }
+      const idKey = normalizeDistrictKey(district?.id);
+      if (idKey) {
+        keys.push(`id:${idKey}`);
+      }
+      const nameKey = normalizeDistrictKey(district?.name);
+      if (nameKey) {
+        keys.push(`name:${nameKey}`);
+      }
+      return [...new Set(keys)];
+    })();
+
+    const reconStatus = buildReconStatus(gatherAssignmentsForKeys(districtKeys));
+    if (reconStatus) {
+      districtKeys.forEach((key) => {
+        if (key) {
+          cityIntelDistrictReconStatuses.set(key, reconStatus);
+        }
+      });
+    }
 
     let fillColor = 'rgba(80, 120, 180, 0.18)';
     let borderColor = 'rgba(120, 190, 255, 0.3)';
@@ -2086,6 +2330,40 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
     context.fillStyle = detailColor;
     context.fillText(riskLabel, cellX + 8, labelY + 16);
 
+    if (reconStatus) {
+      const indicatorWidth = Math.max(Math.min(cellWidth * 0.1, 28), 14);
+      const indicatorHeight = Math.max(cellHeight - 12, 12);
+      const indicatorX = cellX + cellWidth - indicatorWidth - 8;
+      const indicatorY = cellY + (cellHeight - indicatorHeight) / 2;
+
+      context.save();
+      context.fillStyle = reconStatus.fill;
+      context.fillRect(indicatorX, indicatorY, indicatorWidth, indicatorHeight);
+      context.strokeStyle = reconStatus.stroke;
+      context.strokeRect(indicatorX + 0.5, indicatorY + 0.5, indicatorWidth - 1, indicatorHeight - 1);
+
+      if (reconStatus.state === 'cooldown') {
+        context.lineWidth = 1;
+        context.strokeStyle = reconStatus.stroke;
+        for (let offset = -indicatorHeight; offset < indicatorWidth; offset += 4) {
+          context.beginPath();
+          context.moveTo(indicatorX + offset, indicatorY);
+          context.lineTo(indicatorX + offset + indicatorHeight, indicatorY + indicatorHeight);
+          context.stroke();
+        }
+      }
+
+      if (reconStatus.icon) {
+        context.fillStyle = '#0b131d';
+        context.font = '12px "Segoe UI", sans-serif';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText(reconStatus.icon, indicatorX + indicatorWidth / 2, indicatorY + indicatorHeight / 2 + 1);
+      }
+
+      context.restore();
+    }
+
     cityIntelDistrictRects.push({
       key: districtKey,
       index,
@@ -2094,6 +2372,7 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
       y: cellY,
       width: cellWidth,
       height: cellHeight,
+      reconState: reconStatus?.state ?? null,
     });
   });
 
@@ -2107,12 +2386,16 @@ const renderCityIntelMap = ({ districts = [], highlightedMission = null, activeM
 const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission }) => {
   const city = missionSystem?.state?.city ?? null;
   const districts = Array.isArray(city?.districts) ? city.districts : [];
+  const reconSystem = getReconSystem();
+  const reconAssignments = reconSystem?.state?.reconAssignments
+    ?? missionSystem?.state?.reconAssignments
+    ?? [];
 
   const overrideMission = getCityIntelInteractionOverrideMission();
   const mission = overrideMission ?? highlightedMission ?? activeMission ?? null;
   if (!mission) {
     resetCityIntelPanel();
-    renderCityIntelMap({ districts, highlightedMission: null, activeMission });
+    renderCityIntelMap({ districts, highlightedMission: null, activeMission, reconAssignments });
     if (!overrideMission) {
       updateCityIntelCanvasAriaLabel();
     }
@@ -2179,10 +2462,13 @@ const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission
     poiPerks: poiDetails,
   });
 
-  renderCityIntelMap({ districts, highlightedMission: mission, activeMission });
+  renderCityIntelMap({ districts, highlightedMission: mission, activeMission, reconAssignments });
 
   if (!overrideMission) {
-    updateCityIntelCanvasAriaLabel(districtName);
+    const districtKey = district
+      ? createDistrictKeyFromDistrict(district)
+      : createDistrictKeyFromMission(mission);
+    updateCityIntelCanvasAriaLabel({ districtName, districtKey });
   }
 };
 
@@ -2194,7 +2480,7 @@ const refreshCityIntelPanelWithOverride = () => {
     cityIntelLastRenderedDistricts = [];
     cityIntelKeyboardIndex = -1;
     updateCityIntelCanvasAriaLabel();
-    renderCityIntelMap({ districts: [], highlightedMission: null, activeMission: null });
+    renderCityIntelMap({ districts: [], highlightedMission: null, activeMission: null, reconAssignments: [] });
     return;
   }
 
@@ -2223,7 +2509,7 @@ const setCityIntelInteractionOverrideFromDistrict = (district, { reason = 'hover
     if (normalizedReason === 'keyboard' && typeof index === 'number') {
       cityIntelKeyboardIndex = index;
     }
-    updateCityIntelCanvasAriaLabel(district?.name ?? null);
+    updateCityIntelCanvasAriaLabel({ districtName: district?.name ?? null, districtKey });
     return;
   }
 
@@ -2247,7 +2533,7 @@ const setCityIntelInteractionOverrideFromDistrict = (district, { reason = 'hover
     cityIntelKeyboardIndex = resolvedIndex;
   }
 
-  updateCityIntelCanvasAriaLabel(district?.name ?? null);
+  updateCityIntelCanvasAriaLabel({ districtName: district?.name ?? null, districtKey });
   refreshCityIntelPanelWithOverride();
 };
 
@@ -3307,6 +3593,43 @@ const updateReconPanel = () => {
   reconStatus.textContent = statusMessage;
   if (!systemsReady) {
     missionControls.reconStatusDetail = statusMessage;
+  }
+
+  const overlayContext = cityIntelLastRenderContext ?? {};
+  const overlayState = reconSystem?.state ?? missionSystem?.state ?? getSharedState() ?? {};
+  const overlayDistricts = overlayContext.districts && overlayContext.districts.length
+    ? overlayContext.districts
+    : Array.isArray(overlayState?.city?.districts)
+      ? overlayState.city.districts
+      : [];
+
+  if (missionControls.cityIntelCanvas) {
+    renderCityIntelMap({
+      districts: overlayDistricts,
+      highlightedMission: cityIntelInteractionOverride?.mission ?? overlayContext.highlightedMission ?? null,
+      activeMission:
+        missionSystem?.state?.activeMission ?? overlayContext.activeMission ?? null,
+      reconAssignments,
+    });
+
+    if (cityIntelInteractionOverride?.key || cityIntelInteractionOverride?.districtName) {
+      updateCityIntelCanvasAriaLabel({
+        districtName: cityIntelInteractionOverride?.districtName ?? null,
+        districtKey: cityIntelInteractionOverride?.key ?? null,
+      });
+    } else if (cityIntelKeyboardIndex >= 0) {
+      const focusDistrict = cityIntelLastRenderedDistricts[cityIntelKeyboardIndex];
+      if (focusDistrict) {
+        updateCityIntelCanvasAriaLabel({
+          districtName: focusDistrict?.name ?? null,
+          districtKey: createDistrictKeyFromDistrict(focusDistrict),
+        });
+      } else {
+        updateCityIntelCanvasAriaLabel();
+      }
+    } else {
+      updateCityIntelCanvasAriaLabel();
+    }
   }
 };
 
@@ -9312,10 +9635,15 @@ const updateMissionControls = () => {
     resetMissionDetails(descriptionText);
     resetCityIntelPanel();
     const fallbackDistricts = missionSystem?.state?.city?.districts ?? [];
+    const fallbackReconSystem = getReconSystem();
+    const fallbackReconAssignments = fallbackReconSystem?.state?.reconAssignments
+      ?? missionSystem?.state?.reconAssignments
+      ?? [];
     renderCityIntelMap({
       districts: fallbackDistricts,
       highlightedMission: null,
       activeMission: missionSystem?.state?.activeMission ?? null,
+      reconAssignments: fallbackReconAssignments,
     });
     const fallbackState = missionSystem?.state ?? getSharedState() ?? {};
     const fallbackHistory = Array.isArray(fallbackState.crackdownHistory)
