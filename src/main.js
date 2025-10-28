@@ -167,8 +167,8 @@ const missionControls = {
   maintenanceStatus: null,
   maintenanceStatusDetail: '',
   garageActivityList: null,
-  heatLayLowButton: null,
-  heatBribeButton: null,
+  heatActionContainer: null,
+  heatActionButtons: new Map(),
   heatStatus: null,
   heatStatusDetail: '',
   heatHistoryList: null,
@@ -760,12 +760,116 @@ const HEAT_MANAGEMENT_ACTIONS = {
     label: 'Lay Low',
     cost: 4500,
     heatReduction: 2.5,
+    description: 'Rotate crews through low-profile covers to let the city forget your faces.',
+    crackdownBonus: {
+      tierBonuses: { alert: 0.3, lockdown: 0.5 },
+      inactiveSummary: 'Bonus climbs when the crackdown escalates to alert or lockdown.',
+    },
   },
   bribeOfficials: {
     key: 'bribeOfficials',
     label: 'Bribe Officials',
     cost: 9000,
     heatReduction: 4.5,
+    description: 'Slide thick envelopes across command desks to stall investigations.',
+    crackdownBonus: {
+      tierBonuses: { alert: 0.6, lockdown: 1.2 },
+      inactiveSummary: 'Bribes hit harder during alert or lockdown crackdowns.',
+    },
+    facilityBonus: {
+      ids: ['informant-dead-drops'],
+      heatReductionBonus: 0.6,
+      activeSummary: 'Informant Dead Drops add -0.6 heat to every payoff.',
+      inactiveSummary: 'Fund Informant Dead Drops to boost bribery heat drops.',
+    },
+  },
+  informantDeadDrops: {
+    key: 'informantDeadDrops',
+    label: 'Activate Dead Drops',
+    cost: 6500,
+    heatReduction: 3.2,
+    description: 'Trigger informant leverage dumps to smother precinct chatter.',
+    crackdownBonus: {
+      tierBonuses: { alert: 0.3, lockdown: 0.7 },
+      inactiveSummary: 'Lockdown pushes the bonus to its full potential.',
+    },
+    facilityBonus: {
+      ids: ['informant-dead-drops'],
+      heatReductionBonus: 0.8,
+      activeSummary: 'Safehouse dead drops add -0.8 heat to the sweep.',
+      inactiveSummary: 'Dead drop investments unlock another -0.8 heat.',
+    },
+  },
+  sanctuarySweep: {
+    key: 'sanctuarySweep',
+    label: 'Sanctuary Sweep',
+    cost: 7800,
+    heatReduction: 3.6,
+    description: 'Deploy counter-surveillance teams to re-route crackdown patrols around your turf.',
+    crackdownBonus: {
+      tierBonuses: { alert: 0.4, lockdown: 1 },
+      inactiveSummary: 'Crackdown pressure adds up to -1.0 heat during lockdown.',
+    },
+    facilityBonus: {
+      ids: ['escape-tunnel-grid'],
+      heatReductionBonus: 0.6,
+      activeSummary: 'Escape Tunnel Grid amplifies the sweep by -0.6 heat.',
+      inactiveSummary: 'Build the Escape Tunnel Grid to unlock the sweep bonus.',
+    },
+  },
+  signalSpoof: {
+    key: 'signalSpoof',
+    label: 'Spoof Crackdown Broadcasts',
+    cost: 5600,
+    heatReduction: 2.8,
+    description: 'Hijack precinct bulletins to stall raids and redirect officers.',
+    crackdownBonus: {
+      tierBonuses: { alert: 0.4, lockdown: 0.8 },
+      activeSummary: 'Crackdown tier {tier} adds -{bonus} heat to the spoof.',
+      inactiveSummary: 'Bonus scales up once the crackdown escalates.',
+    },
+    facilityBonus: {
+      ids: ['quiet-network', 'ghost-terminal-core'],
+      heatReductionBonus: 0.5,
+      activeSummary: 'Quiet Network lines add -0.5 heat to the broadcast.',
+      inactiveSummary: 'Wire the Quiet Network to unlock another -0.5 heat.',
+    },
+  },
+  frontCompanyBlitz: {
+    key: 'frontCompanyBlitz',
+    label: 'Front Company Blitz',
+    cost: 8600,
+    heatReduction: 3.9,
+    description: 'Overwhelm auditors with shell company paperwork to bury leads.',
+    crackdownBonus: {
+      tierBonuses: { alert: 0.5, lockdown: 1 },
+      activeSummary: 'Crackdown tier {tier} diverts -{bonus} heat into shell firms.',
+      inactiveSummary: 'Unlock higher crackdown tiers to unleash the paperwork dragnet.',
+    },
+    facilityBonus: {
+      ids: ['shell-company-hub', 'shell-finance-desk'],
+      heatReductionBonus: 0.7,
+      activeSummary: 'Shell financiers launder an extra -0.7 heat.',
+      inactiveSummary: 'Fund shell finance upgrades for another -0.7 heat.',
+    },
+  },
+  phantomSweep: {
+    key: 'phantomSweep',
+    label: 'Phantom Sweep',
+    cost: 11800,
+    heatReduction: 5.1,
+    description: 'Deploy the full counter-intel syndicate to scrub every trace.',
+    crackdownBonus: {
+      tierBonuses: { alert: 0.8, lockdown: 1.5 },
+      activeSummary: 'Crackdown tier {tier} hands the sweep another -{bonus} heat.',
+      inactiveSummary: 'Wait for alert or lockdown pressure to magnify the sweep.',
+    },
+    facilityBonus: {
+      ids: ['phantom-syndicate-suite'],
+      heatReductionBonus: 1.2,
+      activeSummary: 'Phantom Syndicate teams add -1.2 heat to the sweep.',
+      inactiveSummary: 'Complete the Phantom Syndicate suite to unlock the final drop.',
+    },
   },
 };
 
@@ -3794,6 +3898,99 @@ const setOperationsDashboardValue = (valueNode, statusNode, { text, riskLevel, s
   }
 };
 
+const deriveHeatActionContext = (action, { heatSystem, facilityBonuses } = {}) => {
+  if (!action) {
+    return {
+      baseReduction: 0,
+      reduction: 0,
+      potentialReduction: 0,
+      activeBonuses: [],
+      potentialBonuses: [],
+      description: '',
+      crackdownTier: 'calm',
+    };
+  }
+
+  const baseReduction = Number.isFinite(action.heatReduction) && action.heatReduction > 0
+    ? action.heatReduction
+    : 0;
+  let reduction = baseReduction;
+  const activeBonuses = [];
+  const potentialBonuses = [];
+
+  const crackdownTierRaw = typeof heatSystem?.getCurrentTier === 'function'
+    ? heatSystem.getCurrentTier()
+    : typeof heatSystem?.state?.heatTier === 'string'
+      ? heatSystem.state.heatTier
+      : 'calm';
+  const crackdownTier = crackdownTierRaw ? crackdownTierRaw.toLowerCase() : 'calm';
+
+  let maxCrackdownBonus = 0;
+  if (action.crackdownBonus?.tierBonuses && typeof action.crackdownBonus.tierBonuses === 'object') {
+    Object.entries(action.crackdownBonus.tierBonuses).forEach(([tierKey, value]) => {
+      const normalizedTier = typeof tierKey === 'string' ? tierKey.toLowerCase() : tierKey;
+      const numericValue = Number(value) || 0;
+      maxCrackdownBonus = Math.max(maxCrackdownBonus, numericValue);
+      if (normalizedTier === crackdownTier && numericValue > 0) {
+        reduction += numericValue;
+        if (action.crackdownBonus.activeSummary) {
+          const formatted = action.crackdownBonus.activeSummary
+            .replace('{bonus}', numericValue.toFixed(1))
+            .replace('{tier}', normalizedTier);
+          activeBonuses.push(formatted);
+        } else {
+          activeBonuses.push(`+${numericValue.toFixed(1)} heat relief during ${normalizedTier} crackdowns.`);
+        }
+      }
+    });
+
+    if (maxCrackdownBonus > 0 && reduction < baseReduction + maxCrackdownBonus) {
+      potentialBonuses.push(
+        action.crackdownBonus.inactiveSummary
+          ?? `Bonus grows to -${maxCrackdownBonus.toFixed(1)} heat when the crackdown tightens.`,
+      );
+    }
+  }
+
+  let facilityBonusValue = 0;
+  if (action.facilityBonus) {
+    const facilityIds = Array.isArray(action.facilityBonus.ids)
+      ? action.facilityBonus.ids
+      : action.facilityBonus.ids
+        ? [action.facilityBonus.ids]
+        : [];
+    facilityBonusValue = Number(action.facilityBonus.heatReductionBonus) || 0;
+    const activeFacilityIds = new Set(facilityBonuses?.activeFacilityIds ?? []);
+    const facilityActive = facilityIds.some((id) => activeFacilityIds.has(id));
+
+    if (facilityActive && facilityBonusValue > 0) {
+      reduction += facilityBonusValue;
+      if (action.facilityBonus.activeSummary) {
+        activeBonuses.push(action.facilityBonus.activeSummary);
+      } else {
+        activeBonuses.push(`Safehouse bonus adds -${facilityBonusValue.toFixed(1)} heat.`);
+      }
+    } else if (facilityBonusValue > 0) {
+      potentialBonuses.push(
+        action.facilityBonus.inactiveSummary
+          ?? `Unlock the linked facility for another -${facilityBonusValue.toFixed(1)} heat.`,
+      );
+    }
+  }
+
+  const potentialReduction = baseReduction + Math.max(0, maxCrackdownBonus) + Math.max(0, facilityBonusValue);
+
+  return {
+    baseReduction,
+    reduction,
+    potentialReduction,
+    activeBonuses,
+    potentialBonuses,
+    description: action.description ?? '',
+    crackdownTier,
+  };
+};
+
 const resetOperationsDashboard = () => {
   const {
     operationsExpensesValue,
@@ -4143,8 +4340,8 @@ const updateOperationsDashboard = () => {
 };
 
 const updateHeatManagementPanel = () => {
-  const { heatLayLowButton, heatBribeButton, heatStatus } = missionControls;
-  if (!heatLayLowButton || !heatBribeButton || !heatStatus) {
+  const { heatActionButtons, heatStatus } = missionControls;
+  if (!heatStatus) {
     return;
   }
 
@@ -4164,46 +4361,154 @@ const updateHeatManagementPanel = () => {
       ? heatSystem.state.crackdownHistory
       : [];
 
-  const layLowConfig = HEAT_MANAGEMENT_ACTIONS.layLow;
-  const bribeConfig = HEAT_MANAGEMENT_ACTIONS.bribeOfficials;
+  const safehouse = state ? getActiveSafehouseFromState(state) : null;
+  const facilityBonuses = safehouse ? computeSafehouseFacilityBonuses(safehouse) : null;
+  const mitigationMultiplier = Number.isFinite(facilityBonuses?.heatMitigationMultiplier)
+    && facilityBonuses.heatMitigationMultiplier > 0
+    ? facilityBonuses.heatMitigationMultiplier
+    : 1;
+  const mitigationBonus = Number.isFinite(facilityBonuses?.heatMitigationBonus)
+    ? facilityBonuses.heatMitigationBonus
+    : 0;
+  const costDiscount = Number.isFinite(facilityBonuses?.heatMitigationCostReduction)
+    ? facilityBonuses.heatMitigationCostReduction
+    : 0;
 
+  const actions = Object.values(HEAT_MANAGEMENT_ACTIONS);
   const systemsReady = Boolean(missionSystem && heatSystem && economySystem);
+  const buttons = heatActionButtons instanceof Map ? heatActionButtons : new Map();
 
-  const canLayLow = systemsReady && funds >= layLowConfig.cost;
-  const canBribe = systemsReady && funds >= bribeConfig.cost;
+  const actionSummaries = [];
+  const shortages = [];
 
-  heatLayLowButton.disabled = !canLayLow;
-  heatBribeButton.disabled = !canBribe;
+  actions.forEach((action) => {
+    const ui = buttons.get(action.key);
+    const button = ui?.button ?? null;
+    const baseCost = Number.isFinite(action.cost) && action.cost > 0 ? action.cost : 0;
+    const adjustedCost = Math.max(0, baseCost - costDiscount);
+    const context = deriveHeatActionContext(action, { heatSystem, facilityBonuses });
+    const projectedReduction = Math.max(0, context.reduction * mitigationMultiplier + mitigationBonus);
+    const potentialReduction = Math.max(0, context.potentialReduction * mitigationMultiplier + mitigationBonus);
+    const baseReduction = Math.max(0, context.baseReduction);
 
-  heatLayLowButton.title = canLayLow
-    ? ''
-    : `Requires ${formatCurrency(layLowConfig.cost)} and operational systems.`;
-  heatBribeButton.title = canBribe
-    ? ''
-    : `Requires ${formatCurrency(bribeConfig.cost)} and operational systems.`;
+    const canPerform = systemsReady && funds >= adjustedCost;
+    if (button) {
+      button.disabled = !canPerform;
+      button.title = canPerform
+        ? ''
+        : `Requires ${formatCurrency(adjustedCost)} and operational systems.`;
+    }
+
+    if (funds < adjustedCost) {
+      shortages.push(`${action.label} needs ${formatCurrency(adjustedCost)}`);
+    }
+
+    let summary = `${action.label} costs ${formatCurrency(adjustedCost)} to drop heat by ${projectedReduction.toFixed(1)}.`;
+    if (context.description) {
+      summary = `${summary} ${context.description}`;
+    }
+    if (context.activeBonuses.length) {
+      summary = `${summary} ${context.activeBonuses.join(' ')}`;
+    }
+    if (context.potentialBonuses.length && potentialReduction > projectedReduction + 0.05) {
+      summary = `${summary} Potential ${potentialReduction.toFixed(1)} with ${context.potentialBonuses.join(' / ')}.`;
+    }
+
+    if (ui) {
+      if (ui.base) {
+        ui.base.textContent = `${baseReduction.toFixed(1)} heat`;
+      }
+      if (ui.projected) {
+        ui.projected.textContent = `${projectedReduction.toFixed(1)} heat`;
+      }
+      if (ui.potential) {
+        ui.potential.textContent = `${potentialReduction.toFixed(1)} heat`;
+      }
+      if (ui.cost) {
+        ui.cost.textContent = formatCurrency(adjustedCost);
+      }
+      if (ui.crackdown) {
+        const crackdownLabel = context.crackdownTier
+          ? `${context.crackdownTier.charAt(0).toUpperCase()}${context.crackdownTier.slice(1)}`
+          : 'Calm';
+        ui.crackdown.textContent = crackdownLabel;
+      }
+      if (ui.active) {
+        ui.active.textContent = context.activeBonuses.length
+          ? `Active bonuses: ${context.activeBonuses.join(' ')}`
+          : 'Active bonuses: none yet.';
+      }
+      if (ui.potentialNotes) {
+        ui.potentialNotes.textContent = context.potentialBonuses.length
+          ? `Potential bonuses: ${context.potentialBonuses.join(' ')}`
+          : 'Potential bonuses: none remaining.';
+      }
+      if (ui.status) {
+        let statusText;
+        if (!systemsReady) {
+          statusText = 'Mitigation systems offline.';
+        } else if (!canPerform) {
+          const shortfall = Math.max(0, adjustedCost - funds);
+          statusText = shortfall > 0
+            ? `Short ${formatCurrency(shortfall)}.`
+            : 'Action unavailable.';
+        } else {
+          statusText = 'Ready to deploy.';
+        }
+
+        const statusExtras = [];
+        if (costDiscount > 0) {
+          statusExtras.push(`Discount ${formatCurrency(costDiscount)} applied.`);
+        }
+        if (mitigationMultiplier !== 1 || mitigationBonus > 0) {
+          const multiplierLabel = mitigationMultiplier !== 1
+            ? `${Math.round((mitigationMultiplier - 1) * 100)}% boost`
+            : null;
+          const bonusLabel = mitigationBonus > 0 ? `+${mitigationBonus.toFixed(1)} flat heat` : null;
+          statusExtras.push(['Safehouse boost', multiplierLabel, bonusLabel].filter(Boolean).join(' '));
+        }
+
+        ui.status.textContent = statusExtras.length
+          ? `${statusText} ${statusExtras.join(' ')}`
+          : statusText;
+      }
+    }
+
+    actionSummaries.push(summary);
+  });
 
   let summaryMessage;
-
   if (!systemsReady) {
     summaryMessage = 'Heat abatement network syncing…';
+  } else if (!actionSummaries.length) {
+    summaryMessage = 'No heat mitigation actions configured.';
   } else {
-    const layLowHeat = layLowConfig.heatReduction.toFixed(1);
-    const bribeHeat = bribeConfig.heatReduction.toFixed(1);
-    summaryMessage = `Lay Low costs ${formatCurrency(layLowConfig.cost)} to drop heat by ${layLowHeat}. ` +
-      `Bribe Officials costs ${formatCurrency(bribeConfig.cost)} to drop heat by ${bribeHeat}.`;
-
-    const shortages = [];
-    if (funds < layLowConfig.cost) {
-      shortages.push(`Lay Low needs ${formatCurrency(layLowConfig.cost)}`);
-    }
-    if (funds < bribeConfig.cost) {
-      shortages.push(`Bribe Officials needs ${formatCurrency(bribeConfig.cost)}`);
-    }
-
+    summaryMessage = actionSummaries.join(' ');
     if (shortages.length) {
       summaryMessage = `${summaryMessage} Funds short — ${shortages.join(' and ')}.`;
     } else {
       summaryMessage = `${summaryMessage} Available funds: ${formatCurrency(funds)}.`;
+    }
+    const bonusSegments = [];
+    if (costDiscount > 0) {
+      bonusSegments.push(`Safehouse perks shave ${formatCurrency(costDiscount)} off each operation.`);
+    }
+    if (mitigationMultiplier !== 1 || mitigationBonus > 0) {
+      const multiplierLabel = mitigationMultiplier !== 1
+        ? `${Math.round((mitigationMultiplier - 1) * 100)}% boost`
+        : null;
+      const bonusLabel = mitigationBonus > 0
+        ? `+${mitigationBonus.toFixed(1)} flat heat`
+        : null;
+      bonusSegments.push(
+        ['Safehouse bonuses amplify mitigation', multiplierLabel, bonusLabel]
+          .filter(Boolean)
+          .join(' ')
+          .concat('.'),
+      );
+    }
+    if (bonusSegments.length) {
+      summaryMessage = `${summaryMessage} ${bonusSegments.join(' ')}`;
     }
   }
 
@@ -4974,20 +5279,37 @@ const performHeatMitigation = (actionKey) => {
 
   const funds = Number.isFinite(state.funds) ? state.funds : 0;
   const cost = Number.isFinite(action.cost) && action.cost > 0 ? action.cost : 0;
+  const safehouse = state ? getActiveSafehouseFromState(state) : null;
+  const facilityBonuses = safehouse ? computeSafehouseFacilityBonuses(safehouse) : null;
+  const costDiscount = Number.isFinite(facilityBonuses?.heatMitigationCostReduction)
+    ? facilityBonuses.heatMitigationCostReduction
+    : 0;
+  const adjustedCost = Math.max(0, cost - costDiscount);
 
-  if (funds < cost) {
-    const required = formatCurrency(cost);
+  if (funds < adjustedCost) {
+    const required = formatCurrency(adjustedCost);
     const available = formatCurrency(funds);
     missionControls.heatStatusDetail = `Insufficient funds — requires ${required}, available ${available}.`;
     updateHeatManagementPanel();
     return;
   }
 
+  const context = deriveHeatActionContext(action, { heatSystem, facilityBonuses });
+  const mitigationMultiplier = Number.isFinite(facilityBonuses?.heatMitigationMultiplier)
+    && facilityBonuses.heatMitigationMultiplier > 0
+    ? facilityBonuses.heatMitigationMultiplier
+    : 1;
+  const mitigationBonus = Number.isFinite(facilityBonuses?.heatMitigationBonus)
+    ? facilityBonuses.heatMitigationBonus
+    : 0;
+  const plannedReduction = Math.max(0, context.reduction);
+  const heatReduction = Math.max(0, plannedReduction * mitigationMultiplier + mitigationBonus);
+
   const finalizeMitigation = (mitigationResult) => {
     if (!mitigationResult?.success) {
       let failureMessage = 'Unable to mitigate heat.';
       if (mitigationResult?.reason === 'insufficient-funds') {
-        const required = formatCurrency(mitigationResult.cost ?? cost);
+        const required = formatCurrency(mitigationResult.cost ?? adjustedCost);
         const available = formatCurrency(mitigationResult.fundsAvailable ?? funds);
         failureMessage = `Insufficient funds — requires ${required}, available ${available}.`;
       } else if (mitigationResult?.reason === 'heat-system-unavailable') {
@@ -5012,9 +5334,31 @@ const performHeatMitigation = (actionKey) => {
         ? heatSystem.state.heat
         : 0;
 
-    missionControls.heatStatusDetail = `Spent ${formatCurrency(mitigationResult.cost ?? cost)} to ${
-      action.label.toLowerCase()
-    } — heat ${formatHeatValue(heatBefore)} → ${formatHeatValue(heatAfter)}.`;
+    const messageSegments = [`Spent ${formatCurrency(mitigationResult.cost ?? adjustedCost)} to ${action.label.toLowerCase()}`];
+    const adjustmentNotes = [];
+    if (context.activeBonuses.length) {
+      adjustmentNotes.push(context.activeBonuses.join(' '));
+    }
+    if (mitigationMultiplier !== 1 || mitigationBonus > 0) {
+      const pieces = [];
+      if (mitigationMultiplier !== 1) {
+        pieces.push(`${Math.round((mitigationMultiplier - 1) * 100)}% safehouse boost`);
+      }
+      if (mitigationBonus > 0) {
+        pieces.push(`+${mitigationBonus.toFixed(1)} flat heat`);
+      }
+      adjustmentNotes.push(pieces.join(' '));
+    }
+    if (costDiscount > 0) {
+      adjustmentNotes.push(`Discount applied — saved ${formatCurrency(costDiscount)}.`);
+    }
+
+    messageSegments.push(`— heat ${formatHeatValue(heatBefore)} → ${formatHeatValue(heatAfter)}.`);
+    if (adjustmentNotes.length) {
+      messageSegments.push(adjustmentNotes.join(' '));
+    }
+
+    missionControls.heatStatusDetail = messageSegments.join(' ');
 
     updateMissionSelect();
     updateMissionControls();
@@ -5033,10 +5377,17 @@ const performHeatMitigation = (actionKey) => {
       heatSystem,
       missionSystem,
       economySystem,
-      reduction: action.heatReduction,
-      cost,
+      reduction: heatReduction,
+      cost: adjustedCost,
       label: action.label,
-      metadata: { action: action.key },
+      metadata: {
+        action: action.key,
+        baseReduction: context.baseReduction,
+        bonusesApplied: context.activeBonuses,
+        facilityMultiplier: mitigationMultiplier,
+        facilityBonus: mitigationBonus,
+        costDiscount,
+      },
     });
 
     if (mitigationOutcome && typeof mitigationOutcome.then === 'function') {
@@ -5049,8 +5400,127 @@ const performHeatMitigation = (actionKey) => {
   }
 };
 
-const handleHeatLayLow = () => performHeatMitigation('layLow');
-const handleHeatBribe = () => performHeatMitigation('bribeOfficials');
+const initializeHeatActionButtons = () => {
+  const container = missionControls.heatActionContainer;
+  if (!container) {
+    missionControls.heatActionButtons = new Map();
+    return;
+  }
+
+  container.innerHTML = '';
+  const entries = new Map();
+
+  Object.values(HEAT_MANAGEMENT_ACTIONS).forEach((action) => {
+    if (!action?.key) {
+      return;
+    }
+
+    const baseId = `mission-heat-${action.key}`;
+    const card = document.createElement('article');
+    card.className = 'mission-heat__action-card';
+    card.setAttribute('role', 'listitem');
+
+    const labelId = `${baseId}-title`;
+    const descriptionId = `${baseId}-description`;
+    const statusId = `${baseId}-status`;
+    card.setAttribute('aria-labelledby', labelId);
+    card.setAttribute('aria-describedby', `${descriptionId} ${statusId}`.trim());
+
+    const title = document.createElement('h4');
+    title.className = 'mission-heat__action-title';
+    title.id = labelId;
+    title.textContent = action.label ?? action.key;
+    card.appendChild(title);
+
+    const description = document.createElement('p');
+    description.className = 'mission-heat__action-description';
+    description.id = descriptionId;
+    description.textContent = action.description ?? '';
+    card.appendChild(description);
+
+    const stats = document.createElement('dl');
+    stats.className = 'mission-heat__action-stats';
+
+    const createStat = (label, className) => {
+      const row = document.createElement('div');
+      row.className = 'mission-heat__action-stat';
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.className = className;
+      row.appendChild(dt);
+      row.appendChild(dd);
+      stats.appendChild(row);
+      return dd;
+    };
+
+    const baseValue = createStat('Base Drop', 'mission-heat__action-value mission-heat__action-value--base');
+    const projectedValue = createStat(
+      'Projected Drop',
+      'mission-heat__action-value mission-heat__action-value--projected',
+    );
+    const potentialValue = createStat(
+      'Max Drop',
+      'mission-heat__action-value mission-heat__action-value--potential',
+    );
+    const crackdownValue = createStat(
+      'Current Crackdown',
+      'mission-heat__action-value mission-heat__action-value--crackdown',
+    );
+    const costValue = createStat('Current Cost', 'mission-heat__action-value mission-heat__action-value--cost');
+
+    [baseValue, projectedValue, potentialValue, crackdownValue, costValue].forEach((node) => {
+      if (node) {
+        node.textContent = '—';
+      }
+    });
+
+    card.appendChild(stats);
+
+    const activeNote = document.createElement('p');
+    activeNote.className = 'mission-heat__action-note mission-heat__action-note--active';
+    activeNote.textContent = 'Active bonuses: syncing…';
+    card.appendChild(activeNote);
+
+    const potentialNote = document.createElement('p');
+    potentialNote.className = 'mission-heat__action-note mission-heat__action-note--potential';
+    potentialNote.textContent = 'Potential bonuses: syncing…';
+    card.appendChild(potentialNote);
+
+    const status = document.createElement('p');
+    status.className = 'mission-heat__action-note mission-heat__action-note--status';
+    status.id = statusId;
+    status.textContent = 'Mitigation telemetry syncing.';
+    card.appendChild(status);
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mission-heat__action-button';
+    button.id = `${baseId}-btn`;
+    button.dataset.actionKey = action.key;
+    button.textContent = action.label ?? action.key;
+    button.setAttribute('aria-describedby', `${descriptionId} ${statusId}`.trim());
+    button.addEventListener('click', () => performHeatMitigation(action.key));
+    card.appendChild(button);
+
+    container.appendChild(card);
+
+    entries.set(action.key, {
+      button,
+      card,
+      base: baseValue,
+      projected: projectedValue,
+      potential: potentialValue,
+      cost: costValue,
+      crackdown: crackdownValue,
+      active: activeNote,
+      potentialNotes: potentialNote,
+      status,
+    });
+  });
+
+  missionControls.heatActionButtons = entries;
+};
 
 const handleSafehouseUpgrade = () => {
   const economySystem = getEconomySystem();
@@ -8755,8 +9225,7 @@ const setupMissionControls = () => {
   missionControls.maintenanceCraftingList = document.getElementById('mission-maintenance-crafting-list');
   missionControls.maintenanceStatus = document.getElementById('mission-maintenance-status');
   missionControls.garageActivityList = document.getElementById('mission-garage-activity-list');
-  missionControls.heatLayLowButton = document.getElementById('mission-heat-laylow-btn');
-  missionControls.heatBribeButton = document.getElementById('mission-heat-bribe-btn');
+  missionControls.heatActionContainer = document.getElementById('mission-heat-actions');
   missionControls.heatStatus = document.getElementById('mission-heat-status');
   missionControls.heatHistoryList = document.getElementById('mission-heat-history-list');
 
@@ -8823,8 +9292,7 @@ const setupMissionControls = () => {
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
-    heatLayLowButton,
-    heatBribeButton,
+    heatActionContainer,
     heatStatus,
   } = missionControls;
 
@@ -8887,8 +9355,7 @@ const setupMissionControls = () => {
     maintenanceRepairButton,
     maintenanceHeatButton,
     maintenanceStatus,
-    heatLayLowButton,
-    heatBribeButton,
+    heatActionContainer,
     heatStatus,
   ].every(Boolean);
 
@@ -8931,8 +9398,7 @@ const setupMissionControls = () => {
   maintenanceUpgradeButton?.addEventListener('click', handleMaintenanceUpgrade);
   maintenanceUpgradeSelect?.addEventListener('change', updateMaintenancePanel);
   maintenanceCraftingList?.addEventListener('click', handleMaintenanceCraftingClick);
-  heatLayLowButton.addEventListener('click', handleHeatLayLow);
-  heatBribeButton.addEventListener('click', handleHeatBribe);
+  initializeHeatActionButtons();
   missionControls.safehouseProjects?.addEventListener('click', handleSafehouseProjectListClick);
   missionControls.safehouseProjects?.addEventListener('keydown', handleSafehouseProjectListKeydown);
   missionControls.safehouseProjectButton?.addEventListener('click', handleSafehouseProjectFunding);

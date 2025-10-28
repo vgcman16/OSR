@@ -7,6 +7,7 @@ import { buildSafehouseIncursionEvents } from './safehouseIncursionEvents.js';
 import { getAvailableCrewStorylineMissions, applyCrewStorylineOutcome } from './crewStorylines.js';
 import { getCrackdownOperationTemplates } from './crackdownOperations.js';
 import { getActiveStorageCapacityFromState, getActiveSafehouseFromState } from '../world/safehouse.js';
+import { computeSafehouseFacilityBonuses } from '../world/safehouseEffects.js';
 import { getCrewPerkEffect } from './crewPerks.js';
 import { getCrewGearEffect } from './crewGear.js';
 import { getVehicleModRecipe, assessVehicleModAffordability } from './vehicleModRecipes.js';
@@ -536,6 +537,39 @@ const PLAYER_GEAR_CATALOG = {
       payoutMultiplier: 1.08,
       heatMultiplier: 0.93,
       successBonus: 0.015,
+    },
+  },
+  'overwatch-suite': {
+    id: 'overwatch-suite',
+    label: 'Overwatch Suite',
+    description: 'Command uplinks steer ops in real time, compressing timelines and steadying risks.',
+    cost: 4400,
+    effects: {
+      durationMultiplier: 0.93,
+      heatMultiplier: 0.97,
+      successBonus: 0.025,
+    },
+  },
+  'deep-cover-ledger': {
+    id: 'deep-cover-ledger',
+    label: 'Deep Cover Ledger',
+    description: 'Layered shell accounts launder payouts while muting the crackdown\'s focus.',
+    cost: 5000,
+    effects: {
+      payoutMultiplier: 1.06,
+      heatMultiplier: 0.9,
+      successBonus: 0.01,
+    },
+  },
+  'emergency-evac-beacon': {
+    id: 'emergency-evac-beacon',
+    label: 'Emergency Evac Beacon',
+    description: 'Pre-cleared air corridors yank crews out when ops stall, salvaging shaky runs.',
+    cost: 4700,
+    effects: {
+      durationMultiplier: 0.9,
+      heatMultiplier: 1.02,
+      successBonus: 0.035,
     },
   },
 };
@@ -2632,6 +2666,9 @@ class MissionSystem {
       ? mission.baseHeat
       : coerceFiniteNumber(mission.heat, 0);
 
+    const safehouse = this.state ? getActiveSafehouseFromState(this.state) : null;
+    const facilityBonuses = safehouse ? computeSafehouseFacilityBonuses(safehouse) : null;
+
     let durationMultiplier = 1;
     let payoutMultiplier = 1;
     let successBonus = 0;
@@ -2648,6 +2685,27 @@ class MissionSystem {
       successBonus += playerImpact.successBonus ?? 0;
       heatMultiplier *= playerImpact.heatMultiplier ?? 1;
     }
+
+    const facilityDurationMultiplier = Number.isFinite(facilityBonuses?.missionDurationMultiplier)
+      && facilityBonuses.missionDurationMultiplier > 0
+      ? facilityBonuses.missionDurationMultiplier
+      : 1;
+    const facilityPayoutMultiplier = Number.isFinite(facilityBonuses?.missionPayoutMultiplier)
+      && facilityBonuses.missionPayoutMultiplier > 0
+      ? facilityBonuses.missionPayoutMultiplier
+      : 1;
+    const facilitySuccessBonus = Number.isFinite(facilityBonuses?.missionSuccessBonus)
+      ? facilityBonuses.missionSuccessBonus
+      : 0;
+    const facilityHeatMultiplier = Number.isFinite(facilityBonuses?.missionHeatMultiplier)
+      && facilityBonuses.missionHeatMultiplier > 0
+      ? facilityBonuses.missionHeatMultiplier
+      : 1;
+
+    durationMultiplier *= facilityDurationMultiplier;
+    payoutMultiplier *= facilityPayoutMultiplier;
+    successBonus += facilitySuccessBonus;
+    heatMultiplier *= facilityHeatMultiplier;
 
     crewMembers.forEach((member) => {
       if (!member) {
@@ -2865,7 +2923,26 @@ class MissionSystem {
       heatAdjustment = crewAdjustedHeat - baseHeat;
     }
 
+    const facilityHeatFlatAdjustment = Number.isFinite(facilityBonuses?.missionHeatFlatAdjustment)
+      ? facilityBonuses.missionHeatFlatAdjustment
+      : 0;
+    if (facilityHeatFlatAdjustment !== 0) {
+      adjustedHeat = Math.max(0, adjustedHeat + facilityHeatFlatAdjustment);
+      heatAdjustment += facilityHeatFlatAdjustment;
+      if (vehicleImpact) {
+        vehicleImpact.heatAdjustment = (vehicleImpact.heatAdjustment ?? 0) + facilityHeatFlatAdjustment;
+      }
+    }
+
     heatMultiplier = combinedHeatMultiplier;
+
+    if (Array.isArray(facilityBonuses?.missionEffectSummaries) && facilityBonuses.missionEffectSummaries.length) {
+      facilityBonuses.missionEffectSummaries.forEach((line) => {
+        if (line) {
+          summary.push(`Safehouse: ${line}`);
+        }
+      });
+    }
 
     const adjustedDuration = Math.max(5, Math.round(baseDuration * durationMultiplier));
     const adjustedPayout = Math.round(basePayout * payoutMultiplier);
