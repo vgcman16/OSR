@@ -1,4 +1,4 @@
-import { createCarThiefGame } from './game/carThief/index.js';
+import { createCarThiefGame, createGameSerializer } from './game/carThief/index.js';
 import { CrewMember, CREW_TRAIT_CONFIG, CREW_FATIGUE_CONFIG } from './game/carThief/entities/crewMember.js';
 import {
   GARAGE_MAINTENANCE_CONFIG,
@@ -12,8 +12,10 @@ import { executeHeatMitigation } from './game/carThief/systems/heatMitigationSer
 import { getAvailableCrewStorylineMissions } from './game/carThief/systems/crewStorylines.js';
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
 import { computeSafehouseFacilityBonuses, getFacilityEffectConfig } from './game/carThief/world/safehouseEffects.js';
+import { createOnboardingTour } from './game/carThief/ui/onboarding.js';
 
 let gameInstance = null;
+let onboardingTour = null;
 
 const teardownGame = () => {
   if (!gameInstance) {
@@ -6492,6 +6494,20 @@ function initGame() {
 
 document.addEventListener('DOMContentLoaded', () => {
   setupMissionControls();
+
+  const onboardingSerializer = createGameSerializer({ key: 'osr.car-thief.onboarding.v1' });
+  onboardingTour = createOnboardingTour({ missionControls, serializer: onboardingSerializer });
+
+  const tutorialToggle = document.getElementById('show-tutorial-btn');
+  if (tutorialToggle) {
+    tutorialToggle.addEventListener('click', () => {
+      onboardingTour?.start({ force: true });
+    });
+  }
+
+  window.requestAnimationFrame(() => {
+    onboardingTour?.start();
+  });
 
   if (document.readyState === 'loading') {
     window.addEventListener('load', initGame, { once: true });
