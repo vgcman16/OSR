@@ -15,6 +15,7 @@ import { getAvailableCrewStorylineMissions } from './game/carThief/systems/crewS
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
 import { computeSafehouseFacilityBonuses, getFacilityEffectConfig } from './game/carThief/world/safehouseEffects.js';
 import { createOnboardingTour } from './game/carThief/ui/onboarding.js';
+import { CREW_GEAR_CATALOG } from './game/carThief/systems/crewGear.js';
 
 let gameInstance = null;
 let onboardingTour = null;
@@ -133,9 +134,13 @@ const missionControls = {
   trainingSpecialtySelect: null,
   trainingLoyaltyButton: null,
   trainingSpecialtyButton: null,
-   trainingAttributeSelect: null,
-   trainingAttributeButton: null,
-   trainingAttributeList: null,
+  trainingAttributeSelect: null,
+  trainingAttributeButton: null,
+  trainingAttributeList: null,
+  trainingGearSelect: null,
+  trainingGearAcquireButton: null,
+  trainingGearEquipButton: null,
+  trainingGearList: null,
   trainingRestCrewSelect: null,
   trainingRestDurationSelect: null,
   trainingRestButton: null,
@@ -259,6 +264,89 @@ const formatCrewTraitSummary = (entity, limit = 3) => {
   return selection
     .map((entry) => `${entry.label} ${entry.value}`)
     .join(', ');
+};
+
+const getCrewGearInventory = (member) => {
+  if (!member) {
+    return [];
+  }
+
+  const raw = typeof member.getGearInventory === 'function'
+    ? member.getGearInventory()
+    : Array.isArray(member.gearInventory)
+      ? member.gearInventory
+      : [];
+
+  const seen = new Set();
+  const normalized = [];
+  raw.forEach((gearId) => {
+    if (!gearId && gearId !== 0) {
+      return;
+    }
+    const id = String(gearId);
+    if (!id || seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    normalized.push(id);
+  });
+
+  return normalized;
+};
+
+const getCrewEquippedGearIds = (member) => {
+  if (!member) {
+    return [];
+  }
+
+  const raw = typeof member.getEquippedGearIds === 'function'
+    ? member.getEquippedGearIds()
+    : Array.isArray(member.equippedGear)
+      ? member.equippedGear
+      : [];
+
+  const inventory = new Set(getCrewGearInventory(member));
+  const seen = new Set();
+  const normalized = [];
+  raw.forEach((gearId) => {
+    if (!gearId && gearId !== 0) {
+      return;
+    }
+    const id = String(gearId);
+    if (!id || seen.has(id) || !inventory.has(id)) {
+      return;
+    }
+    seen.add(id);
+    normalized.push(id);
+  });
+
+  return normalized;
+};
+
+const crewOwnsGear = (member, gearId) => {
+  if (!gearId) {
+    return false;
+  }
+  const normalized = String(gearId);
+  return getCrewGearInventory(member).includes(normalized);
+};
+
+const crewHasEquippedGear = (member, gearId) => {
+  if (!gearId) {
+    return false;
+  }
+  const normalized = String(gearId);
+  return getCrewEquippedGearIds(member).includes(normalized);
+};
+
+const describeCrewGearLoadout = (member) => {
+  const equipped = getCrewEquippedGearIds(member);
+  if (!equipped.length) {
+    return 'Gear: None equipped';
+  }
+
+  const labels = equipped.map((gearId) => CREW_GEAR_CATALOG[gearId]?.label ?? gearId);
+  return `Gear: ${labels.join(', ')}`;
 };
 
 const summarizeCrewReadiness = (member) => {
@@ -593,6 +681,41 @@ const renderCrewTraitList = (container, member) => {
     });
 };
 
+const renderCrewGearList = (container, member) => {
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = '';
+
+  if (!member) {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'Select a crew member to review their gear.';
+    container.appendChild(placeholder);
+    return;
+  }
+
+  const inventory = getCrewGearInventory(member);
+  const equippedSet = new Set(getCrewEquippedGearIds(member));
+
+  if (!inventory.length) {
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'No crew gear acquired yet.';
+    container.appendChild(placeholder);
+    return;
+  }
+
+  inventory.forEach((gearId) => {
+    const config = CREW_GEAR_CATALOG[gearId] ?? null;
+    const label = config?.label ?? gearId;
+    const status = equippedSet.has(gearId) ? 'Equipped' : 'Stowed';
+    const description = config?.description ? ` — ${config.description}` : '';
+    const item = document.createElement('li');
+    item.textContent = `${label} (${status})${description}`;
+    container.appendChild(item);
+  });
+};
+
 const PLAYER_SKILL_OPTIONS = Object.values(PLAYER_SKILL_CONFIG).map((entry) => ({
   value: entry.key,
   label: `${entry.label} — ${entry.description}`,
@@ -606,6 +729,14 @@ const PLAYER_GEAR_OPTIONS = Object.values(PLAYER_GEAR_CATALOG).map((entry) => ({
   label: `${entry.label} — ${entry.description}`,
   cost: entry.cost,
 })).sort((a, b) => a.label.localeCompare(b.label));
+
+const CREW_GEAR_OPTIONS = Object.values(CREW_GEAR_CATALOG)
+  .map((entry) => ({
+    value: entry.id,
+    label: `${entry.label} — ${entry.description}`,
+    cost: entry.cost ?? 0,
+  }))
+  .sort((a, b) => a.label.localeCompare(b.label));
 
 const LOYALTY_TRAINING_COST = 2000;
 const SPECIALTY_TRAINING_COST = 3500;
@@ -4933,6 +5064,10 @@ const updateTrainingOptions = () => {
   const attributeSelect = missionControls.trainingAttributeSelect;
   const attributeButton = missionControls.trainingAttributeButton;
   const attributeList = missionControls.trainingAttributeList;
+  const gearSelect = missionControls.trainingGearSelect;
+  const gearAcquireButton = missionControls.trainingGearAcquireButton;
+  const gearEquipButton = missionControls.trainingGearEquipButton;
+  const gearList = missionControls.trainingGearList;
   const restCrewSelect = missionControls.trainingRestCrewSelect;
   const restDurationSelect = missionControls.trainingRestDurationSelect;
   const restButton = missionControls.trainingRestButton;
@@ -4945,6 +5080,10 @@ const updateTrainingOptions = () => {
     !attributeSelect ||
     !attributeButton ||
     !attributeList ||
+    !gearSelect ||
+    !gearAcquireButton ||
+    !gearEquipButton ||
+    !gearList ||
     !restCrewSelect ||
     !restDurationSelect ||
     !restButton
@@ -5065,6 +5204,100 @@ const updateTrainingOptions = () => {
     restButton.title = '';
   }
 
+  const previousGearSelection = gearSelect.value;
+  gearSelect.innerHTML = '';
+  const gearPlaceholder = document.createElement('option');
+  gearPlaceholder.value = '';
+  gearPlaceholder.textContent = CREW_GEAR_OPTIONS.length
+    ? 'Select crew gear'
+    : 'No gear available';
+  gearPlaceholder.disabled = true;
+  gearPlaceholder.selected = true;
+  gearSelect.appendChild(gearPlaceholder);
+
+  CREW_GEAR_OPTIONS.forEach((entry) => {
+    const option = document.createElement('option');
+    option.value = entry.value;
+    const owned = currentSelection ? crewOwnsGear(currentSelection, entry.value) : false;
+    const equipped = currentSelection ? crewHasEquippedGear(currentSelection, entry.value) : false;
+    const statusLabel = owned ? (equipped ? ' (equipped)' : ' (owned)') : '';
+    option.textContent = `${entry.label}${statusLabel}`;
+    gearSelect.appendChild(option);
+  });
+
+  if (currentSelection && CREW_GEAR_OPTIONS.some((entry) => entry.value === previousGearSelection)) {
+    gearSelect.value = previousGearSelection;
+    gearPlaceholder.selected = false;
+  } else if (currentSelection && CREW_GEAR_OPTIONS.length) {
+    gearSelect.value = CREW_GEAR_OPTIONS[0].value;
+    gearPlaceholder.selected = false;
+  } else {
+    gearSelect.value = '';
+    gearPlaceholder.selected = true;
+  }
+
+  gearSelect.disabled = !currentSelection || !CREW_GEAR_OPTIONS.length;
+
+  const selectedGearOption = CREW_GEAR_OPTIONS.find((entry) => entry.value === gearSelect.value) ?? null;
+  const selectedGearConfig = selectedGearOption ? CREW_GEAR_CATALOG[selectedGearOption.value] : null;
+  const gearCost = Number.isFinite(selectedGearOption?.cost)
+    ? selectedGearOption.cost
+    : selectedGearConfig?.cost ?? 0;
+  const ownsSelectedGear = currentSelection && selectedGearOption
+    ? crewOwnsGear(currentSelection, selectedGearOption.value)
+    : false;
+  const gearEquipped = currentSelection && selectedGearOption
+    ? crewHasEquippedGear(currentSelection, selectedGearOption.value)
+    : false;
+
+  gearAcquireButton.disabled =
+    !missionSystem
+    || !economySystem
+    || !currentSelection
+    || !selectedGearOption
+    || ownsSelectedGear
+    || funds < gearCost;
+
+  if (!currentSelection) {
+    gearAcquireButton.title = 'Select a crew member to outfit.';
+  } else if (!selectedGearOption) {
+    gearAcquireButton.title = 'Select gear to acquire.';
+  } else if (ownsSelectedGear) {
+    gearAcquireButton.title = `${currentSelection.name} already owns this gear.`;
+  } else if (funds < gearCost) {
+    gearAcquireButton.title = 'Insufficient funds for this gear.';
+  } else {
+    gearAcquireButton.title = '';
+  }
+
+  if (selectedGearConfig) {
+    gearAcquireButton.textContent = `Acquire ${selectedGearConfig.label} (${formatCurrency(gearCost)})`;
+  } else {
+    gearAcquireButton.textContent = 'Acquire Gear';
+  }
+
+  const canToggleGear = Boolean(currentSelection && selectedGearOption && ownsSelectedGear);
+  gearEquipButton.disabled = !canToggleGear;
+
+  if (!currentSelection) {
+    gearEquipButton.title = 'Select a crew member to outfit.';
+  } else if (!selectedGearOption) {
+    gearEquipButton.title = 'Select gear to equip.';
+  } else if (!ownsSelectedGear) {
+    gearEquipButton.title = `${currentSelection.name} must acquire this gear before equipping it.`;
+  } else {
+    gearEquipButton.title = '';
+  }
+
+  if (selectedGearConfig) {
+    gearEquipButton.textContent = gearEquipped
+      ? `Unequip ${selectedGearConfig.label}`
+      : `Equip ${selectedGearConfig.label}`;
+  } else {
+    gearEquipButton.textContent = 'Equip Gear';
+  }
+
+  renderCrewGearList(gearList, currentSelection);
   renderCrewTraitList(attributeList, currentSelection);
 
   const previousSpecialty = specialtySelect.value;
@@ -5159,6 +5392,137 @@ const updateTrainingOptions = () => {
   attributeButton.textContent = attributeConfig
     ? `Train ${attributeConfig.label} (${formatCurrency(attributeCost)})`
     : 'Train Attribute';
+};
+
+const handleCrewGearAcquisition = () => {
+  const missionSystem = getMissionSystem();
+  const economySystem = getEconomySystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const crewSelect = missionControls.trainingCrewSelect;
+  const gearSelect = missionControls.trainingGearSelect;
+
+  if (!missionSystem || !economySystem || !state || !crewSelect || !gearSelect) {
+    setTrainingStatus('Gear procurement unavailable.');
+    return;
+  }
+
+  const crew = Array.isArray(state.crew) ? state.crew : [];
+  const member = crew.find((entry) => entry?.id === crewSelect.value);
+
+  if (!member) {
+    setTrainingStatus('Select a crew member to outfit.');
+    return;
+  }
+
+  const gearId = gearSelect.value;
+  const option = CREW_GEAR_OPTIONS.find((entry) => entry.value === gearId) ?? null;
+  const config = gearId ? CREW_GEAR_CATALOG[gearId] : null;
+
+  if (!option || !config) {
+    setTrainingStatus('Select gear to acquire.');
+    return;
+  }
+
+  if (crewOwnsGear(member, gearId)) {
+    setTrainingStatus(`${member.name} already owns ${config.label}.`);
+    return;
+  }
+
+  const cost = Number.isFinite(option.cost) ? option.cost : config.cost ?? 0;
+  const funds = Number.isFinite(state.funds) ? state.funds : 0;
+  if (funds < cost) {
+    setTrainingStatus('Insufficient funds for this gear.');
+    return;
+  }
+
+  economySystem.adjustFunds(-cost);
+  if (typeof member.addGear === 'function') {
+    member.addGear(gearId);
+  } else {
+    if (!Array.isArray(member.gearInventory)) {
+      member.gearInventory = [];
+    }
+    if (!member.gearInventory.includes(gearId)) {
+      member.gearInventory.push(gearId);
+    }
+  }
+
+  if (typeof member.equipGear === 'function') {
+    member.equipGear(gearId);
+  } else {
+    if (!Array.isArray(member.equippedGear)) {
+      member.equippedGear = [];
+    }
+    if (!member.equippedGear.includes(gearId)) {
+      member.equippedGear.push(gearId);
+    }
+  }
+
+  setTrainingStatus(`${member.name} acquires ${config.label}.`);
+  updateTrainingOptions();
+  updateCrewSelectionOptions();
+  updateMissionControls();
+  triggerHudRender();
+};
+
+const handleCrewGearToggle = () => {
+  const missionSystem = getMissionSystem();
+  const state = missionSystem?.state ?? getSharedState();
+  const crewSelect = missionControls.trainingCrewSelect;
+  const gearSelect = missionControls.trainingGearSelect;
+
+  if (!missionSystem || !state || !crewSelect || !gearSelect) {
+    setTrainingStatus('Gear management unavailable.');
+    return;
+  }
+
+  const crew = Array.isArray(state.crew) ? state.crew : [];
+  const member = crew.find((entry) => entry?.id === crewSelect.value);
+
+  if (!member) {
+    setTrainingStatus('Select a crew member to outfit.');
+    return;
+  }
+
+  const gearId = gearSelect.value;
+  const config = gearId ? CREW_GEAR_CATALOG[gearId] : null;
+
+  if (!gearId || !config) {
+    setTrainingStatus('Select crew gear to toggle.');
+    return;
+  }
+
+  if (!crewOwnsGear(member, gearId)) {
+    setTrainingStatus(`${member.name} must acquire ${config.label} before equipping it.`);
+    return;
+  }
+
+  const equipped = crewHasEquippedGear(member, gearId);
+  if (equipped) {
+    if (typeof member.unequipGear === 'function') {
+      member.unequipGear(gearId);
+    } else if (Array.isArray(member.equippedGear)) {
+      member.equippedGear = member.equippedGear.filter((entry) => String(entry) !== gearId);
+    }
+    setTrainingStatus(`${member.name} stows ${config.label}.`);
+  } else {
+    if (typeof member.equipGear === 'function') {
+      member.equipGear(gearId);
+    } else {
+      if (!Array.isArray(member.equippedGear)) {
+        member.equippedGear = [];
+      }
+      if (!member.equippedGear.includes(gearId)) {
+        member.equippedGear.push(gearId);
+      }
+    }
+    setTrainingStatus(`${member.name} equips ${config.label}.`);
+  }
+
+  updateTrainingOptions();
+  updateCrewSelectionOptions();
+  updateMissionControls();
+  triggerHudRender();
 };
 
 const handleCrewRestScheduling = () => {
@@ -5956,7 +6320,8 @@ const updateCrewSelectionOptions = () => {
     const backgroundLabel = backgroundName ? ` • ${backgroundName}` : '';
     const traitSummary = formatCrewTraitSummary(member, 3);
     const traitsLabel = traitSummary ? ` • ${traitSummary}` : '';
-    const descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${readinessLabel}${storyLabel}${backgroundLabel}${traitsLabel}`;
+    const gearLabel = ` • ${describeCrewGearLoadout(member)}`;
+    const descriptorText = `${member.name} — ${member.specialty} • ${loyaltyLabel} • ${statusLabel}${readinessLabel}${storyLabel}${backgroundLabel}${traitsLabel}${gearLabel}`;
     descriptor.textContent = descriptorText;
     const tooltipParts = [];
     if (readiness?.tooltip) {
@@ -7392,6 +7757,61 @@ const setupMissionControls = () => {
     }
   };
 
+  const ensureCrewGearControls = () => {
+    const trainingSection = document.querySelector('.mission-training');
+    if (!trainingSection) {
+      return;
+    }
+
+    if (trainingSection.querySelector('#mission-training-gear')) {
+      return;
+    }
+
+    const statusNode = trainingSection.querySelector('#mission-training-status');
+    const insertBeforeNode = statusNode ?? null;
+
+    const gearLabel = document.createElement('label');
+    gearLabel.className = 'mission-training__label';
+    gearLabel.id = 'mission-training-gear-label';
+    gearLabel.setAttribute('for', 'mission-training-gear');
+    gearLabel.textContent = 'Gear loadout';
+
+    const gearSelect = document.createElement('select');
+    gearSelect.id = 'mission-training-gear';
+    gearSelect.name = 'mission-training-gear';
+
+    const actions = document.createElement('div');
+    actions.className = 'mission-training__actions';
+
+    const acquireButton = document.createElement('button');
+    acquireButton.id = 'mission-training-gear-buy-btn';
+    acquireButton.type = 'button';
+    acquireButton.textContent = 'Acquire Gear';
+    actions.appendChild(acquireButton);
+
+    const equipButton = document.createElement('button');
+    equipButton.id = 'mission-training-gear-equip-btn';
+    equipButton.type = 'button';
+    equipButton.textContent = 'Equip Gear';
+    actions.appendChild(equipButton);
+
+    const gearList = document.createElement('ul');
+    gearList.id = 'mission-training-gear-list';
+    gearList.className = 'mission-details__list mission-training__gear';
+    const placeholder = document.createElement('li');
+    placeholder.textContent = 'Select a crew member to review their gear.';
+    gearList.appendChild(placeholder);
+
+    if (insertBeforeNode) {
+      trainingSection.insertBefore(gearLabel, insertBeforeNode);
+      trainingSection.insertBefore(gearSelect, insertBeforeNode);
+      trainingSection.insertBefore(actions, insertBeforeNode);
+      trainingSection.insertBefore(gearList, insertBeforeNode);
+    } else {
+      trainingSection.append(gearLabel, gearSelect, actions, gearList);
+    }
+  };
+
   const controlPanel = document.querySelector('.control-panel');
   if (controlPanel) {
     let audioControls = controlPanel.querySelector('.mission-audio');
@@ -7596,6 +8016,7 @@ const setupMissionControls = () => {
   }
 
   ensureCrewAttributeControls();
+  ensureCrewGearControls();
 
   missionControls.select = document.getElementById('mission-select');
   missionControls.startButton = document.getElementById('start-mission-btn');
@@ -7661,6 +8082,10 @@ const setupMissionControls = () => {
   missionControls.trainingAttributeSelect = document.getElementById('mission-training-attribute');
   missionControls.trainingAttributeButton = document.getElementById('mission-training-attribute-btn');
   missionControls.trainingAttributeList = document.getElementById('mission-training-attribute-list');
+  missionControls.trainingGearSelect = document.getElementById('mission-training-gear');
+  missionControls.trainingGearAcquireButton = document.getElementById('mission-training-gear-buy-btn');
+  missionControls.trainingGearEquipButton = document.getElementById('mission-training-gear-equip-btn');
+  missionControls.trainingGearList = document.getElementById('mission-training-gear-list');
   missionControls.trainingRestCrewSelect = document.getElementById('mission-training-rest-crew');
   missionControls.trainingRestDurationSelect = document.getElementById('mission-training-rest-duration');
   missionControls.trainingRestButton = document.getElementById('mission-training-rest-btn');
@@ -7732,6 +8157,10 @@ const setupMissionControls = () => {
     trainingAttributeSelect,
     trainingAttributeButton,
     trainingAttributeList,
+    missionControls.trainingGearSelect,
+    missionControls.trainingGearAcquireButton,
+    missionControls.trainingGearEquipButton,
+    missionControls.trainingGearList,
     trainingRestCrewSelect,
     trainingRestDurationSelect,
     trainingRestButton,
@@ -7837,6 +8266,7 @@ const setupMissionControls = () => {
   trainingCrewSelect.addEventListener('change', updateTrainingOptions);
   trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
   trainingAttributeSelect?.addEventListener('change', updateTrainingOptions);
+  missionControls.trainingGearSelect?.addEventListener('change', updateTrainingOptions);
   trainingRestCrewSelect?.addEventListener('change', updateTrainingOptions);
   trainingRestDurationSelect?.addEventListener('change', updateTrainingOptions);
   playerSkillSelect.addEventListener('change', updatePlayerDevelopmentPanel);
@@ -7844,6 +8274,8 @@ const setupMissionControls = () => {
   trainingLoyaltyButton.addEventListener('click', handleLoyaltyTraining);
   trainingSpecialtyButton.addEventListener('click', handleSpecialtyTraining);
   trainingAttributeButton?.addEventListener('click', handleAttributeTraining);
+  missionControls.trainingGearAcquireButton?.addEventListener('click', handleCrewGearAcquisition);
+  missionControls.trainingGearEquipButton?.addEventListener('click', handleCrewGearToggle);
   trainingRestButton?.addEventListener('click', handleCrewRestScheduling);
   playerSkillButton.addEventListener('click', handlePlayerSkillTraining);
   playerGearButton.addEventListener('click', handlePlayerGearAcquisition);
