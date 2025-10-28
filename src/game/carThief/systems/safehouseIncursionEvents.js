@@ -84,7 +84,7 @@ const facilityAlertProfiles = [
     baseWeight: 1.3,
     triggerProgress: 0.28,
     minDifficulty: 2,
-    buildContent: ({ facilityName, safehouseLabel }) => {
+    buildContent: ({ facilityId, facilityName, safehouseLabel }) => {
       const description =
         `Corporate trace monitors flag spikes on the ${facilityName} uplink inside ${safehouseLabel}. ` +
         'If the trace completes, it exposes the crew staging lanes.';
@@ -103,6 +103,15 @@ const facilityAlertProfiles = [
               durationMultiplier: 1.12,
               heatDelta: -1.3,
               successDelta: 0.04,
+              facilityDowntime: {
+                facilityId,
+                durationDays: 1,
+                summary: `${facilityName} offline while technicians reseed clean routes.`,
+                penalties: [
+                  `${facilityName} bonuses temporarily disabled.`,
+                  'Daily heat bleed paused until systems cycle back online.',
+                ],
+              },
             },
           },
           {
@@ -114,6 +123,15 @@ const facilityAlertProfiles = [
               payoutMultiplier: 1.08,
               heatDelta: 1.5,
               successDelta: -0.05,
+              facilityDowntime: {
+                facilityId,
+                durationDays: 2,
+                summary: `${facilityName} cooling systems after decoy overclock.`,
+                penalties: [
+                  `${facilityName} heat-masking offline during recovery.`,
+                  'Mission heat reduction bonuses unavailable.',
+                ],
+              },
             },
           },
         ],
@@ -127,7 +145,7 @@ const facilityAlertProfiles = [
     baseWeight: 1.2,
     triggerProgress: 0.36,
     cooldownDays: 3,
-    buildContent: ({ facilityName, safehouseLabel }) => {
+    buildContent: ({ facilityId, facilityName, safehouseLabel }) => {
       const description =
         `${facilityName} handlers report tampered caches near ${safehouseLabel}. ` +
         'Someone is fishing for the crew’s supply lines while the mission is live.';
@@ -145,6 +163,15 @@ const facilityAlertProfiles = [
               payoutMultiplier: 0.94,
               heatDelta: -1.1,
               successDelta: 0.03,
+              facilityDowntime: {
+                facilityId,
+                durationDays: 2,
+                summary: `${facilityName} rebuilding routes after purging compromised caches.`,
+                penalties: [
+                  `${facilityName} bonuses suspended during restock.`,
+                  'Daily heat bleed offline until couriers reset.',
+                ],
+              },
             },
           },
           {
@@ -156,6 +183,15 @@ const facilityAlertProfiles = [
               payoutMultiplier: 1.06,
               heatDelta: 1.2,
               successDelta: -0.02,
+              facilityDowntime: {
+                facilityId,
+                durationDays: 1,
+                summary: `${facilityName} rerouting couriers after the payoff.`,
+                penalties: [
+                  `${facilityName} benefits reduced while drops are rotated.`,
+                  'Daily heat mitigation paused.',
+                ],
+              },
             },
           },
         ],
@@ -169,7 +205,7 @@ const facilityAlertProfiles = [
     baseWeight: 1.25,
     triggerProgress: 0.42,
     minDifficulty: 2,
-    buildContent: ({ facilityName, safehouseLabel }) => {
+    buildContent: ({ facilityId, facilityName, safehouseLabel }) => {
       const description =
         `Emergency crews from ${facilityName} spin up to intercept patrol chatter near ${safehouseLabel}. ` +
         'Deploying them now keeps the mission steady but stretches the schedule.';
@@ -187,6 +223,15 @@ const facilityAlertProfiles = [
               successDelta: 0.05,
               heatDelta: 0.9,
               durationMultiplier: 1.08,
+              facilityDowntime: {
+                facilityId,
+                durationDays: 1,
+                summary: `${facilityName} crews standing down to recharge after deployment.`,
+                penalties: [
+                  `${facilityName} speed and safety bonuses offline.`,
+                  'Mission duration perks disabled until squads reset.',
+                ],
+              },
             },
           },
           {
@@ -198,6 +243,15 @@ const facilityAlertProfiles = [
               durationMultiplier: 1.15,
               heatDelta: -1.2,
               payoutMultiplier: 0.97,
+              facilityDowntime: {
+                facilityId,
+                durationDays: 2,
+                summary: `${facilityName} sealed for cooldown drills.`,
+                penalties: [
+                  `${facilityName} bonuses unavailable during lockdown.`,
+                  'Mission speed benefits suspended.',
+                ],
+              },
             },
           },
         ],
@@ -329,6 +383,7 @@ const buildEventPayload = ({
   const safehouseLabel = resolveSafehouseLabel(context.safehouse);
   const facilityName = facilityId ? resolveFacilityName(facilityId) : null;
   const content = buildContent({
+    facilityId,
     facilityName: facilityName ?? 'Safehouse Facility',
     safehouseLabel,
     heatTier,
@@ -348,7 +403,20 @@ const buildEventPayload = ({
     baseWeight,
     riskTiers: ['low', 'moderate', 'high'],
     crackdownTiers: ['calm', 'alert', 'lockdown'],
-    choices: content.choices.map((choice) => ({ ...choice })),
+    choices: content.choices.map((choice) => {
+      const cloned = { ...choice };
+      if (cloned.effects && typeof cloned.effects === 'object') {
+        const effects = { ...cloned.effects };
+        if (effects.facilityDowntime && typeof effects.facilityDowntime === 'object') {
+          effects.facilityDowntime = {
+            ...effects.facilityDowntime,
+            facilityId: facilityId ?? effects.facilityDowntime.facilityId ?? null,
+          };
+        }
+        cloned.effects = effects;
+      }
+      return cloned;
+    }),
     badges: [
       { ...SAFEHOUSE_BADGE },
       facilityName
@@ -359,6 +427,9 @@ const buildEventPayload = ({
     resolved: false,
     safehouseAlertId: alertId,
     safehouseAlertCooldownDays: cooldownDays,
+    facilityId,
+    facilityName,
+    heatTier,
     source: 'safehouse-incursion',
   };
 

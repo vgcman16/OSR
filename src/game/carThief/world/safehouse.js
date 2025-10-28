@@ -95,6 +95,94 @@ const normalizeFacility = (entry, fallbackId, defaultName) => {
   };
 };
 
+const normalizeDowntimePenalties = (penalties) => {
+  if (!Array.isArray(penalties)) {
+    if (typeof penalties === 'string' && penalties.trim()) {
+      return [penalties.trim()];
+    }
+    return [];
+  }
+
+  return penalties
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean);
+};
+
+const normalizeFacilityDowntime = (
+  downtime,
+  { defaultFacilityId = null, currentDay = null } = {},
+) => {
+  if (!downtime || typeof downtime !== 'object') {
+    return null;
+  }
+
+  const facilityId =
+    typeof downtime.facilityId === 'string' && downtime.facilityId.trim()
+      ? downtime.facilityId.trim()
+      : typeof defaultFacilityId === 'string' && defaultFacilityId.trim()
+        ? defaultFacilityId.trim()
+        : null;
+
+  if (!facilityId) {
+    return null;
+  }
+
+  const durationDays = Number.isFinite(downtime.durationDays)
+    ? Math.max(0, Math.round(downtime.durationDays))
+    : Number.isFinite(downtime.cooldownDays)
+      ? Math.max(0, Math.round(downtime.cooldownDays))
+      : null;
+  const cooldownDays = Number.isFinite(downtime.cooldownDays)
+    ? Math.max(0, Math.round(downtime.cooldownDays))
+    : durationDays;
+
+  let cooldownEndsOnDay = Number.isFinite(downtime.cooldownEndsOnDay)
+    ? Math.round(downtime.cooldownEndsOnDay)
+    : null;
+  if (cooldownEndsOnDay === null && Number.isFinite(currentDay) && cooldownDays !== null) {
+    cooldownEndsOnDay = currentDay + cooldownDays;
+  }
+
+  const normalized = {
+    facilityId,
+    alertId:
+      typeof downtime.alertId === 'string' && downtime.alertId.trim()
+        ? downtime.alertId.trim()
+        : null,
+    label:
+      typeof downtime.label === 'string' && downtime.label.trim()
+        ? downtime.label.trim()
+        : null,
+    summary:
+      typeof downtime.summary === 'string' && downtime.summary.trim()
+        ? downtime.summary.trim()
+        : null,
+    penalties: normalizeDowntimePenalties(downtime.penalties ?? downtime.impact),
+    penaltySummary:
+      typeof downtime.penaltySummary === 'string' && downtime.penaltySummary.trim()
+        ? downtime.penaltySummary.trim()
+        : null,
+    durationDays,
+    cooldownDays,
+    cooldownEndsOnDay,
+    startedAt: Number.isFinite(downtime.startedAt) ? downtime.startedAt : null,
+  };
+
+  if (normalized.penaltySummary && !normalized.penalties.length) {
+    normalized.penalties = [normalized.penaltySummary];
+  }
+
+  if (normalized.cooldownDays === null && normalized.cooldownEndsOnDay !== null && Number.isFinite(currentDay)) {
+    normalized.cooldownDays = Math.max(0, normalized.cooldownEndsOnDay - currentDay);
+  }
+
+  if (normalized.durationDays === null && normalized.cooldownDays !== null) {
+    normalized.durationDays = normalized.cooldownDays;
+  }
+
+  return normalized;
+};
+
 const normalizeTier = (tier, index) => {
   const level = Number.isFinite(tier?.level) ? tier.level : index;
   const upgradeCost = Number.isFinite(tier?.upgradeCost) ? tier.upgradeCost : 0;
@@ -258,6 +346,7 @@ class Safehouse {
     startingTier = 0,
     purchaseCost = 0,
     owned = false,
+    facilityDowntimes = [],
   } = {}) {
     this.id = id ?? `safehouse-${getRandomId()}`;
     this.name = name;
@@ -272,6 +361,22 @@ class Safehouse {
 
     const resolvedTierIndex = Number.isFinite(tierIndex) ? tierIndex : startingTier;
     this.tierIndex = Math.max(0, Math.min(this.tiers.length - 1, resolvedTierIndex ?? 0));
+
+    const rawDowntimes = Array.isArray(facilityDowntimes)
+      ? facilityDowntimes
+      : facilityDowntimes && typeof facilityDowntimes === 'object'
+        ? Array.isArray(facilityDowntimes.safehouses)
+          ? facilityDowntimes.safehouses
+          : Object.values(facilityDowntimes)
+        : [];
+
+    this.facilityDowntimes = new Map();
+    rawDowntimes
+      .map((entry) => normalizeFacilityDowntime(entry))
+      .filter(Boolean)
+      .forEach((entry) => {
+        this.facilityDowntimes.set(entry.facilityId, entry);
+      });
   }
 
   clone() {
@@ -292,6 +397,7 @@ class Safehouse {
       tierIndex: this.tierIndex,
       purchaseCost: this.purchaseCost,
       owned: this.owned,
+      facilityDowntimes: this.getFacilityDowntimeEntries(),
     });
   }
 
@@ -366,6 +472,95 @@ class Safehouse {
 
   getActiveProjects() {
     return this.getProjectsForTier(this.tierIndex);
+  }
+
+  getFacilityDowntime(facilityId, { currentDay = null } = {}) {
+    if (!facilityId) {
+      return null;
+    }
+
+    const record = this.facilityDowntimes.get(facilityId) ?? null;
+    if (!record) {
+      return null;
+    }
+
+    if (
+      Number.isFinite(currentDay) &&
+      Number.isFinite(record.cooldownEndsOnDay) &&
+      currentDay >= record.cooldownEndsOnDay
+    ) {
+      this.facilityDowntimes.delete(facilityId);
+      return null;
+    }
+
+    return { ...record };
+  }
+
+  getFacilityDowntimeEntries({ currentDay = null } = {}) {
+    if (Number.isFinite(currentDay)) {
+      this.pruneFacilityDowntimes(currentDay);
+    }
+
+    return Array.from(this.facilityDowntimes.values()).map((entry) => ({ ...entry }));
+  }
+
+  hasFacilityDowntime(facilityId, { currentDay = null } = {}) {
+    return this.getFacilityDowntime(facilityId, { currentDay }) !== null;
+  }
+
+  setFacilityDowntime(downtime, { currentDay = null } = {}) {
+    const normalized = normalizeFacilityDowntime(downtime, {
+      defaultFacilityId: downtime?.facilityId,
+      currentDay,
+    });
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (!normalized.alertId && downtime?.alertId) {
+      normalized.alertId = downtime.alertId;
+    }
+
+    if (!normalized.startedAt && Number.isFinite(downtime?.startedAt)) {
+      normalized.startedAt = downtime.startedAt;
+    }
+
+    this.facilityDowntimes.set(normalized.facilityId, normalized);
+    return { ...normalized };
+  }
+
+  clearFacilityDowntime(facilityId) {
+    if (!facilityId) {
+      return false;
+    }
+
+    return this.facilityDowntimes.delete(facilityId);
+  }
+
+  getDisabledFacilityIds({ currentDay = null } = {}) {
+    if (Number.isFinite(currentDay)) {
+      this.pruneFacilityDowntimes(currentDay);
+    }
+
+    return Array.from(this.facilityDowntimes.keys());
+  }
+
+  pruneFacilityDowntimes(currentDay = null) {
+    if (!Number.isFinite(currentDay)) {
+      return;
+    }
+
+    const cutoffDay = currentDay;
+    this.facilityDowntimes.forEach((entry, facilityId) => {
+      if (Number.isFinite(entry.cooldownEndsOnDay) && cutoffDay >= entry.cooldownEndsOnDay) {
+        this.facilityDowntimes.delete(facilityId);
+      }
+    });
+  }
+
+  isFacilityDisabled(facilityId, { currentDay = null } = {}) {
+    return this.hasFacilityDowntime(facilityId, { currentDay });
   }
 
   getUpcomingProjects() {
@@ -660,6 +855,7 @@ class Safehouse {
       tierIndex: this.tierIndex,
       purchaseCost: this.purchaseCost,
       owned: this.owned,
+      facilityDowntimes: this.getFacilityDowntimeEntries(),
     };
   }
 
@@ -776,6 +972,44 @@ class SafehouseCollection {
     }
 
     return safehouse;
+  }
+
+  applyFacilityDowntime(safehouseId, downtime, currentDay = null) {
+    const safehouse = this.getById(safehouseId);
+    if (!safehouse || typeof safehouse.setFacilityDowntime !== 'function') {
+      return null;
+    }
+
+    if (typeof safehouse.pruneFacilityDowntimes === 'function' && Number.isFinite(currentDay)) {
+      safehouse.pruneFacilityDowntimes(currentDay);
+    }
+
+    return safehouse.setFacilityDowntime(downtime, { currentDay });
+  }
+
+  clearFacilityDowntime(safehouseId, facilityId, { currentDay = null } = {}) {
+    const safehouse = this.getById(safehouseId);
+    if (!safehouse || typeof safehouse.clearFacilityDowntime !== 'function') {
+      return false;
+    }
+
+    if (typeof safehouse.pruneFacilityDowntimes === 'function' && Number.isFinite(currentDay)) {
+      safehouse.pruneFacilityDowntimes(currentDay);
+    }
+
+    return safehouse.clearFacilityDowntime(facilityId);
+  }
+
+  pruneFacilityDowntimes(currentDay = null) {
+    if (!Number.isFinite(currentDay)) {
+      return;
+    }
+
+    this.safehouses.forEach((safehouse) => {
+      if (safehouse?.pruneFacilityDowntimes) {
+        safehouse.pruneFacilityDowntimes(currentDay);
+      }
+    });
   }
 
   isOwned(id) {
@@ -1135,6 +1369,11 @@ const getActiveSafehouseFromState = (state) => {
     state.safehouses = collection;
   }
 
+  const currentDay = Number.isFinite(state.day) ? state.day : null;
+  if (typeof collection.pruneFacilityDowntimes === 'function') {
+    collection.pruneFacilityDowntimes(currentDay);
+  }
+
   const player = state.player ?? null;
   const desiredSafehouseId = player?.safehouseId ?? collection.defaultSafehouseId;
 
@@ -1153,6 +1392,10 @@ const getActiveSafehouseFromState = (state) => {
       }
     }
     safehouse = fallback;
+  }
+
+  if (safehouse?.pruneFacilityDowntimes && Number.isFinite(currentDay)) {
+    safehouse.pruneFacilityDowntimes(currentDay);
   }
 
   return safehouse;

@@ -2980,24 +2980,59 @@ const updateSafehousePanel = () => {
 
       let detailLine = baseSummary;
       let summaryLine = '';
+      const downtime =
+        status === 'cooldown' && entry.downtime && typeof entry.downtime === 'object'
+          ? entry.downtime
+          : null;
+      const downtimeLabel = downtime?.label ?? entry.facilityName ?? null;
+      const downtimePenalties = Array.isArray(downtime?.penalties)
+        ? downtime.penalties.filter((line) => typeof line === 'string' && line.trim())
+        : [];
+      const downtimeSummary =
+        typeof downtime?.summary === 'string' && downtime.summary.trim()
+          ? downtime.summary.trim()
+          : typeof downtime?.penaltySummary === 'string' && downtime.penaltySummary.trim()
+            ? downtime.penaltySummary.trim()
+            : '';
+
       if (status === 'cooldown') {
         const cooldownEndsOnDay = Number.isFinite(entry.cooldownEndsOnDay) ? entry.cooldownEndsOnDay : null;
         const remaining =
           cooldownEndsOnDay !== null && numericDay !== null ? cooldownEndsOnDay - numericDay : null;
+        let timerDetail = '';
         if (remaining !== null) {
           if (remaining > 0) {
-            detailLine = `${baseSummary} — Cooldown ${remaining} day${remaining === 1 ? '' : 's'} remaining.`;
-            summaryLine = `${label} cooldown ${remaining} day${remaining === 1 ? '' : 's'} left.`;
+            timerDetail = `Cooldown ${remaining} day${remaining === 1 ? '' : 's'} remaining.`;
+            summaryLine = `${downtimeLabel ?? label} downtime ${remaining} day${remaining === 1 ? '' : 's'} left.`;
           } else {
-            detailLine = `${baseSummary} — Cooldown complete. Systems ready.`;
-            summaryLine = `${label} cooldown cleared.`;
+            timerDetail = 'Cooldown complete. Systems ready.';
+            summaryLine = `${downtimeLabel ?? label} downtime cleared.`;
           }
         } else if (baseSummary) {
-          detailLine = `${baseSummary} — Cooldown active.`;
-          summaryLine = `${label} cooldown active.`;
+          timerDetail = 'Cooldown active.';
+          summaryLine = `${downtimeLabel ?? label} cooldown active.`;
         } else {
-          detailLine = 'Cooldown active.';
-          summaryLine = `${label} cooldown active.`;
+          timerDetail = 'Cooldown active.';
+          summaryLine = `${downtimeLabel ?? label} cooldown active.`;
+        }
+
+        const impactDetail = downtimePenalties.length
+          ? `Impact: ${downtimePenalties.join(' ')}`
+          : downtimeSummary;
+
+        const detailSegments = [baseSummary];
+        if (downtimeLabel) {
+          detailSegments.push(`${downtimeLabel} offline.`);
+        }
+        if (timerDetail) {
+          detailSegments.push(timerDetail);
+        }
+        if (impactDetail) {
+          detailSegments.push(impactDetail);
+        }
+        detailLine = detailSegments.filter(Boolean).join(' ');
+        if (downtimeLabel) {
+          item.dataset.downtime = downtimeLabel;
         }
       } else {
         summaryLine = `${label} alert active.`;
