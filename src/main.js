@@ -100,6 +100,11 @@ const missionControls = {
   cityIntelPoiName: null,
   cityIntelPoiDescription: null,
   cityIntelPoiPerks: null,
+  campaignSection: null,
+  campaignStageLabel: null,
+  campaignReadiness: null,
+  campaignRequirementsList: null,
+  campaignReward: null,
   cityIntelCanvas: null,
   cityIntelCanvasContext: null,
   reconCrewSelect: null,
@@ -1556,16 +1561,19 @@ const buildCampaignIntelLines = ({ district, mission }) => {
   }
 
   if (!snapshot) {
-    return [];
+    return { snapshot: null, lines: [] };
   }
 
   if (snapshot.status === 'complete') {
-    return ['Campaign: All milestones cleared — district fully liberated.'];
+    return {
+      snapshot,
+      lines: ['Campaign: All milestones cleared — district fully liberated.'],
+    };
   }
 
   const milestone = snapshot.activeMilestone;
   if (!milestone) {
-    return [];
+    return { snapshot, lines: [] };
   }
 
   const stageIndex = Number.isFinite(milestone.stage) ? milestone.stage : null;
@@ -1611,7 +1619,122 @@ const buildCampaignIntelLines = ({ district, mission }) => {
     }
   });
 
-  return lines;
+  return { snapshot, lines };
+};
+
+const renderCampaignProgress = (snapshot) => {
+  const {
+    campaignSection,
+    campaignStageLabel,
+    campaignReadiness,
+    campaignRequirementsList,
+    campaignReward,
+  } = missionControls;
+
+  if (!campaignStageLabel || !campaignReadiness || !campaignRequirementsList || !campaignReward) {
+    return;
+  }
+
+  const requirementEntries = [];
+
+  const applySectionState = (state) => {
+    if (campaignSection) {
+      if (state) {
+        campaignSection.dataset.state = state;
+      } else {
+        delete campaignSection.dataset.state;
+      }
+    }
+  };
+
+  let stageText = 'No district campaign is currently tracked.';
+  let readinessText = 'Campaign readiness intel pending.';
+  let readinessState = 'idle';
+  let rewardText = 'Reward preview pending.';
+
+  if (!snapshot) {
+    applySectionState('empty');
+    requirementEntries.push({ text: 'Requirement intel pending.', met: false });
+  } else if (snapshot.status === 'complete') {
+    applySectionState('complete');
+    stageText = 'Campaign complete — district liberated.';
+    readinessText = 'All milestones cleared.';
+    readinessState = 'ready';
+    rewardText = snapshot.completeReward
+      ? `Reward secured: ${snapshot.completeReward}`
+      : 'District benefits active.';
+    requirementEntries.push({ text: 'No further requirements.', met: true });
+  } else {
+    applySectionState('active');
+    const milestone = snapshot.activeMilestone ?? null;
+    if (milestone) {
+      const stageIndex = Number.isFinite(milestone.stage) ? milestone.stage : null;
+      const totalStages = Number.isFinite(snapshot.totalStages) ? snapshot.totalStages : null;
+      if (stageIndex !== null) {
+        const stageLabel = stageIndex + 1;
+        stageText = totalStages ? `Stage ${stageLabel} of ${totalStages}` : `Stage ${stageLabel}`;
+      } else {
+        stageText = 'Campaign milestone';
+      }
+      if (milestone.name) {
+        stageText = `${stageText} — ${milestone.name}`;
+      }
+
+      if (milestone.rewardPreview) {
+        rewardText = `Reward: ${milestone.rewardPreview}`;
+      } else {
+        rewardText = 'Reward intel pending.';
+      }
+
+      if (milestone.ready) {
+        readinessText = 'Milestone ready — launch the special contract.';
+        readinessState = 'ready';
+      } else {
+        const readinessPercent = Number.isFinite(milestone.readiness)
+          ? Math.round(Math.min(1, Math.max(0, milestone.readiness)) * 100)
+          : null;
+        readinessText =
+          readinessPercent !== null
+            ? `Progress: ${readinessPercent}% toward unlock.`
+            : 'Progress intel pending.';
+        readinessState = 'locked';
+      }
+
+      const requirements = Array.isArray(milestone.requirements) ? milestone.requirements : [];
+      requirements.forEach((entry) => {
+        const label = formatCampaignRequirementLine(entry);
+        if (!label) {
+          return;
+        }
+        requirementEntries.push({ text: label, met: Boolean(entry?.met) });
+      });
+
+      if (!requirementEntries.length) {
+        requirementEntries.push({
+          text: milestone.ready ? 'Awaiting final confirmation.' : 'Requirement intel pending.',
+          met: Boolean(milestone.ready),
+        });
+      }
+    } else {
+      stageText = 'Campaign data syncing.';
+      readinessText = 'Awaiting active milestone.';
+      readinessState = 'idle';
+      requirementEntries.push({ text: 'Requirement intel pending.', met: false });
+    }
+  }
+
+  campaignStageLabel.textContent = stageText;
+  campaignReadiness.textContent = readinessText;
+  campaignReadiness.dataset.state = readinessState;
+  campaignReward.textContent = rewardText;
+
+  campaignRequirementsList.innerHTML = '';
+  requirementEntries.forEach(({ text, met }) => {
+    const item = document.createElement('li');
+    item.textContent = text;
+    item.dataset.state = met ? 'ready' : 'locked';
+    campaignRequirementsList.appendChild(item);
+  });
 };
 
 const setCityIntelDetails = ({
@@ -1683,6 +1806,7 @@ const resetCityIntelPanel = () => {
     poiDescription: 'District sweep awaiting recon.',
     poiPerks: ['No unique perks detected.'],
   });
+  renderCampaignProgress(null);
 };
 
 const normalizeDistrictKey = (value) => {
@@ -2005,9 +2129,17 @@ const updateCityIntelPanel = ({ missionSystem, highlightedMission, activeMission
   const poiName = poi?.name ?? 'No special target flagged.';
   const poiDescription = poi?.description ?? 'No notable point of interest for this contract.';
   const poiPerks = describePoiModifiers(poi?.modifiers ?? {});
-  const campaignIntelLines = buildCampaignIntelLines({ district, mission });
+  const { snapshot: campaignSnapshot, lines: campaignIntelLines } = buildCampaignIntelLines({
+    district,
+    mission,
+  });
+  renderCampaignProgress(campaignSnapshot);
   let poiDetails = Array.isArray(poiPerks) ? [...poiPerks] : [];
-  if (poiDetails.length === 1 && poiDetails[0] === 'No unique perks detected.' && campaignIntelLines.length) {
+  if (
+    poiDetails.length === 1 &&
+    poiDetails[0] === 'No unique perks detected.' &&
+    campaignIntelLines.length
+  ) {
     poiDetails = [];
   }
   poiDetails.push(...campaignIntelLines);
@@ -9968,6 +10100,11 @@ const setupMissionControls = () => {
   missionControls.cityIntelPoiName = document.getElementById('mission-city-intel-poi-name');
   missionControls.cityIntelPoiDescription = document.getElementById('mission-city-intel-poi-description');
   missionControls.cityIntelPoiPerks = document.getElementById('mission-city-intel-poi-perks');
+  missionControls.campaignSection = document.querySelector('.mission-campaign');
+  missionControls.campaignStageLabel = document.getElementById('mission-campaign-stage');
+  missionControls.campaignReadiness = document.getElementById('mission-campaign-readiness');
+  missionControls.campaignRequirementsList = document.getElementById('mission-campaign-requirements');
+  missionControls.campaignReward = document.getElementById('mission-campaign-reward');
   missionControls.reconCrewSelect = document.getElementById('mission-recon-crew');
   missionControls.reconDistrictSelect = document.getElementById('mission-recon-district');
   missionControls.reconDurationSelect = document.getElementById('mission-recon-duration');

@@ -262,6 +262,84 @@ body {
   color: rgba(209, 234, 255, 0.85);
 }
 
+.mission-campaign {
+  background: rgba(9, 14, 28, 0.85);
+  border: 1px solid rgba(120, 190, 255, 0.25);
+  box-shadow: inset 0 0 18px rgba(120, 190, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.mission-campaign[data-state='empty'] {
+  opacity: 0.9;
+}
+
+.mission-campaign[data-state='complete'] {
+  border-color: rgba(126, 203, 255, 0.45);
+  box-shadow: inset 0 0 22px rgba(126, 203, 255, 0.22);
+}
+
+.mission-campaign__stage {
+  font-size: 0.95rem;
+  color: rgba(220, 235, 255, 0.92);
+  line-height: 1.4;
+}
+
+.mission-campaign__status {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  font-size: 0.82rem;
+  color: rgba(209, 234, 255, 0.85);
+  transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+
+.mission-campaign__status[data-state='ready'] {
+  color: #82f7a3;
+  text-shadow: 0 0 14px rgba(130, 247, 163, 0.3);
+}
+
+.mission-campaign__status[data-state='locked'] {
+  color: #f2d98d;
+  text-shadow: 0 0 10px rgba(242, 217, 141, 0.25);
+}
+
+.mission-campaign__status[data-state='idle'] {
+  color: rgba(209, 234, 255, 0.85);
+}
+
+.mission-campaign__requirements {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mission-campaign__requirements-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgba(180, 215, 255, 0.7);
+}
+
+.mission-campaign__requirements-list {
+  margin: 0;
+}
+
+.mission-campaign__requirements-list li[data-state='ready'] {
+  color: #82f7a3;
+}
+
+.mission-campaign__requirements-list li[data-state='locked'] {
+  color: #f2d98d;
+}
+
+.mission-campaign__reward {
+  font-size: 0.9rem;
+  color: rgba(209, 234, 255, 0.88);
+  line-height: 1.4;
+}
+
 .mission-details__row dt {
   font-size: 0.75rem;
   text-transform: uppercase;
