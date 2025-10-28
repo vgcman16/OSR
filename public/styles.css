@@ -815,6 +815,70 @@ body {
   line-height: 1.3;
 }
 
+.mission-crew__chemistry {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(120, 190, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mission-crew__chemistry-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: rgba(209, 234, 255, 0.85);
+}
+
+.mission-crew__chemistry-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mission-crew__chemistry-item {
+  padding: 0.55rem 0.65rem;
+  border-radius: 9px;
+  background: rgba(5, 10, 22, 0.7);
+  border: 1px solid rgba(120, 190, 255, 0.14);
+  color: rgba(209, 234, 255, 0.85);
+  font-size: 0.85rem;
+  line-height: 1.35;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.mission-crew__chemistry-item:hover,
+.mission-crew__chemistry-item:focus-visible {
+  border-color: rgba(120, 190, 255, 0.35);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
+  outline: none;
+}
+
+.mission-crew__chemistry-item--pending {
+  color: rgba(209, 234, 255, 0.65);
+  font-style: italic;
+}
+
+.mission-crew__chemistry-item--warning {
+  border-color: rgba(255, 145, 105, 0.75);
+  background: rgba(120, 40, 24, 0.35);
+  color: rgba(255, 209, 192, 0.92);
+}
+
+.mission-crew__chemistry-item--synergy {
+  border-color: rgba(120, 255, 190, 0.6);
+  background: rgba(28, 71, 54, 0.35);
+  color: rgba(210, 255, 236, 0.9);
+}
+
+.mission-crew__chemistry-item--placeholder {
+  color: rgba(209, 234, 255, 0.6);
+  font-style: italic;
+}
+
 .mission-details__row:first-child {
   grid-column: 1 / -1;
 }

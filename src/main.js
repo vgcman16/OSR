@@ -113,6 +113,7 @@ const missionControls = {
   reconSelectedCrewIds: [],
   lastReconCompletionKey: null,
   crewList: null,
+  crewChemistryList: null,
   vehicleList: null,
   crackdownText: null,
   crackdownHistoryList: null,
@@ -287,6 +288,37 @@ const formatCrewTraitSummary = (entity, limit = 3) => {
     .join(', ');
 };
 
+const evaluateChemistryFromAffinity = (affinity) => {
+  const normalizedAffinity = Number.isFinite(affinity) ? affinity : 0;
+  const clampedAffinity = clampAffinityScore(normalizedAffinity);
+  const multiplier = computeRelationshipMultiplier(clampedAffinity);
+  const percentShift = Math.round((multiplier - 1) * 100);
+  const percentLabel = percentShift > 0 ? `+${percentShift}%` : `${percentShift}%`;
+  const synergyThreshold = Number.isFinite(CREW_RELATIONSHIP_CONFIG.synergyThreshold)
+    ? CREW_RELATIONSHIP_CONFIG.synergyThreshold
+    : 35;
+  const strainThreshold = Number.isFinite(CREW_RELATIONSHIP_CONFIG.strainThreshold)
+    ? CREW_RELATIONSHIP_CONFIG.strainThreshold
+    : -35;
+
+  let label = 'Chemistry steady';
+  let status = 'steady';
+  let isWarning = false;
+  if (clampedAffinity >= synergyThreshold) {
+    label = `Chemistry strong (${percentLabel})`;
+    status = 'synergy';
+  } else if (clampedAffinity <= strainThreshold) {
+    label = `Chemistry strained (${percentLabel})`;
+    status = 'strain';
+    isWarning = true;
+  } else if (Math.abs(percentShift) >= 1) {
+    label = `Chemistry shifting (${percentLabel})`;
+    status = 'shifting';
+  }
+
+  return { label, percentLabel, affinity: clampedAffinity, multiplier, isWarning, status };
+};
+
 const summarizeSelectedChemistry = (member, squadMembers = []) => {
   if (!member) {
     return null;
@@ -337,39 +369,17 @@ const summarizeSelectedChemistry = (member, squadMembers = []) => {
   }
 
   const averageAffinity = affinityScores.reduce((sum, value) => sum + value, 0) / affinityScores.length;
-  const clampedAffinity = clampAffinityScore(averageAffinity);
-  const multiplier = computeRelationshipMultiplier(clampedAffinity);
-  const percentShift = Math.round((multiplier - 1) * 100);
-  const percentLabel = percentShift > 0 ? `+${percentShift}%` : `${percentShift}%`;
-  const synergyThreshold = Number.isFinite(CREW_RELATIONSHIP_CONFIG.synergyThreshold)
-    ? CREW_RELATIONSHIP_CONFIG.synergyThreshold
-    : 35;
-  const strainThreshold = Number.isFinite(CREW_RELATIONSHIP_CONFIG.strainThreshold)
-    ? CREW_RELATIONSHIP_CONFIG.strainThreshold
-    : -35;
-
-  let label;
-  let isWarning = false;
-  if (clampedAffinity >= synergyThreshold) {
-    label = `Chemistry strong (${percentLabel})`;
-  } else if (clampedAffinity <= strainThreshold) {
-    label = `Chemistry strained (${percentLabel})`;
-    isWarning = true;
-  } else if (Math.abs(percentShift) >= 1) {
-    label = `Chemistry shifting (${percentLabel})`;
-  } else {
-    label = 'Chemistry steady';
-  }
+  const summary = evaluateChemistryFromAffinity(averageAffinity);
 
   const crewName = member.name ?? 'Crew member';
-  const tooltip = `${crewName} rapport average ${Math.round(clampedAffinity)} — trait impact ${percentLabel}.`;
+  const tooltip = `${crewName} rapport average ${Math.round(summary.affinity)} — trait impact ${summary.percentLabel}.`;
 
   return {
-    label,
+    label: summary.label,
     tooltip,
-    isWarning,
-    affinity: clampedAffinity,
-    multiplier,
+    isWarning: summary.isWarning,
+    affinity: summary.affinity,
+    multiplier: summary.multiplier,
   };
 };
 
@@ -7906,6 +7916,145 @@ const handlePlayerGearAcquisition = () => {
   triggerHudRender();
 };
 
+const renderCrewChemistrySummary = (roster, { missionReady = false } = {}) => {
+  const chemistryList = missionControls.crewChemistryList;
+  if (!chemistryList) {
+    return;
+  }
+
+  const appendPlaceholder = (text) => {
+    const item = document.createElement('li');
+    item.className = 'mission-crew__chemistry-item mission-crew__chemistry-item--placeholder';
+    item.textContent = text;
+    chemistryList.appendChild(item);
+  };
+
+  chemistryList.innerHTML = '';
+
+  if (!missionReady) {
+    appendPlaceholder('Chemistry intel initializing…');
+    return;
+  }
+
+  const normalizedRoster = Array.isArray(roster)
+    ? roster
+        .map((member) => {
+          if (!member) {
+            return null;
+          }
+          const memberId = member.id !== undefined && member.id !== null ? String(member.id).trim() : null;
+          return memberId ? { id: memberId, entity: member } : null;
+        })
+        .filter(Boolean)
+    : [];
+
+  if (normalizedRoster.length < 2) {
+    appendPlaceholder('Recruit at least two specialists to unlock chemistry intel.');
+    return;
+  }
+
+  const entries = [];
+
+  normalizedRoster.forEach((memberWrapper, index) => {
+    const { id: memberId, entity: member } = memberWrapper;
+    const memberName = member.name ?? 'Crew member';
+
+    for (let peerIndex = index + 1; peerIndex < normalizedRoster.length; peerIndex += 1) {
+      const { id: peerId, entity: peer } = normalizedRoster[peerIndex];
+      const peerName = peer.name ?? 'Crew member';
+
+      const directionalScores = [];
+      if (typeof member.getAffinityForCrewmate === 'function') {
+        const score = member.getAffinityForCrewmate(peerId);
+        if (Number.isFinite(score)) {
+          directionalScores.push({ label: `${memberName} → ${peerName}`, value: score });
+        }
+      }
+      if (typeof peer.getAffinityForCrewmate === 'function') {
+        const score = peer.getAffinityForCrewmate(memberId);
+        if (Number.isFinite(score)) {
+          directionalScores.push({ label: `${peerName} → ${memberName}`, value: score });
+        }
+      }
+
+      const pairLabel = `${memberName} ↔ ${peerName}`;
+      if (!directionalScores.length) {
+        entries.push({
+          key: `${memberId}::${peerId}`,
+          pairLabel,
+          summary: null,
+          tooltip: `${memberName} and ${peerName} have not worked together enough to gauge chemistry.`,
+        });
+        continue;
+      }
+
+      const averageAffinity =
+        directionalScores.reduce((sum, entry) => sum + entry.value, 0) / directionalScores.length;
+      const summary = evaluateChemistryFromAffinity(averageAffinity);
+      const tooltipParts = [
+        `${pairLabel} rapport average ${Math.round(summary.affinity)} — trait impact ${summary.percentLabel}.`,
+      ];
+      if (directionalScores.length > 1) {
+        directionalScores.forEach((entry) => {
+          tooltipParts.push(`${entry.label}: ${Math.round(clampAffinityScore(entry.value))}`);
+        });
+      } else {
+        tooltipParts.push('Only one side of this relationship has reported affinity data so far.');
+      }
+
+      entries.push({
+        key: `${memberId}::${peerId}`,
+        pairLabel,
+        summary,
+        tooltip: tooltipParts.join('\n'),
+      });
+    }
+  });
+
+  if (!entries.length) {
+    appendPlaceholder('No chemistry intel available yet.');
+    return;
+  }
+
+  entries.sort((a, b) => {
+    const aHasAffinity = Number.isFinite(a?.summary?.affinity);
+    const bHasAffinity = Number.isFinite(b?.summary?.affinity);
+    if (aHasAffinity && bHasAffinity) {
+      if (a.summary.affinity === b.summary.affinity) {
+        return a.pairLabel.localeCompare(b.pairLabel);
+      }
+      return a.summary.affinity - b.summary.affinity;
+    }
+    if (aHasAffinity) {
+      return -1;
+    }
+    if (bHasAffinity) {
+      return 1;
+    }
+    return a.pairLabel.localeCompare(b.pairLabel);
+  });
+
+  entries.forEach((entry) => {
+    const item = document.createElement('li');
+    item.className = 'mission-crew__chemistry-item';
+    const summaryLabel = entry.summary ? entry.summary.label : 'Chemistry intel pending';
+    item.textContent = `${entry.pairLabel} — ${summaryLabel}`;
+    if (entry.tooltip) {
+      item.title = entry.tooltip;
+    }
+    if (!entry.summary) {
+      item.classList.add('mission-crew__chemistry-item--pending');
+    }
+    if (entry.summary?.isWarning) {
+      item.classList.add('mission-crew__chemistry-item--warning');
+    }
+    if (entry.summary?.status === 'synergy') {
+      item.classList.add('mission-crew__chemistry-item--synergy');
+    }
+    chemistryList.appendChild(item);
+  });
+};
+
 const updateCrewSelectionOptions = () => {
   const crewContainer = missionControls.crewList;
   if (!crewContainer) {
@@ -8866,6 +9015,7 @@ const updateMissionControls = () => {
     operationsCrewFatigueValue,
     operationsCrewFatigueStatus,
     crewList,
+    crewChemistryList,
     vehicleList,
     crackdownText,
     crackdownHistoryList,
@@ -8951,6 +9101,7 @@ const updateMissionControls = () => {
     operationsCrewFatigueValue,
     operationsCrewFatigueStatus,
     crewList,
+    crewChemistryList,
     vehicleList,
     crackdownText,
     crackdownHistoryList,
@@ -8995,6 +9146,9 @@ const updateMissionControls = () => {
   if (!controlsReady) {
     return;
   }
+
+  const chemistryRoster = Array.isArray(missionSystem?.state?.crew) ? missionSystem.state.crew : [];
+  renderCrewChemistrySummary(chemistryRoster, { missionReady: Boolean(missionSystem) });
 
   updateCrewSelectionOptions();
   updateCrewStorylinePanel();
@@ -9853,6 +10007,7 @@ const setupMissionControls = () => {
   missionControls.debtList = document.getElementById('mission-debt-list');
   missionControls.debtStatus = document.getElementById('mission-debt-status');
   missionControls.crewList = document.getElementById('mission-crew-list');
+  missionControls.crewChemistryList = document.getElementById('mission-crew-chemistry');
   missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
   missionControls.crackdownHistoryList = document.getElementById('mission-crackdown-history-list');
