@@ -3,6 +3,7 @@ import { computeSafehouseFacilityBonuses } from '../world/safehouseEffects.js';
 import { advanceCrewGearVendorsForNewDay } from './crewGearVendors.js';
 
 const DAY_LENGTH_SECONDS = 45;
+const MAX_ECONOMY_HISTORY_ENTRIES = 30;
 
 class EconomySystem {
   constructor(state) {
@@ -18,6 +19,16 @@ class EconomySystem {
     this.timeAccumulator = 0;
     this.lastExpenseReport = null;
     this.pendingExpenseReport = null;
+    if (!Array.isArray(this.state.economyHistory)) {
+      this.state.economyHistory = [];
+    }
+    if (this.state.economyHistory.length > MAX_ECONOMY_HISTORY_ENTRIES) {
+      this.state.economyHistory.splice(
+        0,
+        this.state.economyHistory.length - MAX_ECONOMY_HISTORY_ENTRIES,
+      );
+    }
+    this.economyHistoryLimit = MAX_ECONOMY_HISTORY_ENTRIES;
   }
 
   getActiveSafehouse() {
@@ -103,6 +114,40 @@ class EconomySystem {
 
   getLastExpenseReport() {
     return this.lastExpenseReport;
+  }
+
+  getEconomyHistory() {
+    if (!Array.isArray(this.state.economyHistory)) {
+      this.state.economyHistory = [];
+    }
+
+    return this.state.economyHistory;
+  }
+
+  recordExpenseReport(report) {
+    if (!report || typeof report !== 'object') {
+      return;
+    }
+
+    const history = this.getEconomyHistory();
+    const normalizeAmount = (value) => (Number.isFinite(value) ? Math.round(value) : 0);
+
+    const entry = {
+      day: Number.isFinite(report.day) ? Math.max(1, Math.round(report.day)) : this.state.day,
+      base: normalizeAmount(report.base),
+      payroll: normalizeAmount(report.payroll),
+      safehouseOverhead: normalizeAmount(report.safehouseOverhead),
+      safehouseIncome: normalizeAmount(report.safehouseIncome),
+      total: Number.isFinite(report.total)
+        ? Math.round(report.total)
+        : normalizeAmount(report.base) + normalizeAmount(report.payroll) + normalizeAmount(report.safehouseOverhead) - normalizeAmount(report.safehouseIncome),
+      timestamp: Number.isFinite(report.timestamp) ? report.timestamp : Date.now(),
+    };
+
+    history.push(entry);
+    if (history.length > this.economyHistoryLimit) {
+      history.splice(0, history.length - this.economyHistoryLimit);
+    }
   }
 
   payCrew(trackInReport = false) {
@@ -257,6 +302,7 @@ class EconomySystem {
         timestamp: this.pendingExpenseReport.timestamp,
       };
       this.state.lastExpenseReport = this.lastExpenseReport;
+      this.recordExpenseReport(this.lastExpenseReport);
       this.pendingExpenseReport = null;
     }
   }

@@ -163,6 +163,11 @@ const missionControls = {
   operationsStorageStatus: null,
   operationsCrewFatigueValue: null,
   operationsCrewFatigueStatus: null,
+  operationsHistoryContainer: null,
+  operationsHistoryList: null,
+  operationsHistoryEmpty: null,
+  operationsHistoryStatus: null,
+  operationsHistorySignature: '',
   trainingCrewSelect: null,
   trainingSpecialtySelect: null,
   trainingLoyaltyButton: null,
@@ -5687,6 +5692,9 @@ const resetOperationsDashboard = () => {
     operationsStorageStatus,
     operationsCrewFatigueValue,
     operationsCrewFatigueStatus,
+    operationsHistoryList,
+    operationsHistoryEmpty,
+    operationsHistoryStatus,
   } = missionControls;
 
   setOperationsDashboardValue(operationsExpensesValue, operationsExpensesStatus, {
@@ -5714,6 +5722,13 @@ const resetOperationsDashboard = () => {
     riskLevel: 'unknown',
     statusText: 'Fatigue telemetry syncing.',
   });
+
+  if (operationsHistoryList && operationsHistoryEmpty && operationsHistoryStatus) {
+    operationsHistoryList.innerHTML = '';
+    operationsHistoryEmpty.hidden = false;
+    operationsHistoryStatus.textContent = 'Economy history syncing.';
+  }
+  missionControls.operationsHistorySignature = '';
 };
 
 const describeRelativeTime = (timestamp) => {
@@ -5762,6 +5777,9 @@ const updateOperationsDashboard = () => {
     operationsStorageStatus,
     operationsCrewFatigueValue,
     operationsCrewFatigueStatus,
+    operationsHistoryList,
+    operationsHistoryEmpty,
+    operationsHistoryStatus,
   } = missionControls;
 
   const elementsReady = [
@@ -5775,6 +5793,9 @@ const updateOperationsDashboard = () => {
     operationsStorageStatus,
     operationsCrewFatigueValue,
     operationsCrewFatigueStatus,
+    operationsHistoryList,
+    operationsHistoryEmpty,
+    operationsHistoryStatus,
   ].every(Boolean);
 
   if (!elementsReady) {
@@ -6021,6 +6042,118 @@ const updateOperationsDashboard = () => {
     riskLevel: fatigueRisk,
     statusText: fatigueStatus,
   });
+
+  if (operationsHistoryList && operationsHistoryEmpty && operationsHistoryStatus) {
+    const historySource = Array.isArray(state?.economyHistory)
+      ? state.economyHistory
+      : Array.isArray(economySystem?.state?.economyHistory)
+        ? economySystem.state.economyHistory
+        : [];
+
+    const recentHistory = historySource.slice(-8).reverse();
+
+    if (recentHistory.length === 0) {
+      operationsHistoryEmpty.hidden = false;
+      operationsHistoryStatus.textContent =
+        'No economy pulses recorded yet — complete a day cycle to populate telemetry.';
+      if (missionControls.operationsHistorySignature !== 'empty') {
+        missionControls.operationsHistorySignature = 'empty';
+        operationsHistoryList.innerHTML = '';
+      }
+    } else {
+      operationsHistoryEmpty.hidden = true;
+      const latestTimestamp = Number.isFinite(recentHistory[0]?.timestamp)
+        ? recentHistory[0].timestamp
+        : null;
+      const relativeUpdate = latestTimestamp ? describeRelativeTime(latestTimestamp) : null;
+      operationsHistoryStatus.textContent = relativeUpdate
+        ? `Last economy pulse ${relativeUpdate}.`
+        : 'Recent economy pulses available.';
+
+      const signature = recentHistory
+        .map((entry) => {
+          const day = Number.isFinite(entry?.day) ? Math.max(1, Math.round(entry.day)) : 0;
+          const total = Number.isFinite(entry?.total) ? Math.round(entry.total) : 0;
+          const timestamp = Number.isFinite(entry?.timestamp) ? entry.timestamp : 0;
+          const recencyBucket = timestamp
+            ? Math.floor(Math.max(0, Date.now() - timestamp) / 60000)
+            : 0;
+          return `${day}:${total}:${timestamp}:${recencyBucket}`;
+        })
+        .join('|');
+
+      if (signature !== missionControls.operationsHistorySignature) {
+        missionControls.operationsHistorySignature = signature;
+        operationsHistoryList.innerHTML = '';
+
+        const prefixSignedCurrency = (value) => {
+          if (!Number.isFinite(value) || value === 0) {
+            return formatCurrency(0);
+          }
+
+          const absolute = formatCurrency(Math.abs(value));
+          return `${value >= 0 ? '+' : '-'}${absolute}`;
+        };
+
+        const fragment = document.createDocumentFragment();
+        recentHistory.forEach((entry) => {
+          const day = Number.isFinite(entry?.day) ? Math.max(1, Math.round(entry.day)) : null;
+          const base = Number.isFinite(entry?.base) ? Math.round(entry.base) : 0;
+          const payrollAmount = Number.isFinite(entry?.payroll) ? Math.round(entry.payroll) : 0;
+          const overhead = Number.isFinite(entry?.safehouseOverhead)
+            ? Math.round(entry.safehouseOverhead)
+            : 0;
+          const income = Number.isFinite(entry?.safehouseIncome)
+            ? Math.round(entry.safehouseIncome)
+            : 0;
+          const total = Number.isFinite(entry?.total)
+            ? Math.round(entry.total)
+            : base + payrollAmount + overhead - income;
+          const timestamp = Number.isFinite(entry?.timestamp) ? entry.timestamp : null;
+
+          const item = document.createElement('li');
+          item.className = 'mission-operations__history-item';
+          const trend = total < 0 ? 'surplus' : total > 0 ? 'outflow' : 'even';
+          item.dataset.trend = trend;
+
+          const netLabel = total > 0
+            ? `-${formatCurrency(total)}`
+            : total < 0
+              ? `+${formatCurrency(Math.abs(total))}`
+              : formatCurrency(0);
+          const summarySegments = [day ? `Day ${day}` : 'Day —', `${netLabel} net`];
+          const relative = timestamp ? describeRelativeTime(timestamp) : null;
+          if (relative) {
+            summarySegments.push(relative);
+          }
+
+          const summary = document.createElement('span');
+          summary.className = 'mission-operations__history-summary';
+          summary.textContent = summarySegments.join(' • ');
+
+          const detailSegments = [
+            `Base ${formatCurrency(Math.abs(base))}`,
+            `Payroll ${formatCurrency(Math.abs(payrollAmount))}`,
+            `Overhead ${prefixSignedCurrency(overhead)}`,
+            `Passive ${prefixSignedCurrency(income)}`,
+          ];
+          const detail = document.createElement('span');
+          detail.className = 'mission-operations__history-detail';
+          detail.textContent = detailSegments.join(' • ');
+
+          item.setAttribute(
+            'aria-label',
+            `${summarySegments.join(', ')}. ${detailSegments.join(', ')}.`,
+          );
+
+          item.append(summary, detail);
+          fragment.appendChild(item);
+        });
+
+        operationsHistoryList.append(fragment);
+      }
+    }
+  }
 };
 
 const updateHeatManagementPanel = () => {
@@ -11769,6 +11902,10 @@ const setupMissionControls = () => {
   missionControls.operationsStorageStatus = document.getElementById('mission-ops-storage-status');
   missionControls.operationsCrewFatigueValue = document.getElementById('mission-ops-fatigue');
   missionControls.operationsCrewFatigueStatus = document.getElementById('mission-ops-fatigue-status');
+  missionControls.operationsHistoryContainer = document.querySelector('.mission-operations__history');
+  missionControls.operationsHistoryList = document.getElementById('mission-ops-history');
+  missionControls.operationsHistoryEmpty = document.getElementById('mission-ops-history-empty');
+  missionControls.operationsHistoryStatus = document.getElementById('mission-ops-history-status');
   missionControls.cityIntelCanvas = document.getElementById('mission-city-intel-map');
   if (missionControls.cityIntelCanvas) {
     missionControls.cityIntelCanvasContext = missionControls.cityIntelCanvas.getContext('2d');
