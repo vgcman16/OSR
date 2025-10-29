@@ -1118,6 +1118,142 @@ body {
   outline-offset: 2px;
 }
 
+.mission-safehouse__layout {
+  margin-top: 0.85rem;
+  padding: 0.85rem;
+  border-radius: 12px;
+  background: rgba(5, 10, 22, 0.68);
+  border: 1px solid rgba(120, 190, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mission-safehouse__layout[data-layout-state='alert'] {
+  border-color: rgba(255, 140, 140, 0.6);
+  box-shadow: 0 0 16px rgba(255, 140, 140, 0.25);
+}
+
+.mission-safehouse__layout-title {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(180, 215, 255, 0.78);
+}
+
+.mission-safehouse__layout-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mission-safehouse__layout-status {
+  font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.78);
+}
+
+.mission-safehouse__layout-alerts {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0;
+  margin: 0;
+}
+
+.mission-safehouse__layout-warning {
+  font-size: 0.82rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(255, 140, 140, 0.12);
+  color: rgba(255, 200, 200, 0.92);
+  border: 1px solid rgba(255, 140, 140, 0.25);
+}
+
+.mission-safehouse__layout-grid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.mission-safehouse__layout-zone {
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(12, 18, 32, 0.8);
+  border: 1px solid rgba(120, 190, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 130px;
+}
+
+.mission-safehouse__layout-zone-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.mission-safehouse__layout-zone-name {
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  color: rgba(227, 239, 255, 0.95);
+}
+
+.mission-safehouse__layout-zone-score {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(180, 215, 255, 0.85);
+  border: 1px solid rgba(120, 190, 255, 0.35);
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+}
+
+.mission-safehouse__layout-zone-score--weak {
+  border-color: rgba(255, 196, 120, 0.45);
+  color: rgba(255, 209, 158, 0.92);
+  background: rgba(255, 196, 120, 0.12);
+}
+
+.mission-safehouse__layout-zone-score--critical {
+  border-color: rgba(255, 140, 140, 0.55);
+  color: rgba(255, 200, 200, 0.95);
+  background: rgba(255, 140, 140, 0.18);
+}
+
+.mission-safehouse__layout-zone-facilities {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: rgba(209, 234, 255, 0.78);
+}
+
+.mission-safehouse__layout-zone-facilities li {
+  line-height: 1.35;
+}
+
+.mission-safehouse__layout-zone-facilities-empty {
+  font-style: italic;
+  color: rgba(209, 234, 255, 0.6);
+}
+
+.mission-safehouse__layout-empty {
+  font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.7);
+  text-align: center;
+  padding: 0.6rem;
+  border-radius: 8px;
+  background: rgba(120, 190, 255, 0.08);
+  border: 1px dashed rgba(120, 190, 255, 0.25);
+}
+
 .mission-crew {
   padding: 1rem;
   border-radius: 14px;
