@@ -3,6 +3,10 @@ import { CrewMember, createCrewTemplate } from '../entities/crewMember.js';
 import { Vehicle } from '../entities/vehicle.js';
 import { CityMap } from '../world/cityMap.js';
 import { SafehouseCollection, createDefaultSafehouseCollection } from '../world/safehouse.js';
+import {
+  createInitialCrewGearVendorState,
+  sanitizeCrewGearVendorState,
+} from '../systems/crewGearVendors.js';
 
 const cloneReconAssignment = (assignment) => {
   if (!assignment || typeof assignment !== 'object') {
@@ -185,6 +189,7 @@ class GameState {
     partsInventory = 0,
     garageActivityLog = [],
     crackdownHistory = [],
+    crewGearVendors = null,
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -223,6 +228,7 @@ class GameState {
       : 0;
     this.garageActivityLog = sanitizeGarageActivityLog(garageActivityLog);
     this.crackdownHistory = sanitizeCrackdownHistoryLog(crackdownHistory);
+    this.crewGearVendors = sanitizeCrewGearVendorState(crewGearVendors, { day: this.day });
   }
 
   toJSON() {
@@ -287,6 +293,9 @@ class GameState {
       partsInventory: this.partsInventory,
       garageActivityLog: serializeArray(this.garageActivityLog),
       crackdownHistory: serializeArray(this.crackdownHistory),
+      crewGearVendors: this.crewGearVendors
+        ? sanitizeCrewGearVendorState(this.crewGearVendors, { day: this.day })
+        : null,
     };
   }
 
@@ -337,6 +346,7 @@ class GameState {
         : 0,
       garageActivityLog: sanitizeGarageActivityLog(data.garageActivityLog),
       crackdownHistory: sanitizeCrackdownHistoryLog(data.crackdownHistory),
+      crewGearVendors: sanitizeCrewGearVendorState(data.crewGearVendors, { day: data.day }),
     });
   }
 
@@ -516,6 +526,7 @@ const createInitialGameState = () => {
     partsInventory: 0,
     garageActivityLog: [],
     crackdownHistory: [],
+    crewGearVendors: createInitialCrewGearVendorState({ day: 1 }),
   });
 };
 
