@@ -122,6 +122,9 @@ const missionControls = {
   lastReconCompletionKey: null,
   crewList: null,
   crewChemistryList: null,
+  relationshipEventList: null,
+  relationshipEventStatus: null,
+  relationshipEventStatusDetail: '',
   vehicleList: null,
   crackdownText: null,
   crackdownForecast: null,
@@ -8796,6 +8799,102 @@ const renderCrewChemistrySummary = (roster, { missionReady = false } = {}) => {
     return;
   }
 
+  const relationshipList = missionControls.relationshipEventList;
+  const relationshipStatus = missionControls.relationshipEventStatus;
+  if (relationshipStatus) {
+    relationshipStatus.textContent = missionControls.relationshipEventStatusDetail ?? '';
+  }
+
+  const renderRelationshipEventsPanel = () => {
+    if (!relationshipList) {
+      return;
+    }
+
+    relationshipList.innerHTML = '';
+
+    const missionSystem = getMissionSystem();
+    const pendingEvents = missionSystem?.getPendingRelationshipEvents?.()
+      ?? missionSystem?.relationshipService?.getPendingEvents?.()
+      ?? [];
+
+    if (!pendingEvents.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className = 'mission-crew__relationship-event mission-crew__relationship-event--placeholder';
+      placeholder.textContent = missionReady
+        ? 'No relationship events queued.'
+        : 'Relationship monitoring offline.';
+      relationshipList.appendChild(placeholder);
+      return;
+    }
+
+    pendingEvents.forEach((eventEntry) => {
+      if (!eventEntry) {
+        return;
+      }
+      const item = document.createElement('li');
+      item.className = 'mission-crew__relationship-event';
+      item.dataset.eventId = eventEntry.id ?? '';
+
+      const heading = document.createElement('p');
+      heading.className = 'mission-crew__relationship-heading';
+      heading.textContent = Array.isArray(eventEntry.crewNames)
+        ? eventEntry.crewNames.join(' & ')
+        : 'Crew cohort';
+      item.appendChild(heading);
+
+      const prompt = document.createElement('p');
+      prompt.className = 'mission-crew__relationship-prompt';
+      prompt.textContent = eventEntry.prompt ?? 'Relationship milestone detected.';
+      item.appendChild(prompt);
+
+      const metaParts = [];
+      if (eventEntry.band === 'synergy') {
+        metaParts.push('Synergy milestone');
+      } else if (eventEntry.band === 'strain') {
+        metaParts.push('Strain warning');
+      }
+      const missionName = eventEntry?.missionContext?.missionName;
+      if (missionName) {
+        metaParts.push(`Triggered on ${missionName}`);
+      }
+      if (metaParts.length) {
+        const meta = document.createElement('p');
+        meta.className = 'mission-crew__relationship-meta';
+        meta.textContent = metaParts.join(' • ');
+        item.appendChild(meta);
+      }
+
+      const choices = Array.isArray(eventEntry.choices) ? eventEntry.choices : [];
+      if (choices.length) {
+        const choiceBar = document.createElement('div');
+        choiceBar.className = 'mission-crew__relationship-choices';
+        choices.forEach((choice) => {
+          if (!choice) {
+            return;
+          }
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'mission-crew__relationship-choice';
+          button.dataset.relationshipChoice = 'true';
+          if (eventEntry.id) {
+            button.dataset.eventId = eventEntry.id;
+          }
+          if (choice.id) {
+            button.dataset.choiceId = choice.id;
+          }
+          button.textContent = choice.label ?? 'Select';
+          if (choice.description) {
+            button.title = choice.description;
+          }
+          choiceBar.appendChild(button);
+        });
+        item.appendChild(choiceBar);
+      }
+
+      relationshipList.appendChild(item);
+    });
+  };
+
   const appendPlaceholder = (text) => {
     const item = document.createElement('li');
     item.className = 'mission-crew__chemistry-item mission-crew__chemistry-item--placeholder';
@@ -8807,6 +8906,7 @@ const renderCrewChemistrySummary = (roster, { missionReady = false } = {}) => {
 
   if (!missionReady) {
     appendPlaceholder('Chemistry intel initializing…');
+    renderRelationshipEventsPanel();
     return;
   }
 
@@ -8824,6 +8924,7 @@ const renderCrewChemistrySummary = (roster, { missionReady = false } = {}) => {
 
   if (normalizedRoster.length < 2) {
     appendPlaceholder('Recruit at least two specialists to unlock chemistry intel.');
+    renderRelationshipEventsPanel();
     return;
   }
 
@@ -8887,6 +8988,7 @@ const renderCrewChemistrySummary = (roster, { missionReady = false } = {}) => {
 
   if (!entries.length) {
     appendPlaceholder('No chemistry intel available yet.');
+    renderRelationshipEventsPanel();
     return;
   }
 
@@ -8927,6 +9029,8 @@ const renderCrewChemistrySummary = (roster, { missionReady = false } = {}) => {
     }
     chemistryList.appendChild(item);
   });
+
+  renderRelationshipEventsPanel();
 };
 
 const updateCrewSelectionOptions = () => {
@@ -9879,6 +9983,21 @@ const renderMissionLog = () => {
     if (reconSummary && !summary.includes(reconSummary)) {
       details.push(`Recon: ${reconSummary}`);
     }
+    const relationshipEvents = Array.isArray(entry?.events) ? entry.events : [];
+    relationshipEvents.forEach((eventEntry) => {
+      if (!eventEntry) {
+        return;
+      }
+      const eventLabel = eventEntry.eventLabel ?? 'Event';
+      const choiceLabel = eventEntry.choiceLabel ?? 'Choice';
+      const highlight = `${eventLabel}: ${choiceLabel}`;
+      if (!details.some((line) => line.includes(highlight))) {
+        details.push(`Event: ${highlight}`);
+      }
+      if (eventEntry.effectSummary && !details.some((line) => line.includes(eventEntry.effectSummary))) {
+        details.push(`Event impact: ${eventEntry.effectSummary}`);
+      }
+    });
     const timestamp = Number.isFinite(entry?.timestamp) ? new Date(entry.timestamp) : null;
     const timeLabel = timestamp ? ` @ ${timestamp.toLocaleTimeString([], options)}` : '';
     item.textContent = `${details.join(' — ')}${timeLabel}`;
@@ -10864,6 +10983,49 @@ const handleMissionEventChoice = (event) => {
   triggerHudRender();
 };
 
+const handleRelationshipEventChoice = (event) => {
+  const target = event?.target;
+  const button = target?.closest ? target.closest('button[data-relationship-choice]') : null;
+  if (!button) {
+    return;
+  }
+
+  const { eventId, choiceId } = button.dataset;
+  if (!eventId || !choiceId) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const statusNode = missionControls.relationshipEventStatus;
+
+  if (!missionSystem) {
+    missionControls.relationshipEventStatusDetail = 'Relationship service offline — unable to resolve event.';
+    if (statusNode) {
+      statusNode.textContent = missionControls.relationshipEventStatusDetail;
+    }
+    return;
+  }
+
+  const result = missionSystem.resolveRelationshipEvent(eventId, choiceId);
+  if (!result) {
+    missionControls.relationshipEventStatusDetail = 'Relationship event already handled.';
+  } else {
+    const detailParts = [result.summary];
+    if (Array.isArray(result.details) && result.details.length) {
+      detailParts.push(result.details.join(', '));
+    }
+    missionControls.relationshipEventStatusDetail = detailParts.filter(Boolean).join(' — ');
+  }
+
+  if (statusNode) {
+    statusNode.textContent = missionControls.relationshipEventStatusDetail ?? '';
+  }
+
+  const roster = Array.isArray(missionSystem.state?.crew) ? missionSystem.state.crew : [];
+  renderCrewChemistrySummary(roster, { missionReady: Boolean(missionSystem) });
+  triggerHudRender();
+};
+
 const handleMissionStart = () => {
   const missionSystem = getMissionSystem();
   const economySystem = getEconomySystem();
@@ -11292,6 +11454,11 @@ const setupMissionControls = () => {
   missionControls.debtStatus = document.getElementById('mission-debt-status');
   missionControls.crewList = document.getElementById('mission-crew-list');
   missionControls.crewChemistryList = document.getElementById('mission-crew-chemistry');
+  missionControls.relationshipEventList = document.getElementById('mission-crew-relationship-events');
+  missionControls.relationshipEventStatus = document.getElementById('mission-crew-relationship-status');
+  if (missionControls.relationshipEventList) {
+    missionControls.relationshipEventList.addEventListener('click', handleRelationshipEventChoice);
+  }
   missionControls.vehicleList = document.getElementById('mission-vehicle-list');
   missionControls.crackdownText = document.getElementById('mission-crackdown-text');
   missionControls.crackdownForecast = document.getElementById('mission-crackdown-forecast');
