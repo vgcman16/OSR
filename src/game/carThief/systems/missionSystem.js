@@ -21,6 +21,7 @@ import { computeSafehouseFacilityBonuses } from '../world/safehouseEffects.js';
 import { getCrewPerkEffect } from './crewPerks.js';
 import { getCrewGearEffect } from './crewGear.js';
 import { getVehicleModRecipe, assessVehicleModAffordability } from './vehicleModRecipes.js';
+import { createCrewRelationshipService } from './crewRelationships.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
   const numeric = Number(value);
@@ -510,6 +511,11 @@ const evaluateCrewChemistry = (crewMembers = []) => {
       warning: null,
       bestPair: null,
       worstPair: null,
+      band: 'neutral',
+      milestones: {
+        enteredSynergyBand: false,
+        enteredStrainBand: false,
+      },
     };
   }
 
@@ -601,6 +607,15 @@ const evaluateCrewChemistry = (crewMembers = []) => {
     : -35;
 
   const percentShift = Math.round((teamMultiplier - 1) * 100);
+  const chemistryBand = teamAverageAffinity >= synergyThreshold
+    ? 'synergy'
+    : teamAverageAffinity <= strainThreshold
+      ? 'strain'
+      : 'neutral';
+  const milestones = {
+    enteredSynergyBand: chemistryBand === 'synergy',
+    enteredStrainBand: chemistryBand === 'strain',
+  };
   let summary;
   if (members.length <= 1) {
     summary = 'Solo operative — chemistry steady.';
@@ -690,6 +705,8 @@ const evaluateCrewChemistry = (crewMembers = []) => {
     warning,
     bestPair,
     worstPair,
+    band: chemistryBand,
+    milestones,
   };
 };
 
@@ -716,6 +733,11 @@ const serializeChemistryProfile = (profile) => {
     warning: profile.warning ?? null,
     teamAverageAffinity: profile.teamAverageAffinity,
     teamMultiplier: profile.teamMultiplier,
+    band: profile.band ?? 'neutral',
+    milestones: {
+      enteredSynergyBand: Boolean(profile?.milestones?.enteredSynergyBand),
+      enteredStrainBand: Boolean(profile?.milestones?.enteredStrainBand),
+    },
     memberDetails: Array.isArray(profile.memberDetails)
       ? profile.memberDetails.map((entry) => ({
           id: entry.id,
@@ -1573,6 +1595,7 @@ class MissionSystem {
     this.contractPool = contractPool.map((template) => ({ ...template }));
     this.contractFactory = contractFactory;
     this.falloutContractFactory = falloutContractFactory;
+    this.relationshipService = createCrewRelationshipService(this.state);
 
     this.currentCrackdownTier = this.heatSystem.getCurrentTier();
     if (!Number.isFinite(this.state.followUpSequence)) {
@@ -1655,6 +1678,56 @@ class MissionSystem {
     }
 
     return normalized;
+  }
+
+  getPendingRelationshipEvents() {
+    if (!this.relationshipService || typeof this.relationshipService.getPendingEvents !== 'function') {
+      return [];
+    }
+    return this.relationshipService.getPendingEvents();
+  }
+
+  resolveRelationshipEvent(eventId, choiceId) {
+    if (!this.relationshipService || typeof this.relationshipService.resolveEventChoice !== 'function') {
+      return null;
+    }
+    return this.relationshipService.resolveEventChoice(eventId, choiceId);
+  }
+
+  recordCrewRelationshipMilestone(crewMembers = [], chemistryProfile = null, missionContext = null) {
+    if (
+      !this.relationshipService
+      || typeof this.relationshipService.recordChemistryMilestones !== 'function'
+    ) {
+      return null;
+    }
+
+    const crewIds = Array.isArray(crewMembers)
+      ? crewMembers
+          .map((member) => {
+            if (!member) {
+              return null;
+            }
+            const rawId = member.id;
+            if (rawId === undefined || rawId === null) {
+              return null;
+            }
+            const normalized = String(rawId).trim();
+            return normalized || null;
+          })
+          .filter(Boolean)
+      : [];
+
+    if (crewIds.length < 2 || !chemistryProfile) {
+      return null;
+    }
+
+    return this.relationshipService.recordChemistryMilestones({
+      crewIds,
+      crewMembers,
+      chemistryProfile,
+      missionContext,
+    });
   }
 
   getMissionDistrict(source) {
@@ -2969,7 +3042,7 @@ class MissionSystem {
       }
     });
 
-    const summaryParts = [];
+    const summaryParts = [`${eventEntry.label ?? 'Event'}: ${choice.label}`];
     if (choice.narrative) {
       summaryParts.push(choice.narrative);
     }
@@ -4381,6 +4454,12 @@ class MissionSystem {
           falloutByCrewId,
           stressLevel,
         });
+      });
+      const chemistryProfile = evaluateCrewChemistry(assignedCrew);
+      this.recordCrewRelationshipMilestone(assignedCrew, chemistryProfile, {
+        missionId: mission.id ?? null,
+        missionName: mission.name ?? null,
+        outcome,
       });
     }
 
