@@ -56,6 +56,69 @@ const normalizeTextArray = (value) => {
   return [];
 };
 
+const cloneAlertChoiceEffects = (effects) => {
+  if (!effects || typeof effects !== 'object') {
+    return null;
+  }
+
+  const cloned = {};
+  Object.entries(effects).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      cloned[key] = value.map((entry) =>
+        entry && typeof entry === 'object' ? { ...entry } : entry,
+      );
+    } else if (value && typeof value === 'object') {
+      cloned[key] = { ...value };
+      if (Array.isArray(cloned[key].penalties)) {
+        cloned[key].penalties = cloned[key].penalties.slice();
+      }
+    } else {
+      cloned[key] = value;
+    }
+  });
+
+  return cloned;
+};
+
+const sanitizeSafehouseAlertChoice = (choice) => {
+  if (!choice || typeof choice !== 'object') {
+    return null;
+  }
+
+  const id = typeof choice.id === 'string' && choice.id.trim() ? choice.id.trim() : null;
+  if (!id) {
+    return null;
+  }
+
+  const label = typeof choice.label === 'string' && choice.label.trim() ? choice.label.trim() : null;
+  const description =
+    typeof choice.description === 'string' && choice.description.trim()
+      ? choice.description.trim()
+      : null;
+  const narrative =
+    typeof choice.narrative === 'string' && choice.narrative.trim()
+      ? choice.narrative.trim()
+      : null;
+
+  const sanitized = { id };
+  if (label) {
+    sanitized.label = label;
+  }
+  if (description) {
+    sanitized.description = description;
+  }
+  if (narrative) {
+    sanitized.narrative = narrative;
+  }
+
+  const effects = cloneAlertChoiceEffects(choice.effects);
+  if (effects) {
+    sanitized.effects = effects;
+  }
+
+  return sanitized;
+};
+
 const sanitizeFacilityDowntime = (
   downtime,
   { facilityId = null, label = null, currentDay = null } = {},
@@ -2642,6 +2705,15 @@ class MissionSystem {
       payload.downtime = downtime ?? null;
       if (payload.downtime && payload.cooldownDays === null && Number.isFinite(payload.downtime.cooldownDays)) {
         payload.cooldownDays = payload.downtime.cooldownDays;
+      }
+
+      const alertChoices = Array.isArray(alert.choices)
+        ? alert.choices
+            .map((choice) => sanitizeSafehouseAlertChoice(choice))
+            .filter((entry) => entry && entry.id)
+        : [];
+      if (alertChoices.length) {
+        payload.choices = alertChoices;
       }
 
       if (payload.status === 'alert') {
