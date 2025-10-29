@@ -4367,12 +4367,17 @@ const updateSafehousePanel = () => {
       const status = typeof entry.status === 'string' ? entry.status : 'alert';
       const label = entry.label ?? entry.id;
       const baseSummary = entry.summary ?? '';
+      const choices = Array.isArray(entry.choices)
+        ? entry.choices.filter((choice) => choice && choice.id)
+        : [];
+      const resolutionSummary =
+        typeof entry.lastResolutionSummary === 'string' && entry.lastResolutionSummary.trim()
+          ? entry.lastResolutionSummary.trim()
+          : '';
       const item = document.createElement('li');
       item.className = 'mission-safehouse__alerts-item';
       item.dataset.status = status;
 
-      let detailLine = baseSummary;
-      let summaryLine = '';
       const downtime =
         status === 'cooldown' && entry.downtime && typeof entry.downtime === 'object'
           ? entry.downtime
@@ -4388,6 +4393,9 @@ const updateSafehousePanel = () => {
             ? downtime.penaltySummary.trim()
             : '';
 
+      let displayLine = baseSummary ? `${label} — ${baseSummary}` : `${label} alert active.`;
+      let summaryLine = '';
+
       if (status === 'cooldown') {
         const cooldownEndsOnDay = Number.isFinite(entry.cooldownEndsOnDay) ? entry.cooldownEndsOnDay : null;
         const remaining =
@@ -4396,24 +4404,27 @@ const updateSafehousePanel = () => {
         if (remaining !== null) {
           if (remaining > 0) {
             timerDetail = `Cooldown ${remaining} day${remaining === 1 ? '' : 's'} remaining.`;
-            summaryLine = `${downtimeLabel ?? label} downtime ${remaining} day${remaining === 1 ? '' : 's'} left.`;
           } else {
             timerDetail = 'Cooldown complete. Systems ready.';
-            summaryLine = `${downtimeLabel ?? label} downtime cleared.`;
           }
         } else if (baseSummary) {
           timerDetail = 'Cooldown active.';
-          summaryLine = `${downtimeLabel ?? label} cooldown active.`;
         } else {
           timerDetail = 'Cooldown active.';
-          summaryLine = `${downtimeLabel ?? label} cooldown active.`;
         }
 
         const impactDetail = downtimePenalties.length
           ? `Impact: ${downtimePenalties.join(' ')}`
           : downtimeSummary;
 
-        const detailSegments = [baseSummary];
+        const detailSegments = [];
+        if (resolutionSummary) {
+          detailSegments.push(resolutionSummary);
+        } else if (baseSummary) {
+          detailSegments.push(`${label} — ${baseSummary}`);
+        } else {
+          detailSegments.push(`${label} cooldown active.`);
+        }
         if (downtimeLabel) {
           detailSegments.push(`${downtimeLabel} offline.`);
         }
@@ -4423,7 +4434,13 @@ const updateSafehousePanel = () => {
         if (impactDetail) {
           detailSegments.push(impactDetail);
         }
-        detailLine = detailSegments.filter(Boolean).join(' ');
+        displayLine = detailSegments.filter(Boolean).join(' ');
+        const timerSummary = timerDetail ? timerDetail.replace(/\.$/, '') : '';
+        summaryLine = resolutionSummary
+          ? `${resolutionSummary}${timerSummary ? ` — ${timerSummary}` : ''}`
+          : timerSummary
+            ? `${downtimeLabel ?? label} ${timerSummary}`
+            : `${downtimeLabel ?? label} cooldown active.`;
         if (downtimeLabel) {
           item.dataset.downtime = downtimeLabel;
         }
@@ -4432,7 +4449,48 @@ const updateSafehousePanel = () => {
       }
 
       const icon = status === 'alert' ? '⚠️' : status === 'cooldown' ? '⏳' : 'ℹ️';
-      item.textContent = icon ? `${icon} ${label} — ${detailLine}` : `${label} — ${detailLine}`;
+      const summaryContent = icon ? `${icon} ${displayLine}` : displayLine;
+      const summarySpan = document.createElement('span');
+      summarySpan.className = 'mission-safehouse__alerts-summary';
+      summarySpan.textContent = summaryContent;
+      item.appendChild(summarySpan);
+
+      if (status === 'alert' && choices.length) {
+        const optionsContainer = document.createElement('div');
+        optionsContainer.className = 'mission-safehouse__alerts-options';
+        choices.forEach((choice) => {
+          const optionWrapper = document.createElement('div');
+          optionWrapper.className = 'mission-safehouse__alerts-option';
+
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'button button--secondary mission-safehouse__alerts-choice-btn';
+          button.dataset.safehouseAlertChoice = 'true';
+          button.dataset.alertId = entry.id;
+          button.dataset.choiceId = choice.id;
+          button.textContent = choice.label ?? 'Select';
+          optionWrapper.appendChild(button);
+
+          if (choice.description) {
+            const description = document.createElement('p');
+            description.className = 'mission-safehouse__alerts-choice-desc';
+            description.textContent = choice.description;
+            optionWrapper.appendChild(description);
+          }
+
+          const effectSummary = formatEventEffectSummary(choice.effects);
+          if (effectSummary) {
+            const effectLine = document.createElement('p');
+            effectLine.className = 'mission-safehouse__alerts-choice-desc';
+            effectLine.textContent = `Effects: ${effectSummary}`;
+            optionWrapper.appendChild(effectLine);
+          }
+
+          optionsContainer.appendChild(optionWrapper);
+        });
+        item.appendChild(optionsContainer);
+      }
+
       safehouseAlertsList.appendChild(item);
       if (summaryLine) {
         summarySegments.push(summaryLine);
@@ -7618,6 +7676,55 @@ const handleSafehouseListClick = (event) => {
   } else if (action === 'assign') {
     handleSafehouseAssign(safehouseId);
   }
+};
+
+const handleSafehouseAlertChoice = (event) => {
+  const button =
+    event?.target && typeof event.target.closest === 'function'
+      ? event.target.closest('button[data-safehouse-alert-choice]')
+      : null;
+  if (!button) {
+    return;
+  }
+
+  const { alertId, choiceId } = button.dataset;
+  if (!alertId || !choiceId) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const statusNode = missionControls.safehouseAlertStatus;
+
+  if (!missionSystem || typeof missionSystem.resolveSafehouseAlertChoice !== 'function') {
+    if (statusNode) {
+      statusNode.textContent = 'Safehouse systems offline — unable to resolve alert.';
+    }
+    return;
+  }
+
+  const result = missionSystem.resolveSafehouseAlertChoice(alertId, choiceId);
+  let statusMessage = '';
+
+  if (!result) {
+    statusMessage = 'Safehouse alert already resolved or unavailable.';
+  } else {
+    const detailParts = [result.summary];
+    if (Array.isArray(result.details) && result.details.length) {
+      detailParts.push(result.details.join(' '));
+    }
+    statusMessage = detailParts.filter(Boolean).join(' — ');
+  }
+
+  updateSafehousePanel();
+  renderMissionEvents();
+  renderGarageActivityLog();
+  updateHeatManagementPanel();
+
+  if (statusNode && statusMessage) {
+    statusNode.textContent = statusMessage;
+  }
+
+  triggerHudRender();
 };
 
 const handleRecruitHire = (candidateId) => {
@@ -11912,6 +12019,7 @@ const setupMissionControls = () => {
   missionControls.safehouseRushButton?.addEventListener('click', handleSafehouseProjectRush);
   missionControls.safehouseUpgradeButton?.addEventListener('click', handleSafehouseUpgrade);
   missionControls.safehouseList?.addEventListener('click', handleSafehouseListClick);
+  missionControls.safehouseAlertsList?.addEventListener('click', handleSafehouseAlertChoice);
 
   setRecruitStatus('');
   setTrainingStatus('');

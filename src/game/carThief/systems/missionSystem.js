@@ -2490,6 +2490,68 @@ class MissionSystem {
     }
   }
 
+  _buildSafehouseAlertDetailLines(alertEntry, choice, { effectSummary = null, facilityDowntime = null } = {}) {
+    const details = [];
+
+    if (choice?.description) {
+      details.push(choice.description);
+    }
+
+    if (effectSummary && typeof effectSummary === 'string') {
+      const trimmed = effectSummary.trim();
+      if (trimmed) {
+        details.push(`Effects: ${trimmed}`);
+      }
+    }
+
+    const downtime = facilityDowntime ?? choice?.effects?.facilityDowntime ?? null;
+    const summary = typeof downtime?.summary === 'string' ? downtime.summary.trim() : '';
+    if (summary) {
+      details.push(summary);
+    }
+
+    const penalties = Array.isArray(downtime?.penalties)
+      ? downtime.penalties.map((line) => (typeof line === 'string' ? line.trim() : '')).filter(Boolean)
+      : [];
+    if (penalties.length) {
+      details.push(...penalties);
+    }
+
+    return details.filter(Boolean);
+  }
+
+  _recordSafehouseAlertGarageActivity(alertEntry, choice, { summary, detailLines = [], resolvedAt = Date.now() } = {}) {
+    if (!Array.isArray(this.state?.garageActivityLog)) {
+      this.state.garageActivityLog = [];
+    }
+
+    const summaryLine = typeof summary === 'string' && summary.trim()
+      ? summary.trim()
+      : `${alertEntry?.label ?? 'Safehouse alert'} resolved.`;
+    const details = Array.isArray(detailLines)
+      ? detailLines.map((line) => (typeof line === 'string' ? line.trim() : '')).filter(Boolean)
+      : [];
+
+    const metadata = {};
+    if (alertEntry?.id) {
+      metadata.alertId = alertEntry.id;
+    }
+    if (choice?.id) {
+      metadata.choiceId = choice.id;
+    }
+    if (alertEntry?.safehouseId) {
+      metadata.safehouseId = alertEntry.safehouseId;
+    }
+
+    this.recordGarageActivity({
+      type: 'safehouse-alert',
+      summary: summaryLine,
+      details,
+      timestamp: resolvedAt,
+      metadata: Object.keys(metadata).length ? metadata : undefined,
+    });
+  }
+
   normalizeSafehouseIncursions(currentDay = this.state?.day ?? 1) {
     const numericDay = Number.isFinite(currentDay) ? currentDay : null;
     const entries = Array.isArray(this.state?.safehouseIncursions)
@@ -2696,6 +2758,200 @@ class MissionSystem {
     this.state.needsHudRefresh = true;
     this._syncSafehouseDowntimeFromAlert(entry, { currentDay });
     return entry;
+  }
+
+  resolveSafehouseAlertChoice(alertId, choiceId) {
+    if (!alertId || !choiceId || !this.state) {
+      return null;
+    }
+
+    const alerts = Array.isArray(this.state.safehouseIncursions) ? this.state.safehouseIncursions : [];
+    const index = alerts.findIndex((entry) => entry?.id === alertId);
+    if (index === -1) {
+      return null;
+    }
+
+    const alertEntry = alerts[index];
+    const choices = Array.isArray(alertEntry?.choices) ? alertEntry.choices : [];
+    const choice = choices.find((entry) => entry?.id === choiceId);
+    if (!choice) {
+      return null;
+    }
+
+    const currentStatus = typeof alertEntry.status === 'string' ? alertEntry.status : 'alert';
+    if (currentStatus !== 'alert') {
+      return null;
+    }
+
+    const mission = this.state.activeMission ?? null;
+    if (mission?.pendingDecision?.eventId === alertId) {
+      const historyEntry = this.chooseMissionEventOption(alertId, choiceId);
+      if (!historyEntry) {
+        return null;
+      }
+
+      const updatedAlerts = Array.isArray(this.state.safehouseIncursions)
+        ? this.state.safehouseIncursions
+        : alerts;
+      const refreshedIndex = updatedAlerts.findIndex((entry) => entry?.id === alertId);
+      const resolvedAlert = refreshedIndex !== -1
+        ? { ...updatedAlerts[refreshedIndex] }
+        : { ...alertEntry };
+
+      resolvedAlert.lastResolutionChoiceId = choice.id;
+      resolvedAlert.lastResolutionChoiceLabel = choice.label ?? null;
+      resolvedAlert.updatedAt = Date.now();
+
+      if (refreshedIndex !== -1) {
+        updatedAlerts[refreshedIndex] = resolvedAlert;
+        this.state.safehouseIncursions = updatedAlerts;
+      }
+
+      const facilityDowntimeEffect = historyEntry.effects?.facilityDowntime ?? null;
+      const detailLines = this._buildSafehouseAlertDetailLines(resolvedAlert, choice, {
+        effectSummary: historyEntry.effectSummary,
+        facilityDowntime: facilityDowntimeEffect,
+      });
+
+      this._recordSafehouseAlertGarageActivity(resolvedAlert, choice, {
+        summary: historyEntry.summary,
+        detailLines,
+        resolvedAt: historyEntry.resolvedAt ?? Date.now(),
+      });
+
+      return {
+        summary: historyEntry.summary,
+        details: detailLines,
+      };
+    }
+
+    const effects = typeof choice.effects === 'object' && choice.effects !== null ? { ...choice.effects } : {};
+    const currentDay = Number.isFinite(this.state?.day) ? this.state.day : null;
+    const facilityDowntimeEffect = sanitizeFacilityDowntime(effects.facilityDowntime, {
+      facilityId: alertEntry.facilityId ?? null,
+      label: alertEntry.facilityName ?? null,
+      currentDay,
+    });
+
+    const resolvedAt = Date.now();
+    const deltaParts = [];
+    let heatDeltaApplied = 0;
+
+    if (Number.isFinite(effects.heatDelta) && effects.heatDelta !== 0) {
+      const beforeHeat = Number.isFinite(this.state.heat) ? this.state.heat : 0;
+      const targetHeat = Math.max(0, Math.min(10, beforeHeat + effects.heatDelta));
+      this.state.heat = targetHeat;
+      heatDeltaApplied = targetHeat - beforeHeat;
+      if (this.heatSystem && typeof this.heatSystem.updateHeatTier === 'function') {
+        this.heatSystem.updateHeatTier();
+      }
+    }
+
+    if (Math.abs(heatDeltaApplied) >= 0.05) {
+      deltaParts.push(`${heatDeltaApplied > 0 ? '+' : ''}${heatDeltaApplied.toFixed(1)} heat`);
+    }
+
+    if (facilityDowntimeEffect) {
+      const downtimeLabel = facilityDowntimeEffect.label ?? alertEntry.facilityName ?? alertEntry.label;
+      const downtimeDays = Number.isFinite(facilityDowntimeEffect.cooldownDays)
+        ? facilityDowntimeEffect.cooldownDays
+        : Number.isFinite(facilityDowntimeEffect.durationDays)
+          ? facilityDowntimeEffect.durationDays
+          : null;
+      if (downtimeDays !== null) {
+        deltaParts.push(`${downtimeLabel} offline ${downtimeDays} day${downtimeDays === 1 ? '' : 's'}`);
+      } else if (facilityDowntimeEffect.summary) {
+        deltaParts.push(facilityDowntimeEffect.summary);
+      }
+    }
+
+    const summaryParts = [`${alertEntry.label ?? 'Safehouse Alert'}: ${choice.label}`];
+    if (choice.narrative) {
+      summaryParts.push(choice.narrative);
+    }
+    if (deltaParts.length) {
+      summaryParts.push(deltaParts.join(', '));
+    }
+
+    const summary = summaryParts.join(' ').trim() || `${choice.label} resolved.`;
+    const downtimeForAlert = facilityDowntimeEffect
+      ? { ...facilityDowntimeEffect, startedAt: resolvedAt }
+      : null;
+    this.markSafehouseAlertResolved(alertId, {
+      summary,
+      resolvedAt,
+      downtime: downtimeForAlert,
+    });
+
+    const updatedAlerts = Array.isArray(this.state.safehouseIncursions)
+      ? this.state.safehouseIncursions
+      : alerts;
+    const resolvedAlert = updatedAlerts[index] ? { ...updatedAlerts[index] } : { ...alertEntry };
+    resolvedAlert.lastResolutionChoiceId = choice.id;
+    resolvedAlert.lastResolutionChoiceLabel = choice.label ?? null;
+    resolvedAlert.updatedAt = resolvedAt;
+    resolvedAlert.resolvedAt = resolvedAlert.resolvedAt ?? resolvedAt;
+    if (!resolvedAlert.choices && choices.length) {
+      resolvedAlert.choices = choices;
+    }
+
+    updatedAlerts[index] = resolvedAlert;
+    this.state.safehouseIncursions = updatedAlerts;
+    this.state.needsHudRefresh = true;
+
+    const effectSummary = deltaParts.length ? deltaParts.join(', ') : null;
+    const historyEffects = { ...effects };
+    if (facilityDowntimeEffect) {
+      historyEffects.facilityDowntime = { ...facilityDowntimeEffect };
+    }
+
+    const historyEntry = {
+      eventId: alertEntry.id,
+      eventLabel: alertEntry.label ?? 'Safehouse Alert',
+      choiceId: choice.id,
+      choiceLabel: choice.label,
+      choiceNarrative: choice.narrative ?? null,
+      triggeredAt: alertEntry.triggeredAt ?? resolvedAt,
+      resolvedAt,
+      progressAt: mission ? mission.progress ?? null : null,
+      summary,
+      effectSummary,
+      eventBadges: Array.isArray(alertEntry.badges)
+        ? alertEntry.badges.map((badge) => ({ ...badge }))
+        : [],
+      effects: historyEffects,
+      deltas: {
+        payout: 0,
+        heat: heatDeltaApplied,
+        successChance: 0,
+        duration: 0,
+        crewLoyalty: 0,
+      },
+    };
+
+    if (mission) {
+      mission.eventHistory = Array.isArray(mission.eventHistory) ? mission.eventHistory : [];
+      mission.eventHistory.push(historyEntry);
+      if (mission.eventHistory.length > 10) {
+        mission.eventHistory = mission.eventHistory.slice(-10);
+      }
+    }
+
+    const detailLines = this._buildSafehouseAlertDetailLines(resolvedAlert, choice, {
+      effectSummary,
+      facilityDowntime: facilityDowntimeEffect,
+    });
+
+    this._recordSafehouseAlertGarageActivity(resolvedAlert, choice, {
+      summary,
+      detailLines,
+      resolvedAt,
+    });
+
+    return {
+      summary,
+      details: detailLines,
+    };
   }
 
   initializeMissionEvents(mission, context = {}) {
