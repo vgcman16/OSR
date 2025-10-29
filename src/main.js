@@ -1010,22 +1010,43 @@ const RECON_APPROACH_OPTIONS = [
     value: 'stealth',
     label: 'Stealth infiltration — safer intel haul',
     summary: 'Stealth',
-    description: 'Lower detection risk and richer intel in exchange for longer sweeps.',
-    actionSummary: 'Stealth infiltration extends the sweep but improves intel quality and cuts setbacks.',
+    description: 'Lower detection risk and richer intel in exchange for a longer, low-profile sweep.',
+    actionSummary: 'Stealth infiltration slows the op for better intel while trimming setbacks and fatigue.',
+  },
+  {
+    value: 'surveillance',
+    label: 'Surveillance lock-in — patient intel surge',
+    summary: 'Surveillance',
+    description: 'Perch lookouts for an extended watch that wrings out intel and lightens crackdown pressure.',
+    actionSummary: 'Surveillance lock-in runs the team longer for a big intel bump and mild crackdown relief.',
   },
   {
     value: 'balanced',
     label: 'Balanced sweep — standard tempo',
     summary: 'Balanced',
-    description: 'Default pacing with an even balance of intel gains, risk, and relief.',
-    actionSummary: 'Balanced sweep keeps the default recon tempo and risk profile.',
+    description: 'Default pacing with an even mix of intel gains, risk, and recovery.',
+    actionSummary: 'Balanced sweep sticks with the default recon tempo and risk profile.',
+  },
+  {
+    value: 'liaison',
+    label: 'Shadow diplomacy — influence play',
+    summary: 'Liaison',
+    description: 'Lean on contacts to amplify influence and decent intel while risking more attention.',
+    actionSummary: 'Shadow diplomacy invests time to spike influence, accepting extra fatigue and crackdown heat.',
   },
   {
     value: 'aggressive',
     label: 'Aggressive breach — fast strike',
     summary: 'Aggressive',
-    description: 'Finish quickly while risking higher detection and lighter intel packages.',
-    actionSummary: 'Aggressive breach resolves faster but raises detection risk and trims intel.',
+    description: 'Finish quickly while risking higher detection, setbacks, and lighter intel packages.',
+    actionSummary: 'Aggressive breach resolves faster but spikes detection risk, setbacks, and crew fatigue.',
+  },
+  {
+    value: 'decoy',
+    label: 'Decoy saturation — crackdown bleed-off',
+    summary: 'Decoy',
+    description: 'Flood the zone with misdirection to shed crackdown pressure while sacrificing haul quality.',
+    actionSummary: 'Decoy saturation runs short distractions that ease crackdown pressure but blunt rewards.',
   },
 ];
 
@@ -3528,6 +3549,15 @@ const createReconApproachSummaryEntries = (snapshot) => {
   };
 
   pushEntry({
+    key: 'duration',
+    label: 'Duration',
+    value: snapshot.durationDeltaPercent,
+    formatter: formatSignedPercent,
+    penaltyCheck: (value) => Number.isFinite(value) && value > 0,
+    bonusCheck: (value) => Number.isFinite(value) && value < 0,
+  });
+
+  pushEntry({
     key: 'intel',
     label: 'Intel',
     value: snapshot.intelPercent,
@@ -3549,6 +3579,24 @@ const createReconApproachSummaryEntries = (snapshot) => {
     key: 'crackdown',
     label: 'Crackdown',
     value: snapshot.crackdownDeltaPercent,
+    formatter: formatSignedPercent,
+    penaltyCheck: (value) => Number.isFinite(value) && value > 0,
+    bonusCheck: (value) => Number.isFinite(value) && value < 0,
+  });
+
+  pushEntry({
+    key: 'setback',
+    label: 'Setback odds',
+    value: snapshot.setbackDeltaPercent,
+    formatter: formatSignedPercent,
+    penaltyCheck: (value) => Number.isFinite(value) && value > 0,
+    bonusCheck: (value) => Number.isFinite(value) && value < 0,
+  });
+
+  pushEntry({
+    key: 'severity',
+    label: 'Setback severity',
+    value: snapshot.severityDeltaPercent,
     formatter: formatSignedPercent,
     penaltyCheck: (value) => Number.isFinite(value) && value > 0,
     bonusCheck: (value) => Number.isFinite(value) && value < 0,
