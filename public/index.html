@@ -126,6 +126,29 @@
           <p class="mission-details__hint">
             Monitor cash flow, storage pressure, and crew stamina to prevent mission failures.
           </p>
+          <div
+            class="mission-operations__history"
+            role="region"
+            aria-live="polite"
+            aria-labelledby="mission-ops-history-title"
+            aria-describedby="mission-ops-history-status"
+          >
+            <h4 id="mission-ops-history-title" class="mission-operations__history-title">
+              Recent Cashflow Pulses
+            </h4>
+            <p id="mission-ops-history-status" class="mission-operations__history-status visually-hidden">
+              No economy pulses recorded yet — complete a day cycle to populate telemetry.
+            </p>
+            <p id="mission-ops-history-empty" class="mission-operations__history-empty">
+              No economy pulses recorded yet — complete a day cycle to populate telemetry.
+            </p>
+            <ul
+              id="mission-ops-history"
+              class="mission-operations__history-list"
+              aria-label="Recent expense and passive income history"
+              aria-describedby="mission-ops-history-status"
+            ></ul>
+          </div>
           <dl class="mission-details__grid mission-operations__grid">
             <div class="mission-details__row mission-operations__row">
               <dt>Projected Daily Expenses</dt>

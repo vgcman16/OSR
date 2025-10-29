@@ -8,6 +8,8 @@ import {
   sanitizeCrewGearVendorState,
 } from '../systems/crewGearVendors.js';
 
+const MAX_ECONOMY_HISTORY_ENTRIES = 30;
+
 const cloneReconAssignment = (assignment) => {
   if (!assignment || typeof assignment !== 'object') {
     return null;
@@ -166,6 +168,49 @@ const sanitizeCrackdownHistoryLog = (history) => {
   return entries;
 };
 
+const sanitizeEconomyHistoryEntry = (entry) => {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const normalizeAmount = (value) => (Number.isFinite(value) ? Math.round(value) : 0);
+  const base = normalizeAmount(entry.base);
+  const payroll = normalizeAmount(entry.payroll);
+  const safehouseOverhead = normalizeAmount(entry.safehouseOverhead);
+  const safehouseIncome = normalizeAmount(entry.safehouseIncome);
+  const day = Number.isFinite(entry.day) ? Math.max(1, Math.round(entry.day)) : null;
+  const timestamp = Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now();
+  const total = Number.isFinite(entry.total)
+    ? Math.round(entry.total)
+    : base + payroll + safehouseOverhead - safehouseIncome;
+
+  return {
+    day,
+    base,
+    payroll,
+    safehouseOverhead,
+    safehouseIncome,
+    total,
+    timestamp,
+  };
+};
+
+const sanitizeEconomyHistoryLog = (history) => {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  const entries = history
+    .map((entry) => sanitizeEconomyHistoryEntry(entry))
+    .filter(Boolean);
+
+  if (entries.length > MAX_ECONOMY_HISTORY_ENTRIES) {
+    return entries.slice(-MAX_ECONOMY_HISTORY_ENTRIES);
+  }
+
+  return entries;
+};
+
 class GameState {
   constructor({
     day = 1,
@@ -182,6 +227,7 @@ class GameState {
     lastVehicleReport = null,
     recruitPool = [],
     lastExpenseReport = null,
+    economyHistory = [],
     pendingDebts = [],
     followUpSequence = 0,
     safehouseIncursions = [],
@@ -215,6 +261,7 @@ class GameState {
     this.lastVehicleReport = lastVehicleReport;
     this.recruitPool = Array.isArray(recruitPool) ? recruitPool : [];
     this.lastExpenseReport = lastExpenseReport;
+    this.economyHistory = sanitizeEconomyHistoryLog(economyHistory);
     this.pendingDebts = Array.isArray(pendingDebts) ? pendingDebts : [];
     this.followUpSequence = Number.isFinite(followUpSequence) ? followUpSequence : 0;
     this.safehouseIncursions = Array.isArray(safehouseIncursions)
@@ -286,6 +333,7 @@ class GameState {
       lastVehicleReport: serializeObject(this.lastVehicleReport),
       recruitPool: serializeArray(this.recruitPool),
       lastExpenseReport: serializeObject(this.lastExpenseReport),
+      economyHistory: serializeArray(this.economyHistory),
       pendingDebts: serializeArray(this.pendingDebts),
       followUpSequence: this.followUpSequence,
       safehouseIncursions: serializeArray(this.safehouseIncursions),
@@ -346,6 +394,7 @@ class GameState {
         : 0,
       garageActivityLog: sanitizeGarageActivityLog(data.garageActivityLog),
       crackdownHistory: sanitizeCrackdownHistoryLog(data.crackdownHistory),
+      economyHistory: sanitizeEconomyHistoryLog(data.economyHistory),
       crewGearVendors: sanitizeCrewGearVendorState(data.crewGearVendors, { day: data.day }),
     });
   }
