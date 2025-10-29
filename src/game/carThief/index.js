@@ -10,6 +10,18 @@ const SAVE_STORAGE_KEY = 'osr.car-thief.save.v1';
 const SAVE_INTERVAL_SECONDS = 12;
 const memoryStorage = new Map();
 
+const FEATURE_FLAGS = {
+  animatedMissionEvents: (() => {
+    if (typeof globalThis !== 'undefined' && globalThis?.OSR_FEATURES) {
+      if (Object.prototype.hasOwnProperty.call(globalThis.OSR_FEATURES, 'animatedMissionEvents')) {
+        return Boolean(globalThis.OSR_FEATURES.animatedMissionEvents);
+      }
+    }
+
+    return true;
+  })(),
+};
+
 const createMemoryStorage = () => ({
   getItem: (key) => (memoryStorage.has(key) ? memoryStorage.get(key) : null),
   setItem: (key, value) => {
@@ -277,6 +289,11 @@ const createCarThiefGame = ({ canvas, context }) => {
 
   let saveAccumulator = 0;
 
+  const missionEventDisplayState = {
+    entries: [],
+    lastProgressByMission: new Map(),
+  };
+
   const captureStateSnapshot = () => {
     if (state && typeof state.toJSON === 'function') {
       return state.toJSON();
@@ -452,6 +469,590 @@ const createCarThiefGame = ({ canvas, context }) => {
         context.font = labelFont;
         context.fillText(label, x, y + innerRadius + 16);
       }
+
+      context.restore();
+      return bounds;
+    };
+
+    const easeOutCubic = (value) => {
+      if (!Number.isFinite(value)) {
+        return 0;
+      }
+
+      if (value <= 0) {
+        return 0;
+      }
+
+      if (value >= 1) {
+        return 1;
+      }
+
+      const clamped = value;
+      return 1 - (1 - clamped) * (1 - clamped) * (1 - clamped);
+    };
+
+    const ellipsize = (text, maxLength = 60) => {
+      if (!text || typeof text !== 'string') {
+        return '';
+      }
+
+      if (!Number.isFinite(maxLength) || maxLength <= 0) {
+        return text;
+      }
+
+      const trimmed = text.trim();
+      if (trimmed.length <= maxLength) {
+        return trimmed;
+      }
+
+      return `${trimmed.slice(0, Math.max(0, maxLength - 1))}…`;
+    };
+
+    const computeLaneIndex = (key) => {
+      if (!key) {
+        return 0;
+      }
+
+      let hash = 0;
+      for (let index = 0; index < key.length; index += 1) {
+        hash = (hash + (key.charCodeAt(index) * (index + 1))) % 2147483647;
+      }
+
+      return Math.abs(hash) % 3;
+    };
+
+    const renderCircularEventNode = ({
+      x,
+      y,
+      radius = 16,
+      backgroundColor = 'rgba(12, 22, 32, 0.9)',
+      trackColor = 'rgba(120, 190, 255, 0.25)',
+      fillColor = '#ffe27a',
+      icon = '◆',
+      iconColor = '#0c111b',
+      progress = 1,
+      glow = 0,
+    }) => {
+      context.save();
+      context.lineWidth = Math.max(2, Math.round(radius * 0.28));
+      context.lineCap = 'round';
+
+      if (backgroundColor) {
+        context.beginPath();
+        context.fillStyle = backgroundColor;
+        context.arc(x, y, radius - context.lineWidth * 0.5, 0, Math.PI * 2, false);
+        context.fill();
+      }
+
+      if (trackColor) {
+        context.beginPath();
+        context.strokeStyle = trackColor;
+        context.arc(x, y, radius, 0, Math.PI * 2, false);
+        context.stroke();
+      }
+
+      const normalized = clampNormalized(progress);
+      if (normalized > 0) {
+        context.beginPath();
+        context.strokeStyle = fillColor;
+        context.arc(
+          x,
+          y,
+          radius,
+          -Math.PI / 2,
+          -Math.PI / 2 + Math.PI * 2 * normalized,
+          false,
+        );
+        context.stroke();
+      }
+
+      if (glow > 0) {
+        const glowRadius = radius + Math.min(radius * 0.75, glow * radius);
+        const gradient = context.createRadialGradient(x, y, radius * 0.35, x, y, glowRadius);
+        gradient.addColorStop(0, `${fillColor}40`);
+        gradient.addColorStop(1, 'rgba(12, 18, 28, 0)');
+        context.beginPath();
+        context.fillStyle = gradient;
+        context.arc(x, y, glowRadius, 0, Math.PI * 2, false);
+        context.fill();
+      }
+
+      if (icon) {
+        context.font = `${Math.round(radius * 1.35)}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillStyle = iconColor;
+        context.fillText(icon, x, y + 1);
+      }
+
+      context.restore();
+    };
+
+    const renderMotionConnector = ({
+      startX,
+      endX,
+      y,
+      color = '#78beff',
+      alpha = 1,
+      dashOffset = 0,
+      thickness = 3,
+    }) => {
+      if (!Number.isFinite(startX) || !Number.isFinite(endX) || startX === endX) {
+        return;
+      }
+
+      context.save();
+      context.globalAlpha = Math.max(0, Math.min(1, alpha));
+      context.strokeStyle = color;
+      context.lineWidth = thickness;
+      context.lineCap = 'round';
+      context.setLineDash([10, 18]);
+      context.lineDashOffset = dashOffset;
+      context.beginPath();
+      context.moveTo(startX, y);
+      context.lineTo(endX, y);
+      context.stroke();
+      context.restore();
+    };
+
+    const buildEventDescriptor = (mission, rawEvent, fallbackKey, now) => {
+      if (!rawEvent) {
+        return null;
+      }
+
+      const missionId = mission?.id ?? rawEvent.missionId ?? null;
+      const missionName = mission?.name ?? rawEvent.missionName ?? 'Mission';
+      const resolvedAtCandidate = [
+        rawEvent.resolvedAt,
+        rawEvent.completedAt,
+        rawEvent.timestamp,
+        rawEvent.failedAt,
+      ].find((value) => Number.isFinite(value));
+      const resolvedAt = Number.isFinite(resolvedAtCandidate) ? resolvedAtCandidate : now;
+      const triggeredAtCandidate = [rawEvent.triggeredAt, rawEvent.startedAt, rawEvent.queuedAt]
+        .find((value) => Number.isFinite(value));
+      const triggeredAt = Number.isFinite(triggeredAtCandidate) ? triggeredAtCandidate : resolvedAt;
+      const progressCandidate = [
+        rawEvent.progressAt,
+        rawEvent.progress,
+        rawEvent.missionProgress,
+        mission?.progress,
+      ].find((value) => Number.isFinite(value));
+      const progressAt = clampNormalized(progressCandidate ?? 0);
+
+      const badgeIcon = Array.isArray(rawEvent.eventBadges) && rawEvent.eventBadges.length
+        ? rawEvent.eventBadges[0]?.icon
+        : null;
+      const badgeColor = Array.isArray(rawEvent.eventBadges) && rawEvent.eventBadges.length
+        ? rawEvent.eventBadges[0]?.color
+        : null;
+
+      const icon = rawEvent.icon ?? badgeIcon ?? '🚘';
+      const accentColor = rawEvent.accentColor ?? badgeColor ?? '#78beff';
+
+      const labelCandidates = [
+        rawEvent.summary,
+        rawEvent.choiceLabel,
+        rawEvent.eventLabel,
+        rawEvent.label,
+        rawEvent.name,
+      ];
+      const label = labelCandidates.find((value) => typeof value === 'string' && value.trim())
+        ?.trim() ?? 'Mission event';
+
+      const detailCandidates = [rawEvent.effectSummary, rawEvent.choiceNarrative];
+      const detail = detailCandidates.find((value) => typeof value === 'string' && value.trim())
+        ?.trim() ?? null;
+
+      const fromDistrict = rawEvent.fromDistrict ?? rawEvent.originDistrict ?? mission?.fromDistrict ?? null;
+      const toDistrict = rawEvent.toDistrict ?? rawEvent.destinationDistrict ?? mission?.districtName ?? null;
+
+      const keySeed = [
+        missionId ?? 'mission',
+        rawEvent.eventId ?? rawEvent.id ?? fallbackKey ?? label,
+        resolvedAt,
+      ];
+      const key = keySeed.filter((value) => value !== null && value !== undefined).join(':');
+
+      return {
+        key,
+        missionId,
+        missionName,
+        label,
+        detail,
+        icon,
+        accentColor,
+        resolvedAt,
+        triggeredAt,
+        progressAt,
+        fromDistrict,
+        toDistrict,
+      };
+    };
+
+    const synchronizeMissionEventDisplay = (now) => {
+      if (!FEATURE_FLAGS.animatedMissionEvents) {
+        missionEventDisplayState.entries = [];
+        missionEventDisplayState.lastProgressByMission.clear();
+        return [];
+      }
+
+      const MAX_EVENT_ENTRIES = 6;
+      const descriptors = [];
+      const activeMission = state.activeMission ?? null;
+
+      if (activeMission) {
+        const eventHistory = Array.isArray(activeMission.eventHistory)
+          ? activeMission.eventHistory
+          : [];
+        if (eventHistory.length) {
+          eventHistory.slice(-MAX_EVENT_ENTRIES).forEach((entry, index) => {
+            const descriptor = buildEventDescriptor(activeMission, entry, `history-${index}`, now);
+            if (descriptor) {
+              descriptors.push(descriptor);
+            }
+          });
+        } else if (Array.isArray(activeMission.events)) {
+          activeMission.events.slice(0, MAX_EVENT_ENTRIES).forEach((entry, index) => {
+            const descriptor = buildEventDescriptor(activeMission, entry, `event-${index}`, now);
+            if (descriptor) {
+              descriptors.push(descriptor);
+            }
+          });
+        }
+      }
+
+      if (descriptors.length < MAX_EVENT_ENTRIES) {
+        const missionLog = Array.isArray(state.missionLog) ? state.missionLog : [];
+        missionLog.slice(0, 3).forEach((logEntry) => {
+          const missionStub = {
+            id: logEntry?.missionId ?? null,
+            name: logEntry?.missionName ?? logEntry?.summary ?? 'Mission',
+            progress: 1,
+            districtName: logEntry?.districtName ?? null,
+          };
+          const events = Array.isArray(logEntry?.events) ? logEntry.events : [];
+          events.slice(0, MAX_EVENT_ENTRIES - descriptors.length).forEach((entry, index) => {
+            const descriptor = buildEventDescriptor(
+              missionStub,
+              entry,
+              `${logEntry?.id ?? 'log'}-${index}`,
+              now,
+            );
+            if (descriptor) {
+              descriptors.push(descriptor);
+            }
+          });
+        });
+      }
+
+      const sortedDescriptors = descriptors
+        .filter(Boolean)
+        .sort((a, b) => (b.resolvedAt ?? 0) - (a.resolvedAt ?? 0))
+        .slice(0, MAX_EVENT_ENTRIES);
+
+      const keepKeys = new Set(sortedDescriptors.map((descriptor) => descriptor.key));
+
+      sortedDescriptors.forEach((descriptor) => {
+        const {
+          key,
+          missionId,
+          missionName,
+          label,
+          detail,
+          icon,
+          accentColor,
+          resolvedAt,
+          triggeredAt,
+          progressAt,
+          fromDistrict,
+          toDistrict,
+        } = descriptor;
+
+        let entry = missionEventDisplayState.entries.find((candidate) => candidate.key === key);
+        const motionDuration = 820 + Math.random() * 320;
+        if (!entry) {
+          const previousProgress = missionId
+            ? missionEventDisplayState.lastProgressByMission.get(missionId) ?? 0
+            : 0;
+          entry = {
+            key,
+            missionId,
+            missionName,
+            label,
+            detail,
+            icon,
+            accentColor,
+            resolvedAt,
+            triggeredAt,
+            targetProgress: progressAt,
+            displayProgress: previousProgress,
+            startProgress: previousProgress,
+            motionStart: now,
+            motionDuration,
+            createdAt: now,
+            updatedAt: now,
+            expireAt: now + 16000,
+            fromDistrict,
+            toDistrict,
+            laneIndex: computeLaneIndex(key),
+          };
+          missionEventDisplayState.entries.push(entry);
+        } else {
+          entry.missionName = missionName;
+          entry.label = label;
+          entry.detail = detail;
+          entry.icon = icon;
+          entry.accentColor = accentColor;
+          entry.resolvedAt = resolvedAt;
+          entry.triggeredAt = triggeredAt;
+          entry.fromDistrict = fromDistrict;
+          entry.toDistrict = toDistrict;
+          entry.updatedAt = now;
+          entry.expireAt = now + 16000;
+
+          if (Number.isFinite(progressAt) && Math.abs(progressAt - (entry.targetProgress ?? progressAt)) > 0.001) {
+            entry.startProgress = Number.isFinite(entry.displayProgress)
+              ? entry.displayProgress
+              : entry.targetProgress ?? progressAt;
+            entry.targetProgress = progressAt;
+            entry.motionStart = now;
+            entry.motionDuration = motionDuration;
+          }
+        }
+
+        if (missionId) {
+          missionEventDisplayState.lastProgressByMission.set(
+            missionId,
+            Number.isFinite(progressAt) ? progressAt : entry.targetProgress ?? 0,
+          );
+        }
+      });
+
+      missionEventDisplayState.entries = missionEventDisplayState.entries
+        .filter((entry) => keepKeys.has(entry.key) || entry.expireAt > now)
+        .slice(-MAX_EVENT_ENTRIES);
+
+      missionEventDisplayState.lastProgressByMission.forEach((value, missionId) => {
+        const stillPresent = missionEventDisplayState.entries.some((entry) => entry.missionId === missionId);
+        if (!stillPresent) {
+          missionEventDisplayState.lastProgressByMission.delete(missionId);
+        }
+      });
+
+      return sortedDescriptors;
+    };
+
+    const renderMissionEventTimeline = ({
+      x,
+      y,
+      width = 320,
+      maxWidth = width,
+      maxHeight = 176,
+    }) => {
+      if (!FEATURE_FLAGS.animatedMissionEvents) {
+        return null;
+      }
+
+      const now = Date.now();
+      const descriptors = synchronizeMissionEventDisplay(now);
+      const entries = missionEventDisplayState.entries;
+      if (!entries.length) {
+        return null;
+      }
+
+      const availableWidth = Number.isFinite(maxWidth) && maxWidth > 0
+        ? maxWidth
+        : Number.isFinite(width) && width > 0
+          ? width
+          : 320;
+      if (!Number.isFinite(availableWidth) || availableWidth < 180) {
+        return null;
+      }
+
+      let resolvedWidth = Number.isFinite(width) && width > 0 ? width : availableWidth;
+      resolvedWidth = Math.min(resolvedWidth, availableWidth);
+      resolvedWidth = Math.max(180, resolvedWidth);
+
+      const distinctLanes = new Set(entries.map((entry) => entry.laneIndex ?? 0));
+      const lanesUsed = Math.max(1, Math.min(3, distinctLanes.size || 1));
+      const baseHeight = 118;
+      let resolvedHeight = baseHeight + (lanesUsed - 1) * 32;
+      resolvedHeight = Math.max(baseHeight, resolvedHeight);
+      if (Number.isFinite(maxHeight) && maxHeight > 0) {
+        resolvedHeight = Math.min(resolvedHeight, Math.max(baseHeight, maxHeight));
+      }
+      const bounds = {
+        x,
+        y,
+        width: resolvedWidth,
+        height: resolvedHeight,
+      };
+
+      context.save();
+      context.fillStyle = 'rgba(10, 16, 26, 0.92)';
+      context.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+      context.strokeStyle = 'rgba(120, 190, 255, 0.45)';
+      context.strokeRect(bounds.x + 0.5, bounds.y + 0.5, bounds.width - 1, bounds.height - 1);
+
+      const headerY = bounds.y + 20;
+      context.fillStyle = '#9ac7ff';
+      context.font = '16px "Segoe UI", sans-serif';
+      context.textAlign = 'left';
+      context.textBaseline = 'middle';
+      context.fillText('Recent mission events', bounds.x + 16, headerY);
+
+      const newestDescriptor = descriptors.length ? descriptors[0] : null;
+      const newestTimestamp = newestDescriptor?.resolvedAt ?? newestDescriptor?.triggeredAt ?? null;
+      if (Number.isFinite(newestTimestamp)) {
+        try {
+          const timestampLabel = new Date(newestTimestamp)
+            .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          if (timestampLabel) {
+            context.textAlign = 'right';
+            context.font = '12px "Segoe UI", sans-serif';
+            context.fillStyle = '#6f8fb2';
+            context.fillText(`Updated ${timestampLabel}`, bounds.x + bounds.width - 16, headerY);
+            context.textAlign = 'left';
+            context.fillStyle = '#9ac7ff';
+            context.font = '16px "Segoe UI", sans-serif';
+          }
+        } catch (error) {
+          // Ignore timestamp rendering errors.
+        }
+      }
+
+      const trackLeft = bounds.x + 28;
+      const trackRight = bounds.x + bounds.width - 28;
+      const trackWidth = Math.max(0, trackRight - trackLeft);
+      const trackY = Math.min(bounds.y + bounds.height - 48, bounds.y + 64);
+      context.beginPath();
+      context.strokeStyle = 'rgba(120, 190, 255, 0.35)';
+      context.lineWidth = 3;
+      context.moveTo(trackLeft, trackY);
+      context.lineTo(trackRight, trackY);
+      context.stroke();
+
+      const sortedEntries = [...entries].sort((a, b) => {
+        const left = Number.isFinite(a.displayProgress) ? a.displayProgress : a.targetProgress ?? 0;
+        const right = Number.isFinite(b.displayProgress) ? b.displayProgress : b.targetProgress ?? 0;
+        return left - right;
+      });
+
+      sortedEntries.forEach((entry) => {
+        const elapsed = now - entry.motionStart;
+        const duration = entry.motionDuration > 0 ? entry.motionDuration : 800;
+        const motionT = easeOutCubic(Math.max(0, Math.min(1, elapsed / duration)));
+        const start = Number.isFinite(entry.startProgress) ? entry.startProgress : entry.targetProgress ?? 0;
+        const target = Number.isFinite(entry.targetProgress) ? entry.targetProgress : start;
+        entry.displayProgress = start + (target - start) * motionT;
+        entry.displayProgress = clampNormalized(entry.displayProgress);
+        const fadeIn = Math.min(1, (now - entry.createdAt) / 240);
+        const fadeOut = Math.min(1, Math.max(0, (entry.expireAt - now) / 360));
+        entry.currentAlpha = Math.max(0, Math.min(1, fadeIn * fadeOut));
+      });
+
+      for (let index = 1; index < sortedEntries.length; index += 1) {
+        const previous = sortedEntries[index - 1];
+        const current = sortedEntries[index];
+        const startX = trackLeft + trackWidth * (previous.displayProgress ?? 0);
+        const endX = trackLeft + trackWidth * (current.displayProgress ?? 0);
+        const connectorAlpha = Math.min(previous.currentAlpha ?? 1, current.currentAlpha ?? 1) * 0.8;
+        const dashOffset = -((now / 12) % 120);
+        renderMotionConnector({
+          startX,
+          endX,
+          y: trackY,
+          color: current.accentColor ?? '#78beff',
+          alpha: connectorAlpha,
+          dashOffset,
+        });
+
+        const travelProgress = easeOutCubic(Math.max(0, Math.min(1, (now - current.motionStart) / (current.motionDuration || 800))));
+        const travelX = startX + (endX - startX) * travelProgress;
+        context.save();
+        context.globalAlpha = connectorAlpha;
+        context.fillStyle = current.accentColor ?? '#ffd15c';
+        context.beginPath();
+        context.arc(travelX, trackY, 4, 0, Math.PI * 2, false);
+        context.fill();
+        context.restore();
+      }
+
+      sortedEntries.forEach((entry) => {
+        if (!entry) {
+          return;
+        }
+
+        const iconX = trackLeft + trackWidth * (entry.displayProgress ?? 0);
+        const laneOffsets = [0, -32, 32];
+        const laneIndex = Math.max(0, Math.min(laneOffsets.length - 1, entry.laneIndex ?? 0));
+        const laneOffset = laneOffsets[laneIndex];
+        const iconY = trackY + laneOffset;
+        const timeSpan = Math.max(1200, entry.expireAt - entry.createdAt);
+        const age = Math.max(0, now - entry.createdAt);
+        const recency = 1 - Math.min(1, age / timeSpan);
+        const pulse = recency;
+
+        context.save();
+        context.globalAlpha = entry.currentAlpha ?? 1;
+        renderCircularEventNode({
+          x: iconX,
+          y: iconY,
+          radius: 16,
+          fillColor: entry.accentColor ?? '#ffe27a',
+          icon: entry.icon ?? '🚘',
+          progress: Math.max(0.1, recency),
+          glow: pulse * 0.85,
+        });
+
+        const labelY = iconY + (laneOffset >= 0 ? 30 : -28);
+        const detailY = labelY + (laneOffset >= 0 ? 18 : -18);
+        const labelAlignment = 'center';
+        context.textAlign = labelAlignment;
+        context.textBaseline = laneOffset >= 0 ? 'top' : 'bottom';
+        context.font = '13px "Segoe UI", sans-serif';
+        context.fillStyle = '#d1eaff';
+        context.fillText(ellipsize(entry.label, 32), iconX, labelY);
+
+        const timestamp = Number.isFinite(entry.resolvedAt)
+          ? entry.resolvedAt
+          : Number.isFinite(entry.triggeredAt)
+            ? entry.triggeredAt
+            : null;
+        const timestampLabel = (() => {
+          if (!Number.isFinite(timestamp)) {
+            return null;
+          }
+          try {
+            return new Date(timestamp)
+              .toLocaleTimeString([], { minute: '2-digit', hour: '2-digit' });
+          } catch (error) {
+            return null;
+          }
+        })();
+
+        let districtLabel = null;
+        if (entry.fromDistrict && entry.toDistrict && entry.fromDistrict !== entry.toDistrict) {
+          districtLabel = `${entry.fromDistrict} → ${entry.toDistrict}`;
+        } else if (entry.toDistrict || entry.fromDistrict) {
+          districtLabel = entry.toDistrict ?? entry.fromDistrict;
+        }
+
+        const detailParts = [
+          entry.missionName,
+          districtLabel,
+          entry.detail,
+          timestampLabel,
+        ].filter((value) => typeof value === 'string' && value.trim());
+
+        if (detailParts.length) {
+          context.font = '11px "Segoe UI", sans-serif';
+          context.fillStyle = '#9ac7ff';
+          context.fillText(ellipsize(detailParts.join(' • '), 42), iconX, detailY);
+        }
+        context.restore();
+      });
 
       context.restore();
       return bounds;
@@ -863,7 +1464,18 @@ const createCarThiefGame = ({ canvas, context }) => {
     if (!Number.isFinite(missionPanelWidth) || missionPanelWidth <= 0) {
       missionPanelWidth = desiredMissionWidth;
     }
-    let missionInfoY = 48;
+
+    const missionTimelineBounds = renderMissionEventTimeline({
+      x: missionInfoX,
+      y: 32,
+      width: missionPanelWidth,
+      maxWidth: missionInfoRightLimit - missionInfoX,
+      maxHeight: miniMapBounds ? Math.max(120, miniMapBounds.height - 24) : 180,
+    });
+
+    let missionInfoY = missionTimelineBounds
+      ? missionTimelineBounds.y + missionTimelineBounds.height + 24
+      : 48;
     context.fillText('Mission Status:', missionInfoX, missionInfoY);
 
     missionInfoY += 30;
