@@ -26,6 +26,32 @@ const CRACKDOWN_OPERATION_DEFINITIONS = {
         heatPenaltyOnFailure: 0.55,
       },
     },
+    {
+      id: 'calm-hijack-patrol-roster',
+      name: 'Hijack Patrol Roster',
+      difficulty: 2,
+      payout: 13500,
+      heat: 1,
+      duration: 38,
+      description: 'Forge rota orders that sideline elite crackdown units for a full cycle.',
+      crackdownEffects: {
+        heatReduction: 1.3,
+        heatPenaltyOnFailure: 0.65,
+      },
+    },
+    {
+      id: 'calm-burn-sting-budget',
+      name: 'Burn the Sting Budget',
+      difficulty: 2,
+      payout: 14500,
+      heat: 1,
+      duration: 40,
+      description: 'Bleed enforcement coffers with bogus requisitions before raids launch.',
+      crackdownEffects: {
+        heatReduction: 1.5,
+        heatPenaltyOnFailure: 0.75,
+      },
+    },
   ],
   alert: [
     {
@@ -54,6 +80,32 @@ const CRACKDOWN_OPERATION_DEFINITIONS = {
         heatPenaltyOnFailure: 0.8,
       },
     },
+    {
+      id: 'alert-sow-counterintel',
+      name: 'Sow Counter-Intel Doubt',
+      difficulty: 3,
+      payout: 17000,
+      heat: 1,
+      duration: 46,
+      description: 'Flood crackdown analysts with conflicting leads until the dragnet fractures.',
+      crackdownEffects: {
+        heatReduction: 1.8,
+        heatPenaltyOnFailure: 0.9,
+      },
+    },
+    {
+      id: 'alert-exfiltrate-informant',
+      name: 'Extract the Crackdown Informant',
+      difficulty: 4,
+      payout: 20000,
+      heat: 1,
+      duration: 50,
+      description: 'Lift a key snitch from custody to steal their case files and crash the alert.',
+      crackdownEffects: {
+        heatReduction: 2.1,
+        heatPenaltyOnFailure: 1.05,
+      },
+    },
   ],
   lockdown: [
     {
@@ -80,6 +132,32 @@ const CRACKDOWN_OPERATION_DEFINITIONS = {
       crackdownEffects: {
         heatReduction: 2.8,
         heatPenaltyOnFailure: 1.2,
+      },
+    },
+    {
+      id: 'lockdown-break-command-loop',
+      name: 'Break the Command Loop',
+      difficulty: 5,
+      payout: 23000,
+      heat: 1,
+      duration: 60,
+      description: 'Cripple crackdown command uplinks so local captains revert to defensive postures.',
+      crackdownEffects: {
+        heatReduction: 3.1,
+        heatPenaltyOnFailure: 1.4,
+      },
+    },
+    {
+      id: 'lockdown-topple-execution-squads',
+      name: 'Topple the Execution Squads',
+      difficulty: 5,
+      payout: 25500,
+      heat: 1,
+      duration: 66,
+      description: 'Lead a decisive strike that dismantles the elite enforcement squads on standby.',
+      crackdownEffects: {
+        heatReduction: 3.6,
+        heatPenaltyOnFailure: 1.6,
       },
     },
   ],
