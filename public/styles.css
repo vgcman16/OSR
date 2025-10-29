@@ -527,6 +527,91 @@ body {
   line-height: 1.4;
 }
 
+.mission-infiltration {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mission-infiltration__empty {
+  margin: 0;
+  font-size: 0.85rem;
+  font-style: italic;
+  color: rgba(180, 215, 255, 0.6);
+}
+
+.mission-infiltration__timeline {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.mission-infiltration__timeline--condensed {
+  gap: 0.35rem;
+}
+
+.mission-infiltration__item {
+  list-style: none;
+  margin-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  background: rgba(10, 16, 28, 0.45);
+  border: 1px solid rgba(120, 190, 255, 0.15);
+  box-shadow: inset 0 0 12px rgba(120, 190, 255, 0.08);
+}
+
+.mission-infiltration__item--condensed {
+  padding: 0.25rem 0.35rem;
+  gap: 0.2rem;
+  background: rgba(10, 16, 28, 0.35);
+}
+
+.mission-infiltration__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mission-infiltration__step {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(180, 215, 255, 0.7);
+}
+
+.mission-infiltration__choice {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(227, 239, 255, 0.9);
+}
+
+.mission-infiltration__summary {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(227, 239, 255, 0.92);
+  line-height: 1.4;
+}
+
+.mission-infiltration__summary--condensed {
+  font-size: 0.82rem;
+  color: rgba(209, 234, 255, 0.82);
+}
+
+.mission-infiltration__effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .mission-recon__list {
   list-style: none;
   padding-left: 0;
@@ -831,6 +916,34 @@ body {
 .mission-log__list {
   max-height: 9rem;
   overflow-y: auto;
+}
+
+.mission-log__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: 10px;
+  background: rgba(12, 20, 34, 0.55);
+  border: 1px solid rgba(120, 190, 255, 0.18);
+  box-shadow: inset 0 0 14px rgba(120, 190, 255, 0.08);
+}
+
+.mission-log__summary {
+  margin: 0;
+  font-size: 0.88rem;
+  color: rgba(227, 239, 255, 0.9);
+  line-height: 1.45;
+}
+
+.mission-log__entry .mission-infiltration__timeline {
+  gap: 0.35rem;
+}
+
+.mission-log__entry .mission-infiltration__item {
+  background: rgba(10, 16, 28, 0.38);
+  border-color: rgba(120, 190, 255, 0.12);
+  box-shadow: inset 0 0 10px rgba(120, 190, 255, 0.06);
 }
 
 .mission-heat__history {

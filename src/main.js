@@ -149,6 +149,10 @@ const missionControls = {
   eventStatus: null,
   eventStatusDetail: '',
   lastEventPromptId: null,
+  infiltrationTimelineContainer: null,
+  infiltrationTimelineList: null,
+  infiltrationTimelineEmpty: null,
+  lastInfiltrationTimelineSignature: '',
   debtList: null,
   debtStatus: null,
   debtStatusDetail: '',
@@ -10946,6 +10950,7 @@ const renderMissionLog = () => {
 
   logEntries.slice(0, 5).forEach((entry) => {
     const item = document.createElement('li');
+    item.className = 'mission-log__entry';
     const summary = entry?.summary ?? 'Mission resolved.';
     const details = [summary];
     const falloutSummary = entry?.falloutSummary ?? null;
@@ -10996,7 +11001,38 @@ const renderMissionLog = () => {
     });
     const timestamp = Number.isFinite(entry?.timestamp) ? new Date(entry.timestamp) : null;
     const timeLabel = timestamp ? ` @ ${timestamp.toLocaleTimeString([], options)}` : '';
-    item.textContent = `${details.join(' — ')}${timeLabel}`;
+
+    const summaryLine = document.createElement('p');
+    summaryLine.className = 'mission-log__summary';
+    summaryLine.textContent = `${details.join(' — ')}${timeLabel}`;
+    item.appendChild(summaryLine);
+
+    const infiltrationHistoryEntries = (() => {
+      const detailedHistory = Array.isArray(entry?.infiltrationHistory) ? entry.infiltrationHistory : [];
+      if (detailedHistory.length) {
+        return detailedHistory;
+      }
+      const summaryHistory = Array.isArray(entry?.infiltrationSummary) ? entry.infiltrationSummary : [];
+      return summaryHistory
+        .map((line) =>
+          typeof line === 'string' && line.trim()
+            ? { summary: line.trim() }
+            : null,
+        )
+        .filter(Boolean);
+    })();
+
+    if (infiltrationHistoryEntries.length) {
+      const timeline = document.createElement('ul');
+      timeline.className = 'mission-infiltration__timeline mission-infiltration__timeline--condensed';
+      const fragment = document.createDocumentFragment();
+      infiltrationHistoryEntries.forEach((historyEntry) => {
+        fragment.appendChild(createInfiltrationTimelineItem(historyEntry, { condensed: true }));
+      });
+      timeline.appendChild(fragment);
+      item.appendChild(timeline);
+    }
+
     logList.appendChild(item);
   });
 };
@@ -11118,6 +11154,268 @@ const formatMissionEventDuration = (milliseconds) => {
   return parts.join(' ');
 };
 
+const buildInfiltrationHistorySignature = (entries = []) => {
+  if (!Array.isArray(entries) || !entries.length) {
+    return '';
+  }
+
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return '';
+      }
+      const stepId = typeof entry.stepId === 'string' ? entry.stepId : '';
+      const choiceId = typeof entry.choiceId === 'string' ? entry.choiceId : '';
+      const resolvedAt = Number.isFinite(entry.resolvedAt) ? entry.resolvedAt : '';
+      const summary = typeof entry.summary === 'string' ? entry.summary : '';
+      return `${stepId}:${choiceId}:${resolvedAt}:${summary}`;
+    })
+    .join('|');
+};
+
+const formatHeatChange = (value) => {
+  const abs = Math.abs(value);
+  if (abs === 0) {
+    return '0';
+  }
+  if (Number.isInteger(abs)) {
+    return abs.toString();
+  }
+  if (abs < 1) {
+    return abs.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  }
+  return abs.toFixed(1).replace(/\.0$/, '');
+};
+
+const formatMultiplierPercent = (multiplier) => {
+  if (!Number.isFinite(multiplier) || multiplier === 1) {
+    return null;
+  }
+  const percent = Math.round((multiplier - 1) * 100);
+  if (percent === 0) {
+    return null;
+  }
+  return `${percent > 0 ? '+' : ''}${percent}%`;
+};
+
+const formatDurationDelta = (value) => {
+  const abs = Math.abs(value);
+  if (abs === 0) {
+    return '0s';
+  }
+  if (Number.isInteger(abs)) {
+    return `${abs}s`;
+  }
+  if (abs < 1) {
+    return `${abs.toFixed(1).replace(/0+$/, '').replace(/\.$/, '')}s`;
+  }
+  return `${Math.round(abs)}s`;
+};
+
+const buildInfiltrationEffectBadges = (effects = {}, fallbackSummary = null) => {
+  const badges = [];
+  const safeEffects = effects && typeof effects === 'object' ? effects : {};
+
+  const addBadge = (label, tone = null) => {
+    if (!label) {
+      return;
+    }
+    const badge = document.createElement('span');
+    badge.className = 'mission-recon__badge';
+    if (tone) {
+      badge.className += ` mission-recon__badge--${tone}`;
+    }
+    badge.textContent = label;
+    badges.push(badge);
+  };
+
+  const payoutMultiplierLabel = formatMultiplierPercent(safeEffects.payoutMultiplier);
+  if (payoutMultiplierLabel) {
+    addBadge(`Payout ${payoutMultiplierLabel}`, safeEffects.payoutMultiplier > 1 ? 'success' : 'warning');
+  }
+
+  if (Number.isFinite(safeEffects.payoutDelta) && safeEffects.payoutDelta !== 0) {
+    const amount = Math.abs(Math.round(safeEffects.payoutDelta));
+    if (amount > 0) {
+      addBadge(
+        `Payout ${safeEffects.payoutDelta > 0 ? '+' : '-'}$${amount.toLocaleString()}`,
+        safeEffects.payoutDelta > 0 ? 'success' : 'warning',
+      );
+    }
+  }
+
+  const heatMultiplierLabel = formatMultiplierPercent(safeEffects.heatMultiplier);
+  if (heatMultiplierLabel) {
+    addBadge(`Heat ${heatMultiplierLabel}`, safeEffects.heatMultiplier > 1 ? 'heat' : 'success');
+  }
+
+  if (Number.isFinite(safeEffects.heatDelta) && safeEffects.heatDelta !== 0) {
+    const amountLabel = formatHeatChange(safeEffects.heatDelta);
+    if (amountLabel) {
+      addBadge(
+        `Heat ${safeEffects.heatDelta > 0 ? '+' : '-'}${amountLabel}`,
+        safeEffects.heatDelta > 0 ? 'heat' : 'success',
+      );
+    }
+  }
+
+  if (Number.isFinite(safeEffects.successDelta) && safeEffects.successDelta !== 0) {
+    const percentChange = Math.round(safeEffects.successDelta * 100);
+    if (percentChange !== 0) {
+      addBadge(
+        `Success ${percentChange > 0 ? '+' : ''}${percentChange}%`,
+        percentChange > 0 ? 'success' : 'warning',
+      );
+    }
+  }
+
+  const durationMultiplierLabel = formatMultiplierPercent(safeEffects.durationMultiplier);
+  if (durationMultiplierLabel) {
+    addBadge(`Duration ${durationMultiplierLabel}`, safeEffects.durationMultiplier > 1 ? 'warning' : 'success');
+  }
+
+  if (Number.isFinite(safeEffects.durationDelta) && safeEffects.durationDelta !== 0) {
+    const deltaLabel = formatDurationDelta(safeEffects.durationDelta);
+    if (deltaLabel) {
+      addBadge(
+        `Duration ${safeEffects.durationDelta > 0 ? '+' : '-'}${deltaLabel}`,
+        safeEffects.durationDelta > 0 ? 'warning' : 'success',
+      );
+    }
+  }
+
+  if (Number.isFinite(safeEffects.crewLoyaltyDelta) && safeEffects.crewLoyaltyDelta !== 0) {
+    const amount = Math.abs(Math.round(safeEffects.crewLoyaltyDelta));
+    if (amount > 0) {
+      addBadge(
+        `Crew loyalty ${safeEffects.crewLoyaltyDelta > 0 ? '+' : '-'}${amount}`,
+        safeEffects.crewLoyaltyDelta > 0 ? 'success' : 'warning',
+      );
+    }
+  }
+
+  if (!badges.length && typeof fallbackSummary === 'string' && fallbackSummary.trim()) {
+    addBadge(fallbackSummary.trim());
+  }
+
+  return badges;
+};
+
+const extractInfiltrationSummaryText = (entry) => {
+  if (!entry || typeof entry !== 'object') {
+    return '';
+  }
+
+  let summaryText = typeof entry.summary === 'string' ? entry.summary.trim() : '';
+  const stepLabel = typeof entry.stepLabel === 'string' ? entry.stepLabel.trim() : '';
+  if (summaryText && stepLabel) {
+    const prefix = `${stepLabel}:`;
+    if (summaryText.startsWith(prefix)) {
+      summaryText = summaryText.slice(prefix.length).trim();
+    }
+  }
+
+  return summaryText;
+};
+
+const createInfiltrationTimelineItem = (entry, { condensed = false } = {}) => {
+  const item = document.createElement('li');
+  item.className = 'mission-infiltration__item';
+  if (condensed) {
+    item.className += ' mission-infiltration__item--condensed';
+  }
+
+  const header = document.createElement('div');
+  header.className = 'mission-infiltration__header';
+
+  const stepLabel = typeof entry?.stepLabel === 'string' ? entry.stepLabel.trim() : '';
+  if (stepLabel) {
+    const stepEl = document.createElement('span');
+    stepEl.className = 'mission-infiltration__step';
+    stepEl.textContent = stepLabel;
+    header.appendChild(stepEl);
+  }
+
+  const choiceLabel = typeof entry?.choiceLabel === 'string' ? entry.choiceLabel.trim() : '';
+  if (choiceLabel) {
+    const choiceEl = document.createElement('span');
+    choiceEl.className = 'mission-infiltration__choice';
+    choiceEl.textContent = choiceLabel;
+    header.appendChild(choiceEl);
+  }
+
+  if (header.childNodes.length) {
+    item.appendChild(header);
+  }
+
+  let summaryText = extractInfiltrationSummaryText(entry);
+  if (!summaryText && !header.childNodes.length && choiceLabel) {
+    summaryText = choiceLabel;
+  }
+  if (!summaryText && typeof entry?.effectSummary === 'string') {
+    summaryText = entry.effectSummary.trim();
+  }
+  if (!summaryText && typeof entry?.summary === 'string') {
+    summaryText = entry.summary.trim();
+  }
+
+  if (summaryText) {
+    const summaryEl = document.createElement('p');
+    summaryEl.className = 'mission-infiltration__summary';
+    if (condensed) {
+      summaryEl.className += ' mission-infiltration__summary--condensed';
+    }
+    summaryEl.textContent = summaryText;
+    item.appendChild(summaryEl);
+  }
+
+  const badges = buildInfiltrationEffectBadges(entry?.effects ?? {}, entry?.effectSummary ?? null);
+  if (badges.length) {
+    const badgeRow = document.createElement('div');
+    badgeRow.className = 'mission-infiltration__effects';
+    badges.forEach((badge) => badgeRow.appendChild(badge));
+    item.appendChild(badgeRow);
+  }
+
+  return item;
+};
+
+const renderMissionInfiltrationTimeline = (mission) => {
+  const list = missionControls.infiltrationTimelineList;
+  const emptyState = missionControls.infiltrationTimelineEmpty;
+  if (!list || !emptyState) {
+    return;
+  }
+
+  const historyEntries = Array.isArray(mission?.infiltrationState?.history)
+    ? mission.infiltrationState.history
+    : [];
+  const signature = `${mission?.id ?? 'none'}|${buildInfiltrationHistorySignature(historyEntries)}`;
+
+  if (missionControls.lastInfiltrationTimelineSignature === signature) {
+    return;
+  }
+
+  missionControls.lastInfiltrationTimelineSignature = signature;
+
+  list.innerHTML = '';
+
+  if (!historyEntries.length) {
+    emptyState.hidden = false;
+    list.hidden = true;
+    return;
+  }
+
+  emptyState.hidden = true;
+  list.hidden = false;
+
+  const fragment = document.createDocumentFragment();
+  historyEntries.forEach((entry) => {
+    fragment.appendChild(createInfiltrationTimelineItem(entry));
+  });
+  list.appendChild(fragment);
+};
+
 const renderMissionEvents = () => {
   const { eventPrompt, eventChoices, eventHistory } = missionControls;
   if (!eventPrompt || !eventChoices || !eventHistory) {
@@ -11134,12 +11432,15 @@ const renderMissionEvents = () => {
   const mission = missionSystem?.state?.activeMission ?? null;
 
   if (!mission || mission.status === 'completed') {
+    renderMissionInfiltrationTimeline(null);
     missionControls.lastEventPromptId = null;
     const placeholder = document.createElement('li');
     placeholder.textContent = 'No event history yet.';
     eventHistory.appendChild(placeholder);
     return;
   }
+
+  renderMissionInfiltrationTimeline(mission);
 
   const pending = mission.pendingDecision ?? null;
   if (pending) {
@@ -11332,6 +11633,8 @@ const updateMissionControls = () => {
     eventPrompt,
     eventChoices,
     eventHistory,
+    infiltrationTimelineList,
+    infiltrationTimelineEmpty,
     eventStatus,
     debtList,
     debtStatus,
@@ -12477,6 +12780,9 @@ const setupMissionControls = () => {
   missionControls.eventPrompt = document.getElementById('mission-event-prompt');
   missionControls.eventChoices = document.getElementById('mission-event-choices');
   missionControls.eventHistory = document.getElementById('mission-event-history');
+  missionControls.infiltrationTimelineContainer = document.querySelector('.mission-infiltration');
+  missionControls.infiltrationTimelineList = document.getElementById('mission-infiltration-timeline');
+  missionControls.infiltrationTimelineEmpty = document.getElementById('mission-infiltration-empty');
   missionControls.eventStatus = document.getElementById('mission-event-status');
   missionControls.debtList = document.getElementById('mission-debt-list');
   missionControls.debtStatus = document.getElementById('mission-debt-status');
