@@ -74,6 +74,14 @@ const SAFEHOUSE_FACILITY_EFFECTS = {
     summary: 'Auto-sheds 0.45 heat daily and slashes mission heat by 8%.',
     missionEffectSummary: 'Ghost terminal slashes mission heat by 8%.',
   },
+  'harbor-scrambler-array': {
+    name: 'Harbor Scrambler Array',
+    dailyHeatReductionBonus: 0.35,
+    missionHeatFlatAdjustment: -0.15,
+    missionHeatMultiplier: 0.94,
+    summary: 'Auto-sheds 0.35 heat daily and strips 0.15 heat while softening missions by 6%.',
+    missionEffectSummary: 'Scrambler array removes 0.15 heat and trims signatures by 6%.',
+  },
   'shell-company-hub': {
     name: 'Shell Company Hub',
     passiveIncomeBonus: 420,
@@ -152,6 +160,14 @@ const SAFEHOUSE_FACILITY_EFFECTS = {
     heatMitigationMultiplier: 1.15,
     summary: 'Auto-sheds 0.40 heat daily, slashes mission heat 10%, and amplifies mitigation 15%.',
     missionEffectSummary: 'Phantom syndicate suite cuts mission heat 10% and boosts heat buys.',
+  },
+  'specter-liaison-program': {
+    name: 'Specter Liaison Program',
+    missionPayoutMultiplier: 1.06,
+    missionSuccessBonus: 0.015,
+    heatMitigationMultiplier: 1.2,
+    summary: 'Adds +6% payout, +1.5% success, and boosts heat buys 20% via hush contracts.',
+    missionEffectSummary: 'Specter liaisons raise success 1.5%, payout 6%, and amp heat buys.',
   },
   'vip-concierge-ring': {
     name: 'VIP Concierge Ring',
