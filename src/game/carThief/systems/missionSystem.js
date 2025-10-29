@@ -22,6 +22,13 @@ import { getCrewPerkEffect } from './crewPerks.js';
 import { getCrewGearEffect } from './crewGear.js';
 import { getVehicleModRecipe, assessVehicleModAffordability } from './vehicleModRecipes.js';
 import { createCrewRelationshipService } from './crewRelationships.js';
+import {
+  applyInfiltrationChoice,
+  createInfiltrationSequence,
+  getNextInfiltrationStep,
+  summarizeInfiltrationEffects,
+} from './missionInfiltration.js';
+import { createSafehouseDefenseManager } from './safehouseDefense.js';
 
 const coerceFiniteNumber = (value, fallback = 0) => {
   const numeric = Number(value);
@@ -1596,6 +1603,7 @@ class MissionSystem {
     this.contractFactory = contractFactory;
     this.falloutContractFactory = falloutContractFactory;
     this.relationshipService = createCrewRelationshipService(this.state);
+    this.safehouseDefenseManager = createSafehouseDefenseManager(this.state);
 
     this.currentCrackdownTier = this.heatSystem.getCurrentTier();
     if (!Number.isFinite(this.state.followUpSequence)) {
@@ -2517,6 +2525,15 @@ class MissionSystem {
       details.push(...penalties);
     }
 
+    if (this.safehouseDefenseManager) {
+      const defenseLines = this.safehouseDefenseManager.getScenarioSummaryLines(
+        alertEntry?.id ?? alertEntry?.safehouseAlertId ?? null,
+      );
+      if (Array.isArray(defenseLines) && defenseLines.length) {
+        details.push(...defenseLines);
+      }
+    }
+
     return details.filter(Boolean);
   }
 
@@ -2531,6 +2548,19 @@ class MissionSystem {
     const details = Array.isArray(detailLines)
       ? detailLines.map((line) => (typeof line === 'string' ? line.trim() : '')).filter(Boolean)
       : [];
+
+    if (this.safehouseDefenseManager) {
+      const defenseLines = this.safehouseDefenseManager.getScenarioSummaryLines(
+        alertEntry?.id ?? alertEntry?.safehouseAlertId ?? null,
+      );
+      if (Array.isArray(defenseLines) && defenseLines.length) {
+        defenseLines.forEach((line) => {
+          if (typeof line === 'string' && line.trim()) {
+            details.push(line.trim());
+          }
+        });
+      }
+    }
 
     const metadata = {};
     if (alertEntry?.id) {
@@ -2757,6 +2787,12 @@ class MissionSystem {
     this.state.safehouseIncursions = alerts;
     this.state.needsHudRefresh = true;
     this._syncSafehouseDowntimeFromAlert(entry, { currentDay });
+    if (this.safehouseDefenseManager) {
+      this.safehouseDefenseManager.recordResolution(entry, null, {
+        summary: summary ?? entry.lastResolutionSummary ?? null,
+        resolvedAt: entry.resolvedAt,
+      });
+    }
     return entry;
   }
 
@@ -2818,6 +2854,13 @@ class MissionSystem {
         detailLines,
         resolvedAt: historyEntry.resolvedAt ?? Date.now(),
       });
+
+      if (this.safehouseDefenseManager) {
+        this.safehouseDefenseManager.recordResolution(resolvedAlert, choice, {
+          summary: historyEntry.summary,
+          resolvedAt: historyEntry.resolvedAt ?? Date.now(),
+        });
+      }
 
       return {
         summary: historyEntry.summary,
@@ -2959,6 +3002,13 @@ class MissionSystem {
       return;
     }
 
+    if (mission.infiltrationState && mission.infiltrationState.status !== 'resolved') {
+      mission.infiltrationState = null;
+    }
+    mission.infiltrationSummary = Array.isArray(mission.infiltrationSummary)
+      ? mission.infiltrationSummary.slice(-3)
+      : [];
+
     const fallbackCrackdownTier =
       this.currentCrackdownTier ??
       (this.heatSystem && typeof this.heatSystem.getCurrentTier === 'function'
@@ -2999,6 +3049,26 @@ class MissionSystem {
       this.upsertSafehouseAlerts(safehouseEventPayload.alerts);
     }
 
+    const defenseScenarioByAlert = new Map();
+    if (this.safehouseDefenseManager && Array.isArray(safehouseEventPayload?.alerts)) {
+      safehouseEventPayload.alerts.forEach((alert) => {
+        if (!alert || typeof alert !== 'object') {
+          return;
+        }
+        const scenario = this.safehouseDefenseManager.activateScenario(alert, {
+          safehouse,
+          heatTier,
+          cooldownDays: alert.cooldownDays ?? null,
+        });
+        if (scenario) {
+          alert.defenseScenario = scenario;
+          if (alert.id) {
+            defenseScenarioByAlert.set(alert.id, scenario);
+          }
+        }
+      });
+    }
+
     const combinedDeck = Array.isArray(baseDeck) ? baseDeck.slice() : [];
     if (Array.isArray(safehouseEventPayload?.events)) {
       safehouseEventPayload.events.forEach((event) => {
@@ -3018,6 +3088,9 @@ class MissionSystem {
               ? event.baseWeight
               : 1,
         };
+        if (event.safehouseAlertId && defenseScenarioByAlert.has(event.safehouseAlertId)) {
+          cloned.defenseScenario = defenseScenarioByAlert.get(event.safehouseAlertId);
+        }
         combinedDeck.push(cloned);
       });
     }
@@ -3081,6 +3154,240 @@ class MissionSystem {
     return pendingDecision;
   }
 
+  _getAssignedCrewMembers(mission) {
+    if (!mission) {
+      return [];
+    }
+
+    const crewPool = Array.isArray(this.state?.crew) ? this.state.crew : [];
+    const assignedIds = Array.isArray(mission.assignedCrewIds)
+      ? mission.assignedCrewIds
+      : [];
+
+    return crewPool.filter((member) => assignedIds.includes(member?.id));
+  }
+
+  _maybeTriggerInfiltrationSequence(mission, { assignedCrew = null } = {}) {
+    if (!mission) {
+      return false;
+    }
+
+    const crewMembers = Array.isArray(assignedCrew) ? assignedCrew : this._getAssignedCrewMembers(mission);
+    const crewNames = crewMembers.map((member) => member?.name ?? 'Crew member');
+
+    if (!mission.infiltrationState || mission.infiltrationState.status === 'completed') {
+      const sequence = createInfiltrationSequence(mission, { crewMembers, crewNames });
+      if (!sequence) {
+        mission.infiltrationState = null;
+        return false;
+      }
+      mission.infiltrationState = sequence;
+      mission.infiltrationSummary = [];
+    } else if (Array.isArray(crewNames) && crewNames.length) {
+      mission.infiltrationState.crewNames = crewNames.slice();
+    }
+
+    const sequence = mission.infiltrationState;
+    if (!sequence) {
+      return false;
+    }
+
+    const nextStep = getNextInfiltrationStep(sequence);
+    if (!nextStep) {
+      sequence.status = 'resolved';
+      sequence.completedAt = sequence.completedAt ?? Date.now();
+      return false;
+    }
+
+    const pendingDecision = {
+      eventId: `${sequence.id}:${nextStep.id}`,
+      label: nextStep.label,
+      description: nextStep.prompt,
+      triggerProgress: 1,
+      triggeredAt: Date.now(),
+      source: 'infiltration-minigame',
+      infiltrationStepId: nextStep.id,
+      badges: [
+        { type: 'infiltration', icon: nextStep.badgeIcon ?? '🎯', label: 'Infiltration' },
+        { type: 'phase', icon: '🗺️', label: nextStep.phaseLabel ?? 'Sequence' },
+      ],
+      choices: nextStep.choices.map((choice) => ({
+        id: choice.id,
+        label: choice.label,
+        description: choice.description,
+        narrative: choice.narrative ?? null,
+        effects: choice.effects ? { ...choice.effects } : {},
+      })),
+    };
+
+    mission.pendingDecision = pendingDecision;
+    mission.status = 'decision-required';
+    return true;
+  }
+
+  _resolveInfiltrationChoice(mission, pendingDecision, choiceId) {
+    if (!mission || !pendingDecision?.infiltrationStepId || !mission.infiltrationState) {
+      mission.pendingDecision = null;
+      return null;
+    }
+
+    const crewMembers = this._getAssignedCrewMembers(mission);
+    const resolution = applyInfiltrationChoice(
+      mission.infiltrationState,
+      pendingDecision.infiltrationStepId,
+      choiceId,
+    );
+
+    if (!resolution) {
+      mission.pendingDecision = null;
+      return null;
+    }
+
+    const effects = resolution.choice.effects ?? {};
+    const before = {
+      payout: Number.isFinite(mission.payout) ? mission.payout : 0,
+      heat: Number.isFinite(mission.heat) ? mission.heat : 0,
+      successChance: this.normalizeSuccessChance(mission),
+      duration: sanitizeDuration(mission.duration, mission.difficulty),
+    };
+
+    if (Number.isFinite(effects.payoutMultiplier)) {
+      mission.payout = Math.max(0, Math.round(before.payout * effects.payoutMultiplier));
+    }
+
+    if (Number.isFinite(effects.payoutDelta)) {
+      mission.payout = Math.max(0, Math.round((Number.isFinite(mission.payout) ? mission.payout : before.payout) + effects.payoutDelta));
+    }
+
+    if (Number.isFinite(effects.heatMultiplier)) {
+      mission.heat = Math.max(0, (Number.isFinite(mission.heat) ? mission.heat : before.heat) * effects.heatMultiplier);
+    }
+
+    if (Number.isFinite(effects.heatDelta)) {
+      mission.heat = Math.max(0, (Number.isFinite(mission.heat) ? mission.heat : before.heat) + effects.heatDelta);
+    }
+
+    if (Number.isFinite(effects.successDelta)) {
+      mission.successChance = clamp((mission.successChance ?? before.successChance) + effects.successDelta, 0.01, 0.99);
+    }
+
+    if (Number.isFinite(effects.durationMultiplier)) {
+      const duration = sanitizeDuration(mission.duration, mission.difficulty);
+      mission.duration = sanitizeDuration(Math.max(5, Math.round(duration * effects.durationMultiplier)), mission.difficulty);
+    }
+
+    if (Number.isFinite(effects.durationDelta)) {
+      const duration = sanitizeDuration(mission.duration, mission.difficulty);
+      mission.duration = sanitizeDuration(duration + effects.durationDelta, mission.difficulty);
+    }
+
+    let crewLoyaltyDelta = 0;
+    if (Number.isFinite(effects.crewLoyaltyDelta) && crewMembers.length) {
+      const delta = Math.round(effects.crewLoyaltyDelta);
+      if (delta !== 0) {
+        crewMembers.forEach((member) => {
+          if (!member) {
+            return;
+          }
+          if (typeof member.adjustLoyalty === 'function') {
+            member.adjustLoyalty(delta);
+          } else if (Number.isFinite(member.loyalty)) {
+            member.loyalty += delta;
+          }
+        });
+        crewLoyaltyDelta += delta;
+      }
+    }
+
+    const after = {
+      payout: Number.isFinite(mission.payout) ? mission.payout : before.payout,
+      heat: Number.isFinite(mission.heat) ? mission.heat : before.heat,
+      successChance: this.normalizeSuccessChance(mission),
+      duration: sanitizeDuration(mission.duration, mission.difficulty),
+    };
+
+    const payoutDelta = after.payout - before.payout;
+    const heatDelta = after.heat - before.heat;
+    const successDelta = after.successChance - before.successChance;
+    const durationDelta = after.duration - before.duration;
+
+    const deltaParts = [];
+    if (Math.round(payoutDelta) !== 0) {
+      const amount = Math.abs(Math.round(payoutDelta));
+      deltaParts.push(`Payout ${payoutDelta > 0 ? '+' : '-'}$${amount.toLocaleString()}`);
+    }
+    if (Math.abs(heatDelta) >= 0.05) {
+      deltaParts.push(`${heatDelta > 0 ? '+' : ''}${heatDelta.toFixed(1)} heat`);
+    }
+    if (Math.abs(successDelta) >= 0.005) {
+      deltaParts.push(`${successDelta > 0 ? '+' : ''}${Math.round(successDelta * 100)}% success`);
+    }
+    if (Math.abs(durationDelta) >= 1) {
+      deltaParts.push(`Duration ${durationDelta > 0 ? '+' : ''}${Math.round(durationDelta)}s`);
+    }
+    if (crewLoyaltyDelta !== 0) {
+      deltaParts.push(`Crew loyalty ${crewLoyaltyDelta > 0 ? '+' : ''}${crewLoyaltyDelta}`);
+    }
+
+    const summaryParts = [resolution.historyEntry?.summary ?? `${pendingDecision.label}: ${resolution.choice.label}`];
+    if (deltaParts.length) {
+      summaryParts.push(deltaParts.join(', '));
+    }
+    const summary = summaryParts.join(' ').trim();
+
+    mission.pendingDecision = null;
+    mission.status = mission.progress >= 1 ? 'awaiting-resolution' : 'in-progress';
+
+    mission.eventHistory = Array.isArray(mission.eventHistory) ? mission.eventHistory : [];
+    const historyEntry = {
+      eventId: pendingDecision.eventId,
+      eventLabel: pendingDecision.label,
+      choiceId: resolution.choice.id,
+      choiceLabel: resolution.choice.label,
+      choiceNarrative: resolution.choice.narrative ?? null,
+      triggeredAt: pendingDecision.triggeredAt ?? Date.now(),
+      resolvedAt: Date.now(),
+      progressAt: mission.progress ?? 1,
+      summary,
+      effectSummary: deltaParts.length
+        ? deltaParts.join(', ')
+        : summarizeInfiltrationEffects(effects),
+      eventBadges: Array.isArray(pendingDecision.badges)
+        ? pendingDecision.badges.map((badge) => ({ ...badge }))
+        : [],
+      effects: { ...effects },
+      deltas: {
+        payout: payoutDelta,
+        heat: heatDelta,
+        successChance: successDelta,
+        duration: durationDelta,
+        crewLoyalty: crewLoyaltyDelta,
+      },
+    };
+    mission.eventHistory.push(historyEntry);
+    if (mission.eventHistory.length > 10) {
+      mission.eventHistory = mission.eventHistory.slice(-10);
+    }
+
+    mission.infiltrationSummary = Array.isArray(mission.infiltrationState?.history)
+      ? mission.infiltrationState.history.map((entry) => entry.summary)
+      : [];
+
+    if (this._maybeTriggerInfiltrationSequence(mission, { assignedCrew: crewMembers })) {
+      return historyEntry;
+    }
+
+    if (mission.progress >= 1) {
+      mission.status = 'awaiting-resolution';
+      if (!mission.pendingResolution) {
+        const { outcome } = this.prepareAutomaticResolution(mission);
+        this.resolveMission(mission.id, outcome);
+      }
+    }
+
+    return historyEntry;
+  }
+
   finalizeMissionProgress(mission) {
     if (!mission) {
       return;
@@ -3108,6 +3415,10 @@ class MissionSystem {
 
     mission.status = 'awaiting-resolution';
 
+    if (this._maybeTriggerInfiltrationSequence(mission)) {
+      return;
+    }
+
     if (!mission.pendingResolution) {
       const { outcome } = this.prepareAutomaticResolution(mission);
       this.resolveMission(mission.id, outcome);
@@ -3122,7 +3433,14 @@ class MissionSystem {
 
     const pending = mission.pendingDecision;
     if (!pending || pending.eventId !== eventId) {
+      if (pending?.infiltrationStepId) {
+        return this._resolveInfiltrationChoice(mission, pending, choiceId);
+      }
       return null;
+    }
+
+    if (pending?.source === 'infiltration-minigame' || pending?.infiltrationStepId) {
+      return this._resolveInfiltrationChoice(mission, pending, choiceId);
     }
 
     const deck = Array.isArray(mission.eventDeck) ? mission.eventDeck : [];
@@ -3413,6 +3731,10 @@ class MissionSystem {
         })
         .join('; ');
       summary = `${summary} — Events: ${highlights}`;
+    }
+
+    if (Array.isArray(mission.infiltrationSummary) && mission.infiltrationSummary.length) {
+      summary = `${summary} — Infiltration: ${mission.infiltrationSummary.join('; ')}`;
     }
 
     const falloutEntries = Array.isArray(extras?.fallout) ? extras.fallout : [];

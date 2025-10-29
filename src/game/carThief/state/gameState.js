@@ -10,6 +10,245 @@ import {
 
 const MAX_ECONOMY_HISTORY_ENTRIES = 30;
 
+const clampNumber = (value, min, max) => {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  if (value < min) {
+    return min;
+  }
+
+  if (value > max) {
+    return max;
+  }
+
+  return value;
+};
+
+const sanitizeSafehouseDefenseLayout = (layout) => {
+  if (!layout || typeof layout !== 'object') {
+    return null;
+  }
+
+  const safehouseId = typeof layout.safehouseId === 'string' ? layout.safehouseId.trim() : null;
+
+  const zones = Array.isArray(layout.zones)
+    ? layout.zones
+        .map((zone) => {
+          if (!zone || typeof zone !== 'object') {
+            return null;
+          }
+
+          const id = typeof zone.id === 'string' ? zone.id.trim() : null;
+          const label = typeof zone.label === 'string' ? zone.label.trim() : null;
+          if (!id || !label) {
+            return null;
+          }
+
+          const facilityIds = Array.isArray(zone.facilityIds)
+            ? zone.facilityIds
+                .map((facilityId) => (typeof facilityId === 'string' ? facilityId.trim() : ''))
+                .filter(Boolean)
+            : [];
+
+          const defenseScore = Number.isFinite(zone.defenseScore)
+            ? clampNumber(Math.round(zone.defenseScore), 0, 20)
+            : 0;
+
+          return {
+            id,
+            label,
+            facilityIds,
+            defenseScore,
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
+    safehouseId,
+    zones,
+  };
+};
+
+const sanitizeSafehouseDefenseScenario = (scenario) => {
+  if (!scenario || typeof scenario !== 'object') {
+    return null;
+  }
+
+  const alertId = typeof scenario.alertId === 'string' ? scenario.alertId.trim() : null;
+  if (!alertId) {
+    return null;
+  }
+
+  const safehouseId = typeof scenario.safehouseId === 'string' ? scenario.safehouseId.trim() : null;
+  const status = typeof scenario.status === 'string' ? scenario.status.trim() : 'active';
+  const heatTier = typeof scenario.heatTier === 'string' ? scenario.heatTier.trim() : null;
+  const cooldownDays = Number.isFinite(scenario.cooldownDays)
+    ? clampNumber(Math.round(scenario.cooldownDays), 0, 60)
+    : null;
+
+  const escalationTracks = Array.isArray(scenario.escalationTracks)
+    ? scenario.escalationTracks
+        .map((track) => {
+          if (!track || typeof track !== 'object') {
+            return null;
+          }
+
+          const id = typeof track.id === 'string' ? track.id.trim() : null;
+          const label = typeof track.label === 'string' ? track.label.trim() : null;
+          if (!id || !label) {
+            return null;
+          }
+
+          const value = Number.isFinite(track.value) ? clampNumber(track.value, 0, 20) : 0;
+          const max = Number.isFinite(track.max) ? clampNumber(track.max, 1, 20) : 6;
+          const trackStatus = typeof track.status === 'string' ? track.status.trim() : 'active';
+
+          return {
+            id,
+            label,
+            value,
+            max,
+            status: trackStatus,
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  const recommendedActions = Array.isArray(scenario.recommendedActions)
+    ? scenario.recommendedActions
+        .map((action) => {
+          if (!action || typeof action !== 'object') {
+            return null;
+          }
+
+          const id = typeof action.id === 'string' ? action.id.trim() : null;
+          const label = typeof action.label === 'string' ? action.label.trim() : null;
+          const summary = typeof action.summary === 'string' ? action.summary.trim() : null;
+          if (!id || !label) {
+            return null;
+          }
+
+          return { id, label, summary };
+        })
+        .filter(Boolean)
+        .slice(0, 5)
+    : [];
+
+  const history = Array.isArray(scenario.history)
+    ? scenario.history
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') {
+            return null;
+          }
+
+          const choiceId = typeof entry.choiceId === 'string' ? entry.choiceId.trim() : null;
+          const summary = typeof entry.summary === 'string' ? entry.summary.trim() : null;
+          const resolvedAt = Number.isFinite(entry.resolvedAt) ? entry.resolvedAt : null;
+
+          return {
+            choiceId,
+            summary,
+            resolvedAt,
+          };
+        })
+        .filter(Boolean)
+        .slice(-6)
+    : [];
+
+  const layout = sanitizeSafehouseDefenseLayout(scenario.layout);
+
+  return {
+    alertId,
+    safehouseId,
+    status,
+    layout,
+    heatTier,
+    cooldownDays,
+    escalationTracks,
+    recommendedActions,
+    history,
+    startedAt: Number.isFinite(scenario.startedAt) ? scenario.startedAt : null,
+    updatedAt: Number.isFinite(scenario.updatedAt) ? scenario.updatedAt : null,
+    resolvedAt: Number.isFinite(scenario.resolvedAt) ? scenario.resolvedAt : null,
+    lastChoiceId: typeof scenario.lastChoiceId === 'string' ? scenario.lastChoiceId.trim() : null,
+    lastSummary: typeof scenario.lastSummary === 'string' ? scenario.lastSummary.trim() : null,
+  };
+};
+
+const sanitizeSafehouseDefenseState = (value) => {
+  if (!value || typeof value !== 'object') {
+    return {
+      layoutsBySafehouse: {},
+      scenariosByAlert: {},
+      history: [],
+    };
+  }
+
+  const layoutsSource = value.layoutsBySafehouse && typeof value.layoutsBySafehouse === 'object'
+    ? value.layoutsBySafehouse
+    : {};
+  const layoutsBySafehouse = Object.entries(layoutsSource).reduce((accumulator, [key, layout]) => {
+    const sanitized = sanitizeSafehouseDefenseLayout(layout);
+    if (sanitized) {
+      const safehouseId = typeof key === 'string' ? key : sanitized.safehouseId;
+      if (safehouseId) {
+        accumulator[safehouseId] = sanitized;
+      }
+    }
+    return accumulator;
+  }, {});
+
+  const scenariosSource = value.scenariosByAlert && typeof value.scenariosByAlert === 'object'
+    ? value.scenariosByAlert
+    : {};
+  const scenariosByAlert = Object.entries(scenariosSource).reduce(
+    (accumulator, [alertId, scenario]) => {
+      const sanitized = sanitizeSafehouseDefenseScenario({ ...scenario, alertId });
+      if (sanitized) {
+        accumulator[sanitized.alertId] = sanitized;
+      }
+      return accumulator;
+    },
+    {},
+  );
+
+  const history = Array.isArray(value.history)
+    ? value.history
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') {
+            return null;
+          }
+
+          const alertId = typeof entry.alertId === 'string' ? entry.alertId.trim() : null;
+          if (!alertId) {
+            return null;
+          }
+
+          const summary = typeof entry.summary === 'string' ? entry.summary.trim() : null;
+          const choiceId = typeof entry.choiceId === 'string' ? entry.choiceId.trim() : null;
+          const resolvedAt = Number.isFinite(entry.resolvedAt) ? entry.resolvedAt : null;
+
+          return {
+            alertId,
+            summary,
+            choiceId,
+            resolvedAt,
+          };
+        })
+        .filter(Boolean)
+        .slice(-20)
+    : [];
+
+  return {
+    layoutsBySafehouse,
+    scenariosByAlert,
+    history,
+  };
+};
+
 const cloneReconAssignment = (assignment) => {
   if (!assignment || typeof assignment !== 'object') {
     return null;
@@ -236,6 +475,7 @@ class GameState {
     garageActivityLog = [],
     crackdownHistory = [],
     crewGearVendors = null,
+    safehouseDefense = null,
   } = {}) {
     this.day = day;
     this.funds = funds;
@@ -276,6 +516,7 @@ class GameState {
     this.garageActivityLog = sanitizeGarageActivityLog(garageActivityLog);
     this.crackdownHistory = sanitizeCrackdownHistoryLog(crackdownHistory);
     this.crewGearVendors = sanitizeCrewGearVendorState(crewGearVendors, { day: this.day });
+    this.safehouseDefense = sanitizeSafehouseDefenseState(safehouseDefense);
   }
 
   toJSON() {
@@ -344,6 +585,7 @@ class GameState {
       crewGearVendors: this.crewGearVendors
         ? sanitizeCrewGearVendorState(this.crewGearVendors, { day: this.day })
         : null,
+      safehouseDefense: sanitizeSafehouseDefenseState(this.safehouseDefense),
     };
   }
 
@@ -396,6 +638,7 @@ class GameState {
       crackdownHistory: sanitizeCrackdownHistoryLog(data.crackdownHistory),
       economyHistory: sanitizeEconomyHistoryLog(data.economyHistory),
       crewGearVendors: sanitizeCrewGearVendorState(data.crewGearVendors, { day: data.day }),
+      safehouseDefense: sanitizeSafehouseDefenseState(data.safehouseDefense),
     });
   }
 
