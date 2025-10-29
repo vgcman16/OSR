@@ -18,6 +18,47 @@ const DEFAULT_TOUR_STEPS = (
       'Slot specialists into the crew roster to boost success odds and unlock mission perks.',
   },
   {
+    id: 'mission-operations',
+    selector: '.mission-operations',
+    resolveTarget: () => missionControls.operationsSection || document.querySelector('.mission-operations'),
+    title: 'Operations dashboard',
+    description:
+      'Keep cashflow, storage, and fatigue stable here so every contract launches with resources to spare.',
+  },
+  {
+    id: 'mission-recon',
+    selector: '.mission-recon',
+    resolveTarget: () =>
+      missionControls.reconList?.closest('.mission-recon')
+        || missionControls.reconStatus?.closest('.mission-recon')
+        || document.querySelector('.mission-recon'),
+    title: 'Field recon',
+    description:
+      'Use Field Recon to raise district influence before a heist and uncover perks that swing the odds.',
+  },
+  {
+    id: 'mission-training',
+    selector: '.mission-training',
+    resolveTarget: () =>
+      missionControls.trainingStatus?.closest('.mission-training')
+        || missionControls.trainingCrewSelect?.closest('.mission-training')
+        || document.querySelector('.mission-training'),
+    title: 'Crew training',
+    description:
+      'Invest in Crew Training to deepen loyalty, specialties, and recovery so operators stay mission-ready.',
+  },
+  {
+    id: 'mission-heat',
+    selector: '.mission-heat',
+    resolveTarget: () =>
+      missionControls.heatActionContainer?.closest('.mission-heat')
+        || missionControls.heatStatus?.closest('.mission-heat')
+        || document.querySelector('.mission-heat'),
+    title: 'Heat management',
+    description:
+      'Trigger Heat Management actions when pressure spikes to keep crackdowns from locking down your crews.',
+  },
+  {
     id: 'mission-safehouse',
     selector: '.mission-safehouse',
     resolveTarget: () =>
@@ -201,6 +242,39 @@ const createOnboardingTour = ({ missionControls = {}, serializer } = {}) => {
     nextButton.textContent = index >= steps.length - 1 ? 'Finish' : 'Next';
 
     const scrollOptions = { block: 'center', inline: 'center', behavior: 'smooth' };
+    const scrollByWithFallback = (offset) => {
+      if (!offset) {
+        return;
+      }
+
+      try {
+        window.scrollBy({ top: offset, behavior: 'smooth' });
+      } catch (error) {
+        window.scrollBy(0, offset);
+      }
+    };
+
+    const alignTargetWithinViewport = () => {
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const topPadding = 24;
+      const bottomPadding = 24;
+      const rect = target.getBoundingClientRect();
+
+      const overflowTop = topPadding - rect.top;
+      if (overflowTop > 0) {
+        scrollByWithFallback(-overflowTop);
+        return true;
+      }
+
+      const overflowBottom = rect.bottom - (viewportHeight - bottomPadding);
+      if (overflowBottom > 0) {
+        scrollByWithFallback(overflowBottom);
+        return true;
+      }
+
+      return false;
+    };
+
     if (typeof target.scrollIntoView === 'function') {
       try {
         target.scrollIntoView(scrollOptions);
@@ -211,7 +285,14 @@ const createOnboardingTour = ({ missionControls = {}, serializer } = {}) => {
 
     updatePositions();
     window.requestAnimationFrame(() => {
+      const adjusted = alignTargetWithinViewport();
       updatePositions();
+
+      if (adjusted) {
+        window.setTimeout(() => {
+          updatePositions();
+        }, 280);
+      }
     });
 
     return true;
