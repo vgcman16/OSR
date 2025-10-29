@@ -3874,6 +3874,39 @@ class MissionSystem {
       notorietySummary: extras?.notorietySummary ?? null,
       districtSummary: extras?.districtSummary ?? null,
       debtSettlements: debtSettlementEntries.map((entry) => ({ ...entry })),
+      infiltrationHistory: Array.isArray(mission?.infiltrationState?.history)
+        ? mission.infiltrationState.history
+            .map((historyEntry) => {
+              if (!historyEntry || typeof historyEntry !== 'object') {
+                return null;
+              }
+              return {
+                stepId: historyEntry.stepId ?? null,
+                stepLabel: historyEntry.stepLabel ?? null,
+                choiceId: historyEntry.choiceId ?? null,
+                choiceLabel: historyEntry.choiceLabel ?? null,
+                narrative: historyEntry.narrative ?? null,
+                resolvedAt: historyEntry.resolvedAt ?? null,
+                effectSummary: historyEntry.effectSummary ?? null,
+                summary: historyEntry.summary ?? null,
+                effects: historyEntry.effects && typeof historyEntry.effects === 'object'
+                  ? { ...historyEntry.effects }
+                  : {},
+              };
+            })
+            .filter(Boolean)
+        : Array.isArray(mission?.infiltrationSummary)
+        ? mission.infiltrationSummary
+            .map((summaryText) =>
+              typeof summaryText === 'string' && summaryText.trim()
+                ? { summary: summaryText.trim() }
+                : null,
+            )
+            .filter(Boolean)
+        : [],
+      infiltrationSummary: Array.isArray(mission?.infiltrationSummary)
+        ? mission.infiltrationSummary.slice()
+        : [],
     };
 
     this.state.missionLog.unshift(entry);
