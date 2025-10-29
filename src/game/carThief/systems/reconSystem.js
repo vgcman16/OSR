@@ -18,6 +18,18 @@ const RECON_APPROACH_CONFIG = {
     severityRollDelta: -0.2,
     fatigueDelta: -1,
   },
+  surveillance: {
+    key: 'surveillance',
+    label: 'Surveillance lock-in',
+    deploySummary: 'surveillance lock-in',
+    durationMultiplier: 1.35,
+    intelMultiplier: 1.45,
+    influenceMultiplier: 1.05,
+    crackdownMultiplier: 0.9,
+    setbackChanceDelta: -0.12,
+    severityRollDelta: -0.14,
+    fatigueDelta: 1,
+  },
   balanced: {
     key: 'balanced',
     label: 'Balanced sweep',
@@ -30,6 +42,18 @@ const RECON_APPROACH_CONFIG = {
     severityRollDelta: 0,
     fatigueDelta: 0,
   },
+  liaison: {
+    key: 'liaison',
+    label: 'Shadow diplomacy',
+    deploySummary: 'shadow diplomacy',
+    durationMultiplier: 1.15,
+    intelMultiplier: 1.1,
+    influenceMultiplier: 1.35,
+    crackdownMultiplier: 1.12,
+    setbackChanceDelta: 0.08,
+    severityRollDelta: 0.12,
+    fatigueDelta: 2,
+  },
   aggressive: {
     key: 'aggressive',
     label: 'Aggressive breach',
@@ -41,6 +65,18 @@ const RECON_APPROACH_CONFIG = {
     setbackChanceDelta: 0.22,
     severityRollDelta: 0.18,
     fatigueDelta: 3,
+  },
+  decoy: {
+    key: 'decoy',
+    label: 'Decoy saturation',
+    deploySummary: 'decoy saturation',
+    durationMultiplier: 0.95,
+    intelMultiplier: 0.88,
+    influenceMultiplier: 0.9,
+    crackdownMultiplier: 0.7,
+    setbackChanceDelta: 0.16,
+    severityRollDelta: 0.08,
+    fatigueDelta: -1,
   },
 };
 
@@ -57,18 +93,30 @@ const createApproachModifierSnapshot = (
     return Math.round(multiplier * 100);
   };
 
+  const durationMultiplier = Number.isFinite(config?.durationMultiplier)
+    ? config.durationMultiplier
+    : 1;
   const crackdownMultiplier = Number.isFinite(config?.crackdownMultiplier)
     ? config.crackdownMultiplier
     : 1;
   const fatigueDelta = Number.isFinite(config?.fatigueDelta)
     ? Math.round(config.fatigueDelta)
     : 0;
+  const toPercentDelta = (value) => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    return Math.round(value * 100);
+  };
 
   const snapshot = {
     approachKey: typeof config?.key === 'string' ? config.key : DEFAULT_APPROACH_KEY,
+    durationDeltaPercent: Math.round((durationMultiplier - 1) * 100),
     intelPercent: toPercent(config?.intelMultiplier, 1),
     influencePercent: toPercent(config?.influenceMultiplier, 1),
     crackdownDeltaPercent: Math.round((crackdownMultiplier - 1) * 100),
+    setbackDeltaPercent: toPercentDelta(config?.setbackChanceDelta),
+    severityDeltaPercent: toPercentDelta(config?.severityRollDelta),
     fatigueDelta,
   };
 
@@ -217,6 +265,11 @@ class ReconSystem {
         if (typeof provided.approachKey === 'string') {
           snapshot.approachKey = provided.approachKey;
         }
+        if (Number.isFinite(provided.durationDeltaPercent)) {
+          snapshot.durationDeltaPercent = Math.round(provided.durationDeltaPercent);
+        } else if (Number.isFinite(provided.durationMultiplier)) {
+          snapshot.durationDeltaPercent = Math.round((provided.durationMultiplier - 1) * 100);
+        }
         if (Number.isFinite(provided.intelPercent)) {
           snapshot.intelPercent = Math.round(provided.intelPercent);
         }
@@ -227,6 +280,16 @@ class ReconSystem {
           snapshot.crackdownDeltaPercent = Math.round(provided.crackdownDeltaPercent);
         } else if (Number.isFinite(provided.crackdownMultiplier)) {
           snapshot.crackdownDeltaPercent = Math.round((provided.crackdownMultiplier - 1) * 100);
+        }
+        if (Number.isFinite(provided.setbackDeltaPercent)) {
+          snapshot.setbackDeltaPercent = Math.round(provided.setbackDeltaPercent);
+        } else if (Number.isFinite(provided.setbackChanceDelta)) {
+          snapshot.setbackDeltaPercent = Math.round(provided.setbackChanceDelta * 100);
+        }
+        if (Number.isFinite(provided.severityDeltaPercent)) {
+          snapshot.severityDeltaPercent = Math.round(provided.severityDeltaPercent);
+        } else if (Number.isFinite(provided.severityRollDelta)) {
+          snapshot.severityDeltaPercent = Math.round(provided.severityRollDelta * 100);
         }
         if (Number.isFinite(provided.fatigueDelta)) {
           snapshot.fatigueDelta = Math.round(provided.fatigueDelta);
