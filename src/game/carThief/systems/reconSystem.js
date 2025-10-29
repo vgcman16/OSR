@@ -44,6 +44,41 @@ const RECON_APPROACH_CONFIG = {
   },
 };
 
+const createApproachModifierSnapshot = (
+  approachConfig = RECON_APPROACH_CONFIG[DEFAULT_APPROACH_KEY],
+  { durationSeconds } = {},
+) => {
+  const config = approachConfig && typeof approachConfig === 'object'
+    ? approachConfig
+    : RECON_APPROACH_CONFIG[DEFAULT_APPROACH_KEY];
+
+  const toPercent = (value, fallback = 1) => {
+    const multiplier = Number.isFinite(value) ? value : fallback;
+    return Math.round(multiplier * 100);
+  };
+
+  const crackdownMultiplier = Number.isFinite(config?.crackdownMultiplier)
+    ? config.crackdownMultiplier
+    : 1;
+  const fatigueDelta = Number.isFinite(config?.fatigueDelta)
+    ? Math.round(config.fatigueDelta)
+    : 0;
+
+  const snapshot = {
+    approachKey: typeof config?.key === 'string' ? config.key : DEFAULT_APPROACH_KEY,
+    intelPercent: toPercent(config?.intelMultiplier, 1),
+    influencePercent: toPercent(config?.influenceMultiplier, 1),
+    crackdownDeltaPercent: Math.round((crackdownMultiplier - 1) * 100),
+    fatigueDelta,
+  };
+
+  if (Number.isFinite(durationSeconds)) {
+    snapshot.durationSeconds = Math.max(0, Math.round(durationSeconds));
+  }
+
+  return snapshot;
+};
+
 const clampNumber = (value, { min = Number.NEGATIVE_INFINITY, max = Number.POSITIVE_INFINITY } = {}) => {
   if (!Number.isFinite(value)) {
     return min;
@@ -167,6 +202,41 @@ class ReconSystem {
       failureStates: Array.isArray(entry.failureStates) ? entry.failureStates.slice() : [],
       result: null,
       approach: approachConfig.key,
+      modifiersSnapshot: (() => {
+        const baseSnapshot = createApproachModifierSnapshot(
+          approachConfig,
+          { durationSeconds: duration },
+        );
+        if (!entry.modifiersSnapshot || typeof entry.modifiersSnapshot !== 'object') {
+          return baseSnapshot;
+        }
+
+        const snapshot = { ...baseSnapshot };
+        const provided = entry.modifiersSnapshot;
+
+        if (typeof provided.approachKey === 'string') {
+          snapshot.approachKey = provided.approachKey;
+        }
+        if (Number.isFinite(provided.intelPercent)) {
+          snapshot.intelPercent = Math.round(provided.intelPercent);
+        }
+        if (Number.isFinite(provided.influencePercent)) {
+          snapshot.influencePercent = Math.round(provided.influencePercent);
+        }
+        if (Number.isFinite(provided.crackdownDeltaPercent)) {
+          snapshot.crackdownDeltaPercent = Math.round(provided.crackdownDeltaPercent);
+        } else if (Number.isFinite(provided.crackdownMultiplier)) {
+          snapshot.crackdownDeltaPercent = Math.round((provided.crackdownMultiplier - 1) * 100);
+        }
+        if (Number.isFinite(provided.fatigueDelta)) {
+          snapshot.fatigueDelta = Math.round(provided.fatigueDelta);
+        }
+        if (Number.isFinite(provided.durationSeconds)) {
+          snapshot.durationSeconds = Math.max(0, Math.round(provided.durationSeconds));
+        }
+
+        return snapshot;
+      })(),
     };
 
     if (entry.result && typeof entry.result === 'object') {
@@ -346,6 +416,10 @@ class ReconSystem {
       remainingSeconds: operationDuration,
       startedAt: Date.now(),
       approach: approachConfig.key,
+      modifiersSnapshot: createApproachModifierSnapshot(
+        approachConfig,
+        { durationSeconds: operationDuration },
+      ),
     });
 
     assignedCrew.forEach((member) => {
@@ -1027,4 +1101,4 @@ class ReconSystem {
   }
 }
 
-export { ReconSystem };
+export { ReconSystem, RECON_APPROACH_CONFIG, createApproachModifierSnapshot };
