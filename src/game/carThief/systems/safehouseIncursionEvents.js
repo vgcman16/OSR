@@ -433,6 +433,27 @@ const buildEventPayload = ({
     source: 'safehouse-incursion',
   };
 
+  const alertChoices = content.choices
+    .map((choice) => {
+      if (!choice || typeof choice !== 'object') {
+        return null;
+      }
+
+      const normalized = {
+        id: typeof choice.id === 'string' ? choice.id : null,
+        label: typeof choice.label === 'string' ? choice.label : null,
+        description: typeof choice.description === 'string' ? choice.description : null,
+        narrative: typeof choice.narrative === 'string' ? choice.narrative : null,
+      };
+
+      if (choice.effects && typeof choice.effects === 'object') {
+        normalized.effects = { ...choice.effects };
+      }
+
+      return normalized;
+    })
+    .filter((entry) => entry && entry.id);
+
   const alert = {
     id: alertId,
     label,
@@ -446,6 +467,7 @@ const buildEventPayload = ({
     safehouseLabel,
     cooldownDays,
     triggeredAt: Date.now(),
+    choices: alertChoices,
   };
 
   return { event, alert };
