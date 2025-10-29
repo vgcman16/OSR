@@ -224,6 +224,9 @@ const missionControls = {
   safehouseAlertPrompt: null,
   safehouseAlertsList: null,
   safehouseAlertStatus: null,
+  safehouseLayoutSection: null,
+  safehouseLayoutWarnings: null,
+  safehouseLayoutZones: null,
   safehouseSelectedProjectId: null,
   lastSafehouseAlertSignature: null,
   selectedCrewIds: [],
@@ -4603,6 +4606,9 @@ const updateSafehousePanel = () => {
     safehouseAlertPrompt,
     safehouseAlertsList,
     safehouseAlertStatus,
+    safehouseLayoutSection,
+    safehouseLayoutWarnings,
+    safehouseLayoutZones,
   } = missionControls;
 
   if (
@@ -4615,12 +4621,16 @@ const updateSafehousePanel = () => {
     !safehouseStatus ||
     !safehouseAlertPrompt ||
     !safehouseAlertsList ||
-    !safehouseAlertStatus
+    !safehouseAlertStatus ||
+    !safehouseLayoutSection ||
+    !safehouseLayoutWarnings ||
+    !safehouseLayoutZones
   ) {
     return;
   }
 
   const economySystem = getEconomySystem();
+  const missionSystem = getMissionSystem();
   const state = getSharedState();
   let alertSummaryLine = '';
 
@@ -4782,6 +4792,127 @@ const updateSafehousePanel = () => {
 
     safehouseAlertStatus.textContent = summarySegments.join(' ');
     return { summaryLine: summarySegments[0] ?? '' };
+  };
+
+  const renderSafehouseLayout = (
+    layout,
+    {
+      warningLines = [],
+      recommendedActions = [],
+      emptyMessage = 'Assign a safehouse to map defensive zones.',
+      idleMessage = 'No active incursions — watchers rotating patrols.',
+    } = {},
+  ) => {
+    safehouseLayoutZones.innerHTML = '';
+    safehouseLayoutWarnings.innerHTML = '';
+
+    const combinedWarnings = [];
+    warningLines
+      .map((line) => (typeof line === 'string' ? line.trim() : ''))
+      .filter(Boolean)
+      .forEach((line) => combinedWarnings.push(line));
+
+    recommendedActions
+      .filter((action) => action && typeof action === 'object')
+      .forEach((action) => {
+        const label = typeof action.label === 'string' ? action.label.trim() : '';
+        const summary = typeof action.summary === 'string' ? action.summary.trim() : '';
+        if (label && summary) {
+          combinedWarnings.push(`${label} — ${summary}`);
+        } else if (label) {
+          combinedWarnings.push(label);
+        }
+      });
+
+    if (combinedWarnings.length) {
+      const list = document.createElement('ul');
+      list.className = 'mission-safehouse__layout-alerts';
+      combinedWarnings.forEach((line) => {
+        const item = document.createElement('li');
+        item.className = 'mission-safehouse__layout-warning';
+        item.textContent = line;
+        list.appendChild(item);
+      });
+      safehouseLayoutWarnings.appendChild(list);
+      safehouseLayoutSection.dataset.layoutState = 'alert';
+    } else {
+      const statusLine = document.createElement('p');
+      statusLine.className = 'mission-safehouse__layout-status';
+      statusLine.textContent = idleMessage;
+      safehouseLayoutWarnings.appendChild(statusLine);
+      safehouseLayoutSection.dataset.layoutState = 'ready';
+    }
+
+    if (!layout || !Array.isArray(layout.zones) || !layout.zones.length) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'mission-safehouse__layout-empty';
+      placeholder.textContent = emptyMessage;
+      safehouseLayoutZones.appendChild(placeholder);
+      safehouseLayoutSection.dataset.layoutState = 'empty';
+      return;
+    }
+
+    const formatFacilityLabel = (facilityId) => {
+      if (typeof facilityId !== 'string' || !facilityId.trim()) {
+        return 'Unassigned slot';
+      }
+      const config = getFacilityEffectConfig(facilityId);
+      if (config?.name) {
+        return config.name;
+      }
+      const normalized = facilityId.replace(/[-_]+/g, ' ').trim();
+      return normalized
+        .split(' ')
+        .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ''))
+        .join(' ');
+    };
+
+    layout.zones.forEach((zone) => {
+      const zoneCard = document.createElement('article');
+      zoneCard.className = 'mission-safehouse__layout-zone';
+      zoneCard.dataset.zoneId = zone?.id ?? '';
+
+      const header = document.createElement('header');
+      header.className = 'mission-safehouse__layout-zone-header';
+
+      const name = document.createElement('h5');
+      name.className = 'mission-safehouse__layout-zone-name';
+      name.textContent = zone?.label ?? 'Zone';
+
+      const scoreValue = Number.isFinite(zone?.defenseScore) ? Math.max(0, zone.defenseScore) : 0;
+      const score = document.createElement('span');
+      score.className = 'mission-safehouse__layout-zone-score';
+      score.dataset.score = String(scoreValue);
+      score.textContent = `Defense ${scoreValue}`;
+      if (scoreValue <= 3) {
+        score.classList.add('mission-safehouse__layout-zone-score--critical');
+      } else if (scoreValue <= 6) {
+        score.classList.add('mission-safehouse__layout-zone-score--weak');
+      }
+
+      header.append(name, score);
+      zoneCard.appendChild(header);
+
+      const facilities = Array.isArray(zone?.facilityIds) ? zone.facilityIds : [];
+      const list = document.createElement('ul');
+      list.className = 'mission-safehouse__layout-zone-facilities';
+      if (facilities.length) {
+        facilities.forEach((facilityId) => {
+          const item = document.createElement('li');
+          item.textContent = formatFacilityLabel(facilityId);
+          list.appendChild(item);
+        });
+      } else {
+        const emptyItem = document.createElement('li');
+        emptyItem.className = 'mission-safehouse__layout-zone-facilities-empty';
+        emptyItem.textContent = 'No facilities installed.';
+        list.appendChild(emptyItem);
+      }
+
+      zoneCard.appendChild(list);
+      safehouseLayoutZones.appendChild(zoneCard);
+    });
+
   };
 
   const renderEffects = (lines) => {
@@ -5123,6 +5254,10 @@ const updateSafehousePanel = () => {
     offlineAlert.textContent = 'Reconnect the command uplink to monitor incursions.';
     safehouseAlertsList.appendChild(offlineAlert);
     safehouseAlertStatus.textContent = '';
+    renderSafehouseLayout(null, {
+      emptyMessage: 'Safehouse layout offline.',
+      idleMessage: 'Layout telemetry unavailable.',
+    });
     const detail = missionControls.safehouseStatusDetail?.trim();
     const summary = 'Safehouse telemetry unavailable.';
     safehouseStatus.textContent = [detail, alertSummaryLine, summary].filter(Boolean).join(' ');
@@ -5139,6 +5274,16 @@ const updateSafehousePanel = () => {
   const trackedAlerts = Array.isArray(safehouseAlerts)
     ? safehouseAlerts.filter((entry) => entry && entry.id)
     : [];
+  const missionStateSnapshot = missionSystem?.state ?? state ?? {};
+  const defenseState = missionStateSnapshot?.safehouseDefense ?? {};
+  const layoutsBySafehouse =
+    defenseState && typeof defenseState.layoutsBySafehouse === 'object'
+      ? defenseState.layoutsBySafehouse
+      : {};
+  const scenariosByAlert =
+    defenseState && typeof defenseState.scenariosByAlert === 'object'
+      ? defenseState.scenariosByAlert
+      : {};
   const nextAlertSignature = trackedAlerts.length
     ? trackedAlerts
         .map((entry) => {
@@ -5165,6 +5310,93 @@ const updateSafehousePanel = () => {
   }
   const alertRenderResult = renderSafehouseAlerts(safehouseAlerts, { day: dayValue });
   alertSummaryLine = alertRenderResult?.summaryLine ?? '';
+
+  const activeSafehouseId = safehouse?.id ?? missionStateSnapshot?.player?.safehouseId ?? null;
+  const activeLayout = activeSafehouseId ? layoutsBySafehouse?.[activeSafehouseId] ?? null : null;
+  const layoutWarnings = [];
+  trackedAlerts.forEach((alert) => {
+    if (activeSafehouseId && alert.safehouseId && alert.safehouseId !== activeSafehouseId) {
+      return;
+    }
+
+    const status = typeof alert.status === 'string' ? alert.status.trim().toLowerCase() : 'alert';
+    if (status === 'cooldown' && alert.downtime && typeof alert.downtime === 'object') {
+      const downtimeLabel =
+        typeof alert.downtime.label === 'string' && alert.downtime.label.trim()
+          ? alert.downtime.label.trim()
+          : typeof alert.facilityName === 'string' && alert.facilityName.trim()
+            ? alert.facilityName.trim()
+            : 'Facility';
+      const penalties = Array.isArray(alert.downtime.penalties)
+        ? alert.downtime.penalties.filter((line) => typeof line === 'string' && line.trim())
+        : [];
+      const summary =
+        typeof alert.downtime.summary === 'string' && alert.downtime.summary.trim()
+          ? alert.downtime.summary.trim()
+          : typeof alert.downtime.penaltySummary === 'string' && alert.downtime.penaltySummary.trim()
+            ? alert.downtime.penaltySummary.trim()
+            : '';
+      if (penalties.length) {
+        layoutWarnings.push(`${downtimeLabel}: ${penalties.join(' ')}`);
+      } else if (summary) {
+        layoutWarnings.push(`${downtimeLabel}: ${summary}`);
+      }
+    }
+  });
+
+  const relevantScenarios = trackedAlerts
+    .map((alert) => scenariosByAlert?.[alert.id] ?? null)
+    .filter((scenario) => {
+      if (!scenario) {
+        return false;
+      }
+      if (!activeSafehouseId) {
+        return true;
+      }
+      return !scenario.safehouseId || scenario.safehouseId === activeSafehouseId;
+    });
+
+  const scenarioRecommendedActions = [];
+  const seenActionIds = new Set();
+  relevantScenarios.forEach((scenario) => {
+    const tracks = Array.isArray(scenario?.escalationTracks) ? scenario.escalationTracks : [];
+    tracks.forEach((track) => {
+      const value = Number.isFinite(track?.value) ? track.value : 0;
+      const max = Number.isFinite(track?.max) ? track.max : 6;
+      const status = typeof track?.status === 'string' ? track.status.trim().toLowerCase() : 'active';
+      if (value >= max - 1 || status === 'escalating') {
+        layoutWarnings.push(`${track.label}: ${value}/${max} pressure (${status}).`);
+      } else if (status && status !== 'active') {
+        layoutWarnings.push(`${track.label}: ${value}/${max} pressure (${status}).`);
+      }
+    });
+
+    if (Array.isArray(scenario?.recommendedActions)) {
+      scenario.recommendedActions.forEach((action) => {
+        if (action && typeof action === 'object') {
+          const actionId = typeof action.id === 'string' ? action.id : null;
+          if (actionId && seenActionIds.has(actionId)) {
+            return;
+          }
+          if (actionId) {
+            seenActionIds.add(actionId);
+          }
+          scenarioRecommendedActions.push(action);
+        }
+      });
+    }
+  });
+
+  renderSafehouseLayout(activeLayout, {
+    warningLines: layoutWarnings,
+    recommendedActions: scenarioRecommendedActions,
+    emptyMessage: safehouse
+      ? 'Layout intel compiling — assign crews to facilities to unlock defenses.'
+      : 'Assign a safehouse to map defensive zones.',
+    idleMessage: scenarioRecommendedActions.length
+      ? 'Alerts resolved — crews rotating watch for next incursion.'
+      : 'No active incursions — watchers rotating patrols.',
+  });
 
   if (safehouse) {
     const nameLabel = `${safehouse.name}${safehouse.location ? ` — ${safehouse.location}` : ''}`;
@@ -12039,6 +12271,30 @@ const setupMissionControls = () => {
       catalogPlaceholder.textContent = 'Safehouse manifest loading…';
       catalog.appendChild(catalogPlaceholder);
 
+      const layoutSection = document.createElement('div');
+      layoutSection.id = 'mission-safehouse-layout';
+      layoutSection.className = 'mission-safehouse__layout';
+
+      const layoutTitle = document.createElement('h4');
+      layoutTitle.className = 'mission-details__title mission-safehouse__layout-title';
+      layoutTitle.textContent = 'Defensive Layout';
+
+      const layoutWarnings = document.createElement('div');
+      layoutWarnings.id = 'mission-safehouse-layout-warnings';
+      layoutWarnings.className = 'mission-safehouse__layout-warnings';
+      layoutWarnings.textContent = 'Layout telemetry syncing…';
+
+      const layoutGrid = document.createElement('div');
+      layoutGrid.id = 'mission-safehouse-layout-grid';
+      layoutGrid.className = 'mission-safehouse__layout-grid';
+
+      const layoutPlaceholder = document.createElement('p');
+      layoutPlaceholder.className = 'mission-safehouse__layout-empty';
+      layoutPlaceholder.textContent = 'Assign a safehouse to map defensive zones.';
+      layoutGrid.appendChild(layoutPlaceholder);
+
+      layoutSection.append(layoutTitle, layoutWarnings, layoutGrid);
+
       const alertsContainer = document.createElement('div');
       alertsContainer.className = 'mission-safehouse__alerts';
 
@@ -12114,6 +12370,7 @@ const setupMissionControls = () => {
         hint,
         grid,
         catalog,
+        layoutSection,
         alertsContainer,
         projectsContainer,
         projectButton,
@@ -12135,6 +12392,9 @@ const setupMissionControls = () => {
     missionControls.safehouseTier = safehouseSection.querySelector('#mission-safehouse-tier');
     missionControls.safehouseEffects = safehouseSection.querySelector('#mission-safehouse-effects');
     missionControls.safehouseList = safehouseSection.querySelector('#mission-safehouse-catalog');
+    missionControls.safehouseLayoutSection = safehouseSection.querySelector('#mission-safehouse-layout');
+    missionControls.safehouseLayoutWarnings = safehouseSection.querySelector('#mission-safehouse-layout-warnings');
+    missionControls.safehouseLayoutZones = safehouseSection.querySelector('#mission-safehouse-layout-grid');
     missionControls.safehouseProjects = safehouseSection.querySelector('#mission-safehouse-projects');
     missionControls.safehouseProjectButton = safehouseSection.querySelector('#mission-safehouse-project-btn');
     missionControls.safehouseRushButton = safehouseSection.querySelector('#mission-safehouse-rush-btn');
