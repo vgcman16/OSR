@@ -702,6 +702,108 @@ body {
   color: rgba(209, 234, 255, 0.78);
 }
 
+.mission-recon__activity {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.2rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.mission-recon__activity-item {
+  display: grid;
+  grid-template-columns: min-content 1fr;
+  align-items: start;
+  gap: 0.45rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(6, 12, 22, 0.5);
+  border-left: 3px solid rgba(120, 190, 255, 0.35);
+  box-shadow: inset 0 0 8px rgba(120, 190, 255, 0.08);
+  color: rgba(209, 234, 255, 0.82);
+}
+
+.mission-recon__activity-icon {
+  font-size: 0.9rem;
+  line-height: 1;
+  margin-top: 0.05rem;
+}
+
+.mission-recon__activity-icon:empty {
+  display: none;
+}
+
+.mission-recon__activity-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.mission-recon__activity-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.mission-recon__activity-time {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(180, 215, 255, 0.7);
+}
+
+.mission-recon__activity-summary {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(227, 239, 255, 0.94);
+  flex: 1 1 auto;
+}
+
+.mission-recon__activity-detail {
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: rgba(209, 234, 255, 0.78);
+}
+
+.mission-recon__activity-item[data-severity='warning'] {
+  border-left-color: rgba(255, 196, 120, 0.85);
+}
+
+.mission-recon__activity-item[data-severity='warning'] .mission-recon__activity-summary {
+  color: rgba(255, 214, 182, 0.95);
+}
+
+.mission-recon__activity-item[data-severity='warning'] .mission-recon__activity-detail {
+  color: rgba(255, 214, 182, 0.82);
+}
+
+.mission-recon__activity-item[data-severity='critical'] {
+  border-left-color: rgba(255, 140, 140, 0.88);
+}
+
+.mission-recon__activity-item[data-severity='critical'] .mission-recon__activity-summary {
+  color: rgba(255, 182, 182, 0.96);
+}
+
+.mission-recon__activity-item[data-severity='critical'] .mission-recon__activity-detail {
+  color: rgba(255, 182, 182, 0.85);
+}
+
+.mission-recon__activity-item[data-severity='success'] {
+  border-left-color: rgba(166, 255, 202, 0.85);
+}
+
+.mission-recon__activity-item[data-severity='success'] .mission-recon__activity-summary {
+  color: rgba(214, 247, 224, 0.95);
+}
+
+.mission-recon__activity-item[data-severity='success'] .mission-recon__activity-detail {
+  color: rgba(214, 247, 224, 0.82);
+}
+
 .mission-recon__cancel-btn {
   font-size: 0.75rem;
   padding: 0.3rem 0.6rem;

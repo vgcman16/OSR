@@ -3728,6 +3728,48 @@ const buildReconAssignmentBadges = (assignment) => {
   return badges;
 };
 
+const normalizeReconSeverity = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  const aliasMap = {
+    danger: 'critical',
+    emergency: 'critical',
+    severe: 'critical',
+    critical: 'critical',
+    fatal: 'critical',
+    high: 'critical',
+    warning: 'warning',
+    caution: 'warning',
+    alert: 'warning',
+    moderate: 'warning',
+    minor: 'info',
+    info: 'info',
+    informational: 'info',
+    notice: 'info',
+    neutral: 'info',
+    success: 'success',
+    positive: 'success',
+    bonus: 'success',
+    resolved: 'success',
+  };
+
+  return aliasMap[normalized] ?? null;
+};
+
+const resolveReconSeverityIcon = (severity, fallbackIcon = '🔍') => {
+  const iconMap = {
+    critical: '🚨',
+    warning: '⚠️',
+    success: '✅',
+    info: 'ℹ️',
+  };
+
+  return iconMap[severity] ?? fallbackIcon;
+};
+
 const buildReconCrewNotes = (assignment, crewById) => {
   if (!assignment) {
     return [];
@@ -3776,6 +3818,137 @@ const buildReconCrewNotes = (assignment, crewById) => {
     .filter(Boolean);
 
   return notes.filter((note, index) => notes.indexOf(note) === index);
+};
+
+const buildReconActivityEntries = (assignment) => {
+  if (!assignment) {
+    return [];
+  }
+
+  const collectDetailSegments = (raw, summaryText) => {
+    const segments = [];
+    const seen = new Set();
+
+    const addString = (value) => {
+      if (typeof value !== 'string') {
+        return;
+      }
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return;
+      }
+      if (summaryText && trimmed === summaryText) {
+        return;
+      }
+      if (seen.has(trimmed)) {
+        return;
+      }
+      seen.add(trimmed);
+      segments.push(trimmed);
+    };
+
+    const candidates = [raw.detail, raw.description, raw.effectSummary, raw.message];
+    candidates.forEach((candidate) => {
+      if (Array.isArray(candidate)) {
+        candidate.forEach(addString);
+      } else {
+        addString(candidate);
+      }
+    });
+
+    if (Array.isArray(raw.details)) {
+      raw.details.forEach(addString);
+    }
+
+    if (Array.isArray(raw.notes)) {
+      raw.notes.forEach(addString);
+    } else if (typeof raw.notes === 'string') {
+      addString(raw.notes);
+    }
+
+    return segments.join(' • ');
+  };
+
+  const resolveTimestamp = (raw, fallbackTimestamp) => {
+    const candidates = [
+      raw.timestamp,
+      raw.resolvedAt,
+      raw.completedAt,
+      raw.updatedAt,
+      raw.triggeredAt,
+      raw.occurredAt,
+      raw.loggedAt,
+      raw.createdAt,
+      raw.time,
+    ];
+
+    const match = candidates.find((value) => Number.isFinite(value));
+    if (Number.isFinite(match)) {
+      return match;
+    }
+
+    return Number.isFinite(fallbackTimestamp) ? fallbackTimestamp : null;
+  };
+
+  const normalizeEntry = (raw, fallbackTimestamp) => {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+
+    const summaryCandidates = [
+      raw.summary,
+      raw.title,
+      raw.label,
+      raw.eventLabel,
+      raw.name,
+      raw.type,
+    ];
+    const summary = summaryCandidates.find((value) => typeof value === 'string' && value.trim())
+      ?.trim() ?? null;
+
+    const detail = collectDetailSegments(raw, summary);
+    const primaryText = summary || detail;
+    if (!primaryText) {
+      return null;
+    }
+
+    const severity = normalizeReconSeverity(raw.severity) ?? normalizeReconSeverity(raw.tone)
+      ?? normalizeReconSeverity(raw.level) ?? null;
+    const icon = typeof raw.icon === 'string' && raw.icon.trim()
+      ? raw.icon.trim()
+      : resolveReconSeverityIcon(severity);
+
+    const timestamp = resolveTimestamp(raw, fallbackTimestamp);
+    const timeLabel = Number.isFinite(timestamp)
+      ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : null;
+
+    return {
+      summary: summary ?? detail,
+      detail: summary && detail && detail !== summary ? detail : null,
+      severity,
+      icon,
+      timestamp,
+      timeLabel,
+    };
+  };
+
+  const fallbackTimestamp = assignment.updatedAt ?? assignment.completedAt ?? assignment.startedAt ?? null;
+  const rawEntries = [
+    ...(Array.isArray(assignment.history) ? assignment.history : []),
+    ...(Array.isArray(assignment.events) ? assignment.events : []),
+  ];
+
+  const normalized = rawEntries
+    .map((entry) => normalizeEntry(entry, fallbackTimestamp))
+    .filter(Boolean)
+    .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+
+  if (normalized.length > 5) {
+    return normalized.slice(0, 5);
+  }
+
+  return normalized;
 };
 
 const updateReconPanel = () => {
@@ -4104,6 +4277,63 @@ const updateReconPanel = () => {
         });
         if (notesList.childNodes.length) {
           item.appendChild(notesList);
+        }
+      }
+
+      const activityEntries = buildReconActivityEntries(assignment);
+      if (activityEntries.length) {
+        const activityList = document.createElement('ul');
+        activityList.className = 'mission-recon__activity';
+        activityEntries.forEach((entry) => {
+          if (!entry) {
+            return;
+          }
+
+          const { icon, timeLabel, summary, detail, severity } = entry;
+          const entryItem = document.createElement('li');
+          entryItem.className = 'mission-recon__activity-item';
+          if (severity) {
+            entryItem.dataset.severity = severity;
+          }
+
+          const iconSpan = document.createElement('span');
+          iconSpan.className = 'mission-recon__activity-icon';
+          iconSpan.textContent = icon ?? '';
+          entryItem.appendChild(iconSpan);
+
+          const contentWrapper = document.createElement('div');
+          contentWrapper.className = 'mission-recon__activity-content';
+
+          const headerRow = document.createElement('div');
+          headerRow.className = 'mission-recon__activity-header';
+
+          if (timeLabel) {
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'mission-recon__activity-time';
+            timeSpan.textContent = timeLabel;
+            headerRow.appendChild(timeSpan);
+          }
+
+          const summarySpan = document.createElement('span');
+          summarySpan.className = 'mission-recon__activity-summary';
+          summarySpan.textContent = summary;
+          headerRow.appendChild(summarySpan);
+
+          contentWrapper.appendChild(headerRow);
+
+          if (detail) {
+            const detailSpan = document.createElement('div');
+            detailSpan.className = 'mission-recon__activity-detail';
+            detailSpan.textContent = detail;
+            contentWrapper.appendChild(detailSpan);
+          }
+
+          entryItem.appendChild(contentWrapper);
+          activityList.appendChild(entryItem);
+        });
+
+        if (activityList.childNodes.length) {
+          item.appendChild(activityList);
         }
       }
 
