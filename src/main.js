@@ -24,6 +24,7 @@ import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from '
 import { computeSafehouseFacilityBonuses, getFacilityEffectConfig } from './game/carThief/world/safehouseEffects.js';
 import { createOnboardingTour } from './game/carThief/ui/onboarding.js';
 import { CREW_GEAR_CATALOG } from './game/carThief/systems/crewGear.js';
+import { getCrewGearVendorOptions, purchaseCrewGearFromVendor } from './game/carThief/systems/crewGearVendors.js';
 
 let gameInstance = null;
 let onboardingTour = null;
@@ -161,6 +162,7 @@ const missionControls = {
   trainingGearSelect: null,
   trainingGearAcquireButton: null,
   trainingGearEquipButton: null,
+  trainingGearVendorStatus: null,
   trainingGearList: null,
   trainingRestCrewSelect: null,
   trainingRestDurationSelect: null,
@@ -858,14 +860,6 @@ const PLAYER_GEAR_OPTIONS = Object.values(PLAYER_GEAR_CATALOG).map((entry) => ({
   label: `${entry.label} — ${entry.description}`,
   cost: entry.cost,
 })).sort((a, b) => a.label.localeCompare(b.label));
-
-const CREW_GEAR_OPTIONS = Object.values(CREW_GEAR_CATALOG)
-  .map((entry) => ({
-    value: entry.id,
-    label: `${entry.label} — ${entry.description}`,
-    cost: entry.cost ?? 0,
-  }))
-  .sort((a, b) => a.label.localeCompare(b.label));
 
 const LOYALTY_TRAINING_COST = 2000;
 const SPECIALTY_TRAINING_COST = 3500;
@@ -7581,6 +7575,7 @@ const updateTrainingOptions = () => {
   const state = missionSystem?.state ?? getSharedState();
   const crew = Array.isArray(state?.crew) ? state.crew : [];
   const funds = Number.isFinite(state?.funds) ? state.funds : 0;
+  const vendorOptions = getCrewGearVendorOptions(state ?? {});
 
   const previousSelection = crewSelect.value;
   crewSelect.innerHTML = '';
@@ -7693,60 +7688,93 @@ const updateTrainingOptions = () => {
   gearSelect.innerHTML = '';
   const gearPlaceholder = document.createElement('option');
   gearPlaceholder.value = '';
-  gearPlaceholder.textContent = CREW_GEAR_OPTIONS.length
+  gearPlaceholder.textContent = vendorOptions.length
     ? 'Select crew gear'
-    : 'No gear available';
+    : 'No vendor stock available';
   gearPlaceholder.disabled = true;
   gearPlaceholder.selected = true;
   gearSelect.appendChild(gearPlaceholder);
 
-  CREW_GEAR_OPTIONS.forEach((entry) => {
+  vendorOptions.forEach((entry) => {
     const option = document.createElement('option');
-    option.value = entry.value;
-    const owned = currentSelection ? crewOwnsGear(currentSelection, entry.value) : false;
-    const equipped = currentSelection ? crewHasEquippedGear(currentSelection, entry.value) : false;
-    const statusLabel = owned ? (equipped ? ' (equipped)' : ' (owned)') : '';
+    option.value = entry.gearId;
+    const owned = currentSelection ? crewOwnsGear(currentSelection, entry.gearId) : false;
+    const equipped = currentSelection ? crewHasEquippedGear(currentSelection, entry.gearId) : false;
+    const statusSegments = [];
+    if (entry.locked) {
+      statusSegments.push('locked');
+    } else if (entry.soldOut) {
+      statusSegments.push('restocking');
+    } else if (Number.isFinite(entry.quantity)) {
+      statusSegments.push(`${entry.quantity} in stock`);
+    }
+    if (owned) {
+      statusSegments.push(equipped ? 'equipped' : 'owned');
+    }
+    const statusLabel = statusSegments.length ? ` (${statusSegments.join(', ')})` : '';
     option.textContent = `${entry.label}${statusLabel}`;
+    option.dataset.available = entry.available ? 'true' : 'false';
+    option.dataset.locked = entry.locked ? 'true' : 'false';
+    option.dataset.soldOut = entry.soldOut ? 'true' : 'false';
+    option.dataset.messages = entry.messages.join(' ');
+    option.dataset.cost = entry.cost;
     gearSelect.appendChild(option);
   });
 
-  if (currentSelection && CREW_GEAR_OPTIONS.some((entry) => entry.value === previousGearSelection)) {
+  if (currentSelection && vendorOptions.some((entry) => entry.gearId === previousGearSelection)) {
     gearSelect.value = previousGearSelection;
     gearPlaceholder.selected = false;
-  } else if (currentSelection && CREW_GEAR_OPTIONS.length) {
-    gearSelect.value = CREW_GEAR_OPTIONS[0].value;
+  } else if (currentSelection && vendorOptions.length) {
+    const preferred = vendorOptions.find((entry) => entry.available) ?? vendorOptions[0];
+    gearSelect.value = preferred?.gearId ?? '';
     gearPlaceholder.selected = false;
   } else {
     gearSelect.value = '';
     gearPlaceholder.selected = true;
   }
 
-  gearSelect.disabled = !currentSelection || !CREW_GEAR_OPTIONS.length;
+  gearSelect.disabled = !currentSelection || !vendorOptions.length;
 
-  const selectedGearOption = CREW_GEAR_OPTIONS.find((entry) => entry.value === gearSelect.value) ?? null;
-  const selectedGearConfig = selectedGearOption ? CREW_GEAR_CATALOG[selectedGearOption.value] : null;
-  const gearCost = Number.isFinite(selectedGearOption?.cost)
-    ? selectedGearOption.cost
+  const selectedVendorOption = vendorOptions.find((entry) => entry.gearId === gearSelect.value) ?? null;
+  const vendorStatusNode = missionControls.trainingGearVendorStatus;
+  if (vendorStatusNode) {
+    if (selectedVendorOption?.messages?.length) {
+      vendorStatusNode.textContent = selectedVendorOption.messages.join(' ');
+    } else if (vendorOptions.length) {
+      vendorStatusNode.textContent = 'Select crew gear to view stock and unlock requirements.';
+    } else {
+      vendorStatusNode.textContent = 'No crew gear vendors are currently stocked.';
+    }
+  }
+
+  const selectedGearConfig = selectedVendorOption ? CREW_GEAR_CATALOG[selectedVendorOption.gearId] : null;
+  const gearCost = Number.isFinite(selectedVendorOption?.cost)
+    ? selectedVendorOption.cost
     : selectedGearConfig?.cost ?? 0;
-  const ownsSelectedGear = currentSelection && selectedGearOption
-    ? crewOwnsGear(currentSelection, selectedGearOption.value)
+  const ownsSelectedGear = currentSelection && selectedVendorOption
+    ? crewOwnsGear(currentSelection, selectedVendorOption.gearId)
     : false;
-  const gearEquipped = currentSelection && selectedGearOption
-    ? crewHasEquippedGear(currentSelection, selectedGearOption.value)
+  const gearEquipped = currentSelection && selectedVendorOption
+    ? crewHasEquippedGear(currentSelection, selectedVendorOption.gearId)
     : false;
 
   gearAcquireButton.disabled =
     !missionSystem
     || !economySystem
     || !currentSelection
-    || !selectedGearOption
+    || !selectedVendorOption
+    || !selectedVendorOption.available
     || ownsSelectedGear
     || funds < gearCost;
 
   if (!currentSelection) {
     gearAcquireButton.title = 'Select a crew member to outfit.';
-  } else if (!selectedGearOption) {
+  } else if (!selectedVendorOption) {
     gearAcquireButton.title = 'Select gear to acquire.';
+  } else if (selectedVendorOption.locked) {
+    gearAcquireButton.title = selectedVendorOption.messages.join(' ') || 'Complete objectives to unlock this gear.';
+  } else if (selectedVendorOption.soldOut) {
+    gearAcquireButton.title = selectedVendorOption.messages.join(' ') || 'Vendor is currently sold out.';
   } else if (ownsSelectedGear) {
     gearAcquireButton.title = `${currentSelection.name} already owns this gear.`;
   } else if (funds < gearCost) {
@@ -7761,12 +7789,12 @@ const updateTrainingOptions = () => {
     gearAcquireButton.textContent = 'Acquire Gear';
   }
 
-  const canToggleGear = Boolean(currentSelection && selectedGearOption && ownsSelectedGear);
+  const canToggleGear = Boolean(currentSelection && selectedVendorOption && ownsSelectedGear);
   gearEquipButton.disabled = !canToggleGear;
 
   if (!currentSelection) {
     gearEquipButton.title = 'Select a crew member to outfit.';
-  } else if (!selectedGearOption) {
+  } else if (!selectedVendorOption) {
     gearEquipButton.title = 'Select gear to equip.';
   } else if (!ownsSelectedGear) {
     gearEquipButton.title = `${currentSelection.name} must acquire this gear before equipping it.`;
@@ -7900,11 +7928,22 @@ const handleCrewGearAcquisition = () => {
   }
 
   const gearId = gearSelect.value;
-  const option = CREW_GEAR_OPTIONS.find((entry) => entry.value === gearId) ?? null;
   const config = gearId ? CREW_GEAR_CATALOG[gearId] : null;
+  const vendorOptions = getCrewGearVendorOptions(state ?? {});
+  const vendorEntry = vendorOptions.find((entry) => entry.gearId === gearId) ?? null;
 
-  if (!option || !config) {
+  if (!vendorEntry || !config) {
     setTrainingStatus('Select gear to acquire.');
+    return;
+  }
+
+  if (vendorEntry.locked) {
+    setTrainingStatus(vendorEntry.messages.join(' ') || 'Meet the unlock requirements to access this gear.');
+    return;
+  }
+
+  if (vendorEntry.soldOut || !vendorEntry.available) {
+    setTrainingStatus(vendorEntry.messages.join(' ') || 'Vendor is currently sold out.');
     return;
   }
 
@@ -7913,10 +7952,33 @@ const handleCrewGearAcquisition = () => {
     return;
   }
 
-  const cost = Number.isFinite(option.cost) ? option.cost : config.cost ?? 0;
+  const cost = Number.isFinite(vendorEntry.cost) ? vendorEntry.cost : config.cost ?? 0;
   const funds = Number.isFinite(state.funds) ? state.funds : 0;
   if (funds < cost) {
     setTrainingStatus('Insufficient funds for this gear.');
+    return;
+  }
+
+  const purchaseResult = purchaseCrewGearFromVendor(state, gearId);
+  if (!purchaseResult?.success) {
+    if (purchaseResult?.reason === 'locked') {
+      const message = Array.isArray(purchaseResult.requirements)
+        ? purchaseResult.requirements
+            .filter((req) => req && req.fulfilled === false && req.message)
+            .map((req) => req.message)
+            .join(' ')
+        : '';
+      setTrainingStatus(message || 'Gear remains locked.');
+      return;
+    }
+    if (purchaseResult?.reason === 'sold-out') {
+      const restockLabel = Number.isFinite(purchaseResult.restockDay)
+        ? `Restocks Day ${purchaseResult.restockDay}.`
+        : 'Vendor is sold out.';
+      setTrainingStatus(restockLabel);
+      return;
+    }
+    setTrainingStatus('Unable to secure this gear from the vendor right now.');
     return;
   }
 
@@ -7943,7 +8005,10 @@ const handleCrewGearAcquisition = () => {
     }
   }
 
-  setTrainingStatus(`${member.name} acquires ${config.label}.`);
+  const restockMessage = Number.isFinite(purchaseResult?.nextRestockDay)
+    ? `Vendor restocks Day ${purchaseResult.nextRestockDay}.`
+    : '';
+  setTrainingStatus(`${member.name} acquires ${config.label}.${restockMessage ? ` ${restockMessage}` : ''}`);
   updateTrainingOptions();
   updateCrewSelectionOptions();
   updateMissionControls();
@@ -10913,6 +10978,11 @@ const setupMissionControls = () => {
     gearSelect.id = 'mission-training-gear';
     gearSelect.name = 'mission-training-gear';
 
+    const vendorStatus = document.createElement('div');
+    vendorStatus.id = 'mission-training-gear-vendor-status';
+    vendorStatus.className = 'mission-training__vendor-status';
+    vendorStatus.textContent = 'Select gear to view vendor stock and unlocks.';
+
     const actions = document.createElement('div');
     actions.className = 'mission-training__actions';
 
@@ -10938,10 +11008,11 @@ const setupMissionControls = () => {
     if (insertBeforeNode) {
       trainingSection.insertBefore(gearLabel, insertBeforeNode);
       trainingSection.insertBefore(gearSelect, insertBeforeNode);
+      trainingSection.insertBefore(vendorStatus, insertBeforeNode);
       trainingSection.insertBefore(actions, insertBeforeNode);
       trainingSection.insertBefore(gearList, insertBeforeNode);
     } else {
-      trainingSection.append(gearLabel, gearSelect, actions, gearList);
+      trainingSection.append(gearLabel, gearSelect, vendorStatus, actions, gearList);
     }
   };
 
@@ -11238,6 +11309,7 @@ const setupMissionControls = () => {
   missionControls.trainingGearSelect = document.getElementById('mission-training-gear');
   missionControls.trainingGearAcquireButton = document.getElementById('mission-training-gear-buy-btn');
   missionControls.trainingGearEquipButton = document.getElementById('mission-training-gear-equip-btn');
+  missionControls.trainingGearVendorStatus = document.getElementById('mission-training-gear-vendor-status');
   missionControls.trainingGearList = document.getElementById('mission-training-gear-list');
   missionControls.trainingRestCrewSelect = document.getElementById('mission-training-rest-crew');
   missionControls.trainingRestDurationSelect = document.getElementById('mission-training-rest-duration');

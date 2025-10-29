@@ -1,5 +1,6 @@
 import { getActiveSafehouseFromState } from '../world/safehouse.js';
 import { computeSafehouseFacilityBonuses } from '../world/safehouseEffects.js';
+import { advanceCrewGearVendorsForNewDay } from './crewGearVendors.js';
 
 const DAY_LENGTH_SECONDS = 45;
 
@@ -233,9 +234,13 @@ class EconomySystem {
       this.applySafehouseDailyEconomyEffects();
       this.recoverCrewFatigue(1);
       this.state.day += 1;
+      const { restocked } = advanceCrewGearVendorsForNewDay(this.state);
       if (this.state) {
         this.state.needsHudRefresh = true;
         this.state.lastEconomyTickAt = Date.now();
+        if (restocked) {
+          this.state.lastVendorRefreshAt = Date.now();
+        }
       }
       const total =
         this.pendingExpenseReport.base +
