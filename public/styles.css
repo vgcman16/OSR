@@ -483,6 +483,63 @@ body {
   flex-wrap: wrap;
 }
 
+.mission-recon__status {
+  min-height: 2.2rem;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.78);
+  transition: color 0.2s ease;
+}
+
+.mission-recon__status[data-tone='warning'] {
+  color: rgba(255, 166, 166, 0.92);
+}
+
+.mission-recon__status[data-tone='success'] {
+  color: rgba(166, 255, 202, 0.92);
+}
+
+.mission-recon__status[data-tone='info'] {
+  color: rgba(209, 234, 255, 0.85);
+}
+
+.mission-recon__status[data-tone='bonus'] {
+  color: rgba(166, 255, 229, 0.9);
+}
+
+.mission-recon__approach-detail {
+  align-self: stretch;
+  margin-top: 0.3rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(12, 18, 30, 0.45);
+  border: 1px solid rgba(120, 190, 255, 0.2);
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+  color: rgba(209, 234, 255, 0.78);
+}
+
+.mission-recon__approach-detail[hidden] {
+  display: none;
+}
+
+.mission-recon__approach-detail-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
+}
+
+.mission-recon__approach-detail-item[data-state='penalty'] {
+  color: rgba(255, 166, 166, 0.92);
+}
+
+.mission-recon__approach-detail-item[data-state='bonus'] {
+  color: rgba(166, 255, 229, 0.92);
+}
+
 .mission-recon__summary {
   font-weight: 600;
   color: rgba(227, 239, 255, 0.95);

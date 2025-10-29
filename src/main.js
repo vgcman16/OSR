@@ -18,6 +18,10 @@ import {
   CRACKDOWN_NOTORIETY_PRESSURE,
 } from './game/carThief/systems/missionSystem.js';
 import { getVehicleModRecipes, assessVehicleModAffordability } from './game/carThief/systems/vehicleModRecipes.js';
+import {
+  RECON_APPROACH_CONFIG,
+  createApproachModifierSnapshot,
+} from './game/carThief/systems/reconSystem.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
 import { getAvailableCrewStorylineMissions } from './game/carThief/systems/crewStorylines.js';
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
@@ -115,9 +119,13 @@ const missionControls = {
   reconDurationSelect: null,
   reconApproachSelect: null,
   reconAssignButton: null,
+  reconApproachDetail: null,
   reconStatus: null,
   reconList: null,
   reconStatusDetail: '',
+  reconStatusTone: 'neutral',
+  reconStatusSource: 'system',
+  reconStatusTimestamp: 0,
   reconSelectedCrewIds: [],
   lastReconCompletionKey: null,
   crewList: null,
@@ -2950,7 +2958,7 @@ const armReconTargetFromDistrict = (district) => {
   }
 
   const districtLabel = district?.name ?? 'District';
-  setReconStatus(`Recon target armed: ${districtLabel}.`);
+  setReconStatus(`Recon target armed: ${districtLabel}.`, { tone: 'info', source: 'system' });
 };
 
 const handleCityIntelCanvasPointerMove = (event) => {
@@ -3382,14 +3390,38 @@ const setTrainingStatus = (message) => {
   missionControls.trainingStatus.textContent = message ?? '';
 };
 
-const setReconStatus = (message) => {
-  if (!missionControls.reconStatus) {
-    missionControls.reconStatusDetail = message ?? '';
+const setReconStatus = (message, options = {}) => {
+  const {
+    tone = 'neutral',
+    source = 'system',
+    force = true,
+  } = options ?? {};
+
+  if (!force && missionControls.reconStatusSource && missionControls.reconStatusSource !== source) {
     return;
   }
 
-  missionControls.reconStatus.textContent = message ?? '';
-  missionControls.reconStatusDetail = message ?? '';
+  const normalizedMessage = typeof message === 'string'
+    ? message
+    : message === null || message === undefined
+      ? ''
+      : String(message);
+
+  missionControls.reconStatusDetail = normalizedMessage;
+  missionControls.reconStatusTone = tone;
+  missionControls.reconStatusSource = source;
+  missionControls.reconStatusTimestamp = Date.now();
+
+  if (!missionControls.reconStatus) {
+    return;
+  }
+
+  missionControls.reconStatus.textContent = normalizedMessage;
+  if (tone && tone !== 'neutral') {
+    missionControls.reconStatus.dataset.tone = tone;
+  } else if (missionControls.reconStatus.dataset) {
+    delete missionControls.reconStatus.dataset.tone;
+  }
 };
 
 const setPlayerStatus = (message) => {
@@ -3421,6 +3453,125 @@ const resolveReconApproachOption = (value) => {
     ?? RECON_APPROACH_OPTIONS[0];
 };
 
+const resolveReconApproachConfig = (value) => {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized && RECON_APPROACH_CONFIG[normalized]) {
+    return RECON_APPROACH_CONFIG[normalized];
+  }
+
+  if (RECON_APPROACH_CONFIG.balanced) {
+    return RECON_APPROACH_CONFIG.balanced;
+  }
+
+  const [, fallbackConfig] = Object.entries(RECON_APPROACH_CONFIG ?? {}).find(() => true) ?? [];
+  return fallbackConfig ?? null;
+};
+
+const createReconApproachSummaryEntries = (snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return [];
+  }
+
+  const entries = [];
+
+  const pushEntry = ({ key, label, value, formatter, penaltyCheck, bonusCheck }) => {
+    const formattedValue = formatter ? formatter(value) : value;
+    if (formattedValue === null || formattedValue === undefined || formattedValue === '') {
+      return;
+    }
+
+    const isPenalty = typeof penaltyCheck === 'function' ? penaltyCheck(value) : false;
+    const isBonus = typeof bonusCheck === 'function' ? bonusCheck(value) : false;
+
+    entries.push({
+      key,
+      label,
+      value,
+      displayValue: formattedValue,
+      isPenalty,
+      isBonus,
+    });
+  };
+
+  const formatPercent = (value) => {
+    if (!Number.isFinite(value)) {
+      return '—';
+    }
+    return `${Math.round(value)}%`;
+  };
+
+  const formatSignedPercent = (value) => {
+    if (!Number.isFinite(value)) {
+      return '—';
+    }
+    if (value === 0) {
+      return '±0%';
+    }
+    const prefix = value > 0 ? '+' : '';
+    return `${prefix}${Math.round(value)}%`;
+  };
+
+  const formatSignedNumber = (value) => {
+    if (!Number.isFinite(value)) {
+      return '0';
+    }
+    if (value === 0) {
+      return '±0';
+    }
+    const prefix = value > 0 ? '+' : '';
+    return `${prefix}${Math.round(value)}`;
+  };
+
+  pushEntry({
+    key: 'intel',
+    label: 'Intel',
+    value: snapshot.intelPercent,
+    formatter: formatPercent,
+    penaltyCheck: (value) => Number.isFinite(value) && value < 100,
+    bonusCheck: (value) => Number.isFinite(value) && value > 100,
+  });
+
+  pushEntry({
+    key: 'influence',
+    label: 'Influence',
+    value: snapshot.influencePercent,
+    formatter: formatPercent,
+    penaltyCheck: (value) => Number.isFinite(value) && value < 100,
+    bonusCheck: (value) => Number.isFinite(value) && value > 100,
+  });
+
+  pushEntry({
+    key: 'crackdown',
+    label: 'Crackdown',
+    value: snapshot.crackdownDeltaPercent,
+    formatter: formatSignedPercent,
+    penaltyCheck: (value) => Number.isFinite(value) && value > 0,
+    bonusCheck: (value) => Number.isFinite(value) && value < 0,
+  });
+
+  pushEntry({
+    key: 'fatigue',
+    label: 'Fatigue',
+    value: snapshot.fatigueDelta,
+    formatter: formatSignedNumber,
+    penaltyCheck: (value) => Number.isFinite(value) && value > 0,
+    bonusCheck: (value) => Number.isFinite(value) && value < 0,
+  });
+
+  return entries;
+};
+
+const formatReconModifierSnapshot = (snapshot) => {
+  const entries = createReconApproachSummaryEntries(snapshot);
+  if (!entries.length) {
+    return '';
+  }
+
+  return entries
+    .map((entry) => `${entry.label} ${entry.displayValue}`)
+    .join(', ');
+};
+
 const buildReconAssignmentLabel = (assignment, crewById) => {
   if (!assignment) {
     return 'Recon assignment';
@@ -3431,6 +3582,13 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
   const approachOption = resolveReconApproachOption(assignment.approach);
   const approachSummary = approachOption?.summary ?? approachOption?.label ?? null;
   const withApproach = (label) => (approachSummary ? `${label} — Approach: ${approachSummary}` : label);
+  const withModifiers = (label) => {
+    const modifierSummary = formatReconModifierSnapshot(assignment.modifiersSnapshot);
+    if (!modifierSummary) {
+      return label;
+    }
+    return `${label} — ${modifierSummary}`;
+  };
   if (statusLabel === 'failed') {
     const summaryLabel = assignment.resultSummary ?? 'Recon failed.';
     const timestamp = Number.isFinite(assignment.completedAt)
@@ -3444,7 +3602,7 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
     const baseLabel = timeLabel
       ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}`
       : `${districtLabel} — ${summaryLabel}`;
-    return withApproach(baseLabel);
+    return withApproach(withModifiers(baseLabel));
   }
 
   if (statusLabel === 'completed') {
@@ -3455,7 +3613,7 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
     const baseLabel = timeLabel
       ? `${districtLabel} — ${summaryLabel} @ ${timeLabel}`
       : `${districtLabel} — ${summaryLabel}`;
-    return withApproach(baseLabel);
+    return withApproach(withModifiers(baseLabel));
   }
 
   if (statusLabel === 'cancelled') {
@@ -3468,7 +3626,8 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
       progressPercent ? `${progressPercent}% complete` : null,
       remainingSeconds !== null ? `${remainingSeconds}s early` : null,
     ].filter(Boolean);
-    return withApproach(`${districtLabel} — ${statusSegments.join(' — ')}`);
+    const baseLabel = `${districtLabel} — ${statusSegments.join(' — ')}`;
+    return withApproach(withModifiers(baseLabel));
   }
 
   const progressPercent = Math.round((assignment.progress ?? 0) * 100);
@@ -3489,7 +3648,7 @@ const buildReconAssignmentLabel = (assignment, crewById) => {
 
   const crewSegment = crewNames.length ? `Crew: ${crewNames.join(', ')}` : null;
   const baseLabel = [districtLabel, ...statusSegments, crewSegment].filter(Boolean).join(' — ');
-  return withApproach(baseLabel);
+  return withApproach(withModifiers(baseLabel));
 };
 
 const buildReconAssignmentBadges = (assignment) => {
@@ -3762,6 +3921,64 @@ const updateReconPanel = () => {
 
   const durationOption = resolveReconDurationOption(reconDurationSelect.value);
   const approachOption = resolveReconApproachOption(reconApproachSelect.value);
+  const approachConfig = resolveReconApproachConfig(approachOption?.value);
+  const approachSnapshot = systemsReady && approachConfig
+    ? createApproachModifierSnapshot(
+      approachConfig,
+      { durationSeconds: durationOption?.seconds },
+    )
+    : null;
+  const approachSummaryEntries = createReconApproachSummaryEntries(approachSnapshot);
+
+  let approachDetailList = missionControls.reconApproachDetail;
+  if (!approachDetailList || !(approachDetailList instanceof HTMLElement)) {
+    approachDetailList = document.createElement('ul');
+    approachDetailList.className = 'mission-recon__approach-detail';
+    reconAssignButton.insertAdjacentElement('afterend', approachDetailList);
+    missionControls.reconApproachDetail = approachDetailList;
+  }
+
+  if (approachDetailList) {
+    approachDetailList.innerHTML = '';
+    if (!systemsReady || !approachSummaryEntries.length) {
+      approachDetailList.hidden = true;
+    } else {
+      approachDetailList.hidden = false;
+      approachSummaryEntries.forEach((entry) => {
+        if (!entry) {
+          return;
+        }
+        const item = document.createElement('li');
+        item.className = 'mission-recon__approach-detail-item';
+        if (entry.isPenalty) {
+          item.dataset.state = 'penalty';
+        } else if (entry.isBonus) {
+          item.dataset.state = 'bonus';
+        }
+        item.textContent = `${entry.label}: ${entry.displayValue}`;
+        approachDetailList.appendChild(item);
+      });
+    }
+  }
+
+  const hasPenalty = approachSummaryEntries.some((entry) => entry?.isPenalty);
+  const hasBonus = approachSummaryEntries.some((entry) => entry?.isBonus);
+  const previewTone = hasPenalty ? 'warning' : hasBonus ? 'bonus' : 'info';
+  const previewSegments = approachSummaryEntries.map((entry) => `${entry.label} ${entry.displayValue}`);
+  const previewMessage = systemsReady && previewSegments.length
+    ? `${approachOption?.summary ?? approachOption?.label ?? 'Approach'} forecast — ${previewSegments.join(' • ')}.`
+    : '';
+  const holdSystemStatus = missionControls.reconStatusSource === 'system'
+    && Date.now() - (missionControls.reconStatusTimestamp ?? 0) < 3500;
+
+  if (!systemsReady) {
+    setReconStatus('Recon systems offline.', { tone: 'warning', source: 'system', force: true });
+  } else if (previewMessage && (!holdSystemStatus || hasPenalty)) {
+    setReconStatus(previewMessage, { tone: previewTone, source: 'preview', force: true });
+  } else if (!previewMessage && missionControls.reconStatusSource === 'preview') {
+    setReconStatus('', { tone: 'neutral', source: 'preview', force: true });
+  }
+
   const canSchedule = systemsReady && selectedCrewIds.length > 0 && reconDistrictSelect.value;
 
   reconAssignButton.disabled = !canSchedule;
@@ -3914,18 +4131,31 @@ const updateReconPanel = () => {
       ? 'Recon failed'
       : 'Recon completed');
     const message = `Recon in ${districtLabel} ${statusWord} — ${displaySummary}.`;
-    setReconStatus(message);
+    const tone = (latestResolved.status ?? '').toLowerCase() === 'failed' ? 'warning' : 'success';
+    setReconStatus(message, { tone, source: 'system' });
     missionControls.lastReconCompletionKey = completionKey;
   } else if (!completionKey) {
     missionControls.lastReconCompletionKey = null;
   }
 
+  const statusTone = systemsReady
+    ? missionControls.reconStatusTone ?? 'neutral'
+    : 'warning';
   const statusMessage = systemsReady
     ? missionControls.reconStatusDetail ?? ''
     : 'Recon systems offline.';
+
   reconStatus.textContent = statusMessage;
+  if (statusTone && statusTone !== 'neutral') {
+    reconStatus.dataset.tone = statusTone;
+  } else if (reconStatus.dataset) {
+    delete reconStatus.dataset.tone;
+  }
+
   if (!systemsReady) {
     missionControls.reconStatusDetail = statusMessage;
+    missionControls.reconStatusTone = 'warning';
+    missionControls.reconStatusSource = 'system';
   }
 
   const overlayContext = cityIntelLastRenderContext ?? {};
@@ -8146,7 +8376,7 @@ const handleReconSchedule = () => {
   const state = reconSystem?.state ?? missionSystem?.state ?? getSharedState();
 
   if (!reconSystem || !state) {
-    setReconStatus('Recon systems offline.');
+    setReconStatus('Recon systems offline.', { tone: 'warning' });
     updateReconPanel();
     return;
   }
@@ -8156,7 +8386,7 @@ const handleReconSchedule = () => {
     : [];
 
   if (!crewIds.length) {
-    setReconStatus('Select idle crew to deploy.');
+    setReconStatus('Select idle crew to deploy.', { tone: 'warning' });
     updateReconPanel();
     return;
   }
@@ -8175,7 +8405,7 @@ const handleReconSchedule = () => {
     });
 
   if (unavailableMember) {
-    setReconStatus(`${unavailableMember.name ?? 'Crew member'} is unavailable for recon duty.`);
+    setReconStatus(`${unavailableMember.name ?? 'Crew member'} is unavailable for recon duty.`, { tone: 'warning' });
     updateReconPanel();
     return;
   }
@@ -8183,7 +8413,7 @@ const handleReconSchedule = () => {
   const districtSelect = missionControls.reconDistrictSelect;
   const districtId = districtSelect?.value;
   if (!districtId) {
-    setReconStatus('Select a district to scout.');
+    setReconStatus('Select a district to scout.', { tone: 'warning' });
     updateReconPanel();
     return;
   }
@@ -8198,7 +8428,7 @@ const handleReconSchedule = () => {
   });
 
   if (!result?.success) {
-    setReconStatus(result?.message ?? 'Unable to deploy recon team.');
+    setReconStatus(result?.message ?? 'Unable to deploy recon team.', { tone: 'warning' });
     updateReconPanel();
     return;
   }
@@ -8210,7 +8440,7 @@ const handleReconSchedule = () => {
     });
   }
 
-  setReconStatus(result.message ?? 'Recon team deployed.');
+  setReconStatus(result.message ?? 'Recon team deployed.', { tone: 'success' });
   updateMissionControls();
   triggerHudRender();
 };
@@ -8222,19 +8452,19 @@ const handleReconCancel = (assignmentId) => {
 
   const reconSystem = getReconSystem();
   if (!reconSystem) {
-    setReconStatus('Recon systems offline.');
+    setReconStatus('Recon systems offline.', { tone: 'warning' });
     updateReconPanel();
     return;
   }
 
   const result = reconSystem.cancelAssignment(assignmentId);
   if (!result?.success) {
-    setReconStatus(result?.message ?? 'Unable to abort recon assignment.');
+    setReconStatus(result?.message ?? 'Unable to abort recon assignment.', { tone: 'warning' });
     updateReconPanel();
     return;
   }
 
-  setReconStatus(result.message ?? 'Recon assignment cancelled.');
+  setReconStatus(result.message ?? 'Recon assignment cancelled.', { tone: 'info' });
   updateMissionControls();
   triggerHudRender();
 };
