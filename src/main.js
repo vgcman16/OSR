@@ -10321,10 +10321,26 @@ const describeCrackdownOperationContext = (mission, crackdownInfo) => {
     contextMessage = `Eligible under the ${label.toLowerCase()} crackdown.`;
   }
 
+  const ensureSentence = (value) => {
+    if (typeof value !== 'string' || !value.trim()) {
+      return '';
+    }
+    const trimmed = value.trim();
+    return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+  };
+
+  const effectsSummary = formatCrackdownEffectsSummary(mission?.crackdownEffects);
+  const baseSentence = ensureSentence(contextMessage);
+  const effectsSentence = effectsSummary
+    ? ensureSentence(`Crackdown effects: ${effectsSummary}`)
+    : '';
+
+  const combinedMessage = [baseSentence, effectsSentence].filter(Boolean).join(' ');
+
   return {
     tierId: id,
     tierLabel: label,
-    contextMessage,
+    contextMessage: combinedMessage || contextMessage,
   };
 };
 
