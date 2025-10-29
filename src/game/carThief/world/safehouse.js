@@ -1203,7 +1203,18 @@ const DEFAULT_SAFEHOUSES = [
             status: 'active',
           },
         ],
-        projects: [],
+        projects: [
+          {
+            id: 'harbor-scrambler-array',
+            name: 'Harbor Scrambler Array',
+            summary:
+              'Signal jammers blanket the docks, bleeding heat daily and dampening missions.',
+            status: 'queued',
+            cost: 26800,
+            durationDays: 4,
+            rushCostPerDay: 5800,
+          },
+        ],
       },
     ],
   },
@@ -1348,7 +1359,17 @@ const DEFAULT_SAFEHOUSES = [
             status: 'active',
           },
         ],
-        projects: [],
+        projects: [
+          {
+            id: 'specter-liaison-program',
+            name: 'Specter Liaison Program',
+            summary: 'VIP fixers broker hush routes that spike payouts and success odds.',
+            status: 'queued',
+            cost: 31200,
+            durationDays: 5,
+            rushCostPerDay: 6200,
+          },
+        ],
       },
     ],
   },
