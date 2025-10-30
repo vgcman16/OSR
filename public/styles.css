@@ -1614,6 +1614,48 @@ body {
 
 .mission-safehouse__facility-controls {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+}
+
+.mission-safehouse__facility-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+
+.mission-safehouse__facility-action {
+  background: rgba(15, 24, 42, 0.9);
+  border: 1px solid rgba(120, 190, 255, 0.28);
+  border-radius: 999px;
+  color: rgba(209, 234, 255, 0.86);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mission-safehouse__facility-action:hover,
+.mission-safehouse__facility-action:focus-visible {
+  background: rgba(28, 44, 72, 0.95);
+  border-color: rgba(120, 190, 255, 0.6);
+  color: rgba(229, 244, 255, 0.95);
+  box-shadow: 0 0 0 2px rgba(120, 190, 255, 0.18);
+  outline: none;
+}
+
+.mission-safehouse__facility-action:active {
+  background: rgba(18, 32, 52, 0.98);
+  border-color: rgba(120, 190, 255, 0.7);
+}
+
+.mission-safehouse__facility-zone-controls {
+  display: flex;
   align-items: center;
   gap: 0.45rem;
 }
