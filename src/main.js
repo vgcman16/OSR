@@ -87,6 +87,13 @@ const missionControls = {
   select: null,
   startButton: null,
   statusText: null,
+  missionFilterContainer: null,
+  missionCategoryFilter: null,
+  missionRiskFilter: null,
+  missionFilterState: null,
+  missionFiltersActive: false,
+  totalMissionCount: 0,
+  filteredMissionCount: 0,
   detailDescription: null,
   detailPayout: null,
   detailHeat: null,
@@ -238,6 +245,164 @@ const missionControls = {
   lastGarageStatusTimestamp: 0,
   lastCrackdownTierName: null,
   lastMissionStatusKey: null,
+};
+
+const DEFAULT_MISSION_FILTER_STATE = { category: 'all', risk: 'all' };
+
+const MISSION_CATEGORY_LABELS = {
+  'campaign-operation': 'Campaign Operations',
+  'vehicle-heist': 'Vehicle Heists',
+  'defense-operation': 'Defense Operations',
+  'crew-loyalty': 'Crew Loyalty',
+  'crackdown-operation': 'Crackdown Operations',
+};
+
+const normalizeMissionCategoryKey = (value) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized || 'uncategorized';
+};
+
+const normalizeRiskTierKey = (value) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized || 'unknown';
+};
+
+const formatMissionCategoryLabel = (categoryKey) => {
+  if (!categoryKey || categoryKey === 'uncategorized') {
+    return 'General Contracts';
+  }
+
+  if (MISSION_CATEGORY_LABELS[categoryKey]) {
+    return MISSION_CATEGORY_LABELS[categoryKey];
+  }
+
+  return categoryKey
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+};
+
+const formatRiskTierShortLabel = (tierKey) => {
+  if (!tierKey || tierKey === 'unknown') {
+    return 'Unknown risk';
+  }
+
+  const normalized = String(tierKey).trim().toLowerCase();
+  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return `${label} risk`;
+};
+
+const getMissionFilterState = () => {
+  if (!missionControls.missionFilterState) {
+    missionControls.missionFilterState = { ...DEFAULT_MISSION_FILTER_STATE };
+  }
+
+  return missionControls.missionFilterState;
+};
+
+const updateMissionFilterState = (partialState = {}) => {
+  const currentState = getMissionFilterState();
+  missionControls.missionFilterState = {
+    ...DEFAULT_MISSION_FILTER_STATE,
+    ...currentState,
+    ...partialState,
+  };
+  return missionControls.missionFilterState;
+};
+
+const readMissionFilterControls = () => {
+  const nextState = {
+    category: missionControls.missionCategoryFilter?.value || 'all',
+    risk: missionControls.missionRiskFilter?.value || 'all',
+  };
+
+  return updateMissionFilterState(nextState);
+};
+
+const syncMissionFilterOptions = (missions) => {
+  const categoryOptions = new Map();
+  const riskOptions = new Map();
+
+  missions.forEach((mission) => {
+    const categoryKey = normalizeMissionCategoryKey(mission.category);
+    if (!categoryOptions.has(categoryKey)) {
+      categoryOptions.set(categoryKey, formatMissionCategoryLabel(categoryKey));
+    }
+
+    const riskKey = normalizeRiskTierKey(mission.riskTier);
+    if (!riskOptions.has(riskKey)) {
+      riskOptions.set(riskKey, formatRiskTierShortLabel(riskKey));
+    }
+  });
+
+  const state = getMissionFilterState();
+
+  const { missionCategoryFilter, missionRiskFilter } = missionControls;
+
+  if (missionCategoryFilter) {
+    const previousValue = state.category ?? 'all';
+    missionCategoryFilter.innerHTML = '';
+
+    const allOption = document.createElement('option');
+    allOption.value = 'all';
+    allOption.textContent = 'All categories';
+    missionCategoryFilter.appendChild(allOption);
+
+    Array.from(categoryOptions.entries())
+      .sort(([, labelA], [, labelB]) => labelA.localeCompare(labelB))
+      .forEach(([key, label]) => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = label;
+        missionCategoryFilter.appendChild(option);
+      });
+
+    let nextValue = previousValue;
+    if (nextValue !== 'all' && !categoryOptions.has(nextValue)) {
+      nextValue = 'all';
+    }
+
+    missionCategoryFilter.value = nextValue;
+    if (nextValue !== previousValue) {
+      updateMissionFilterState({ category: nextValue });
+    }
+  }
+
+  if (missionRiskFilter) {
+    const previousValue = state.risk ?? 'all';
+    missionRiskFilter.innerHTML = '';
+
+    const allOption = document.createElement('option');
+    allOption.value = 'all';
+    allOption.textContent = 'All risk tiers';
+    missionRiskFilter.appendChild(allOption);
+
+    Array.from(riskOptions.entries())
+      .sort(([, labelA], [, labelB]) => labelA.localeCompare(labelB))
+      .forEach(([key, label]) => {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = label;
+        missionRiskFilter.appendChild(option);
+      });
+
+    let nextValue = previousValue;
+    if (nextValue !== 'all' && !riskOptions.has(nextValue)) {
+      nextValue = 'all';
+    }
+
+    missionRiskFilter.value = nextValue;
+    if (nextValue !== previousValue) {
+      updateMissionFilterState({ risk: nextValue });
+    }
+  }
+};
+
+const handleMissionFilterChange = () => {
+  readMissionFilterControls();
+  updateMissionSelect();
+  updateMissionStatusText();
 };
 
 const CITY_INTEL_CANVAS_ARIA_LABEL = 'City districts map — hover or use arrow keys to preview intel.';
@@ -10846,6 +11011,14 @@ const updateMissionStatusText = () => {
     statusMessage = `${statusMessage} ${crackdownSentence}`.trim();
   }
 
+  if (
+    missionControls.missionFiltersActive &&
+    missionControls.totalMissionCount > 0 &&
+    missionControls.filteredMissionCount === 0
+  ) {
+    statusMessage = `${statusMessage} All contracts hidden by filters — adjust category or risk filters to view missions.`.trim();
+  }
+
   missionControls.statusText.textContent = statusMessage;
   renderMissionEvents();
   renderMissionLog();
@@ -12179,75 +12352,144 @@ const updateMissionSelect = () => {
   const missionSystem = getMissionSystem();
   if (!missionSystem) {
     select.disabled = true;
+    select.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Select a mission';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    select.appendChild(placeholder);
+    syncMissionFilterOptions([]);
+    missionControls.totalMissionCount = 0;
+    missionControls.filteredMissionCount = 0;
+    missionControls.missionFiltersActive = false;
     return;
   }
 
-  select.disabled = false;
-
   const previousSelection = select.value;
   const missions = missionSystem.availableMissions ?? [];
+  syncMissionFilterOptions(missions);
+
+  const filterState = getMissionFilterState();
+  const activeCategory = filterState.category && filterState.category !== 'all' ? filterState.category : null;
+  const activeRisk = filterState.risk && filterState.risk !== 'all' ? filterState.risk : null;
+
+  const normalizedMissions = missions.map((mission) => ({
+    mission,
+    categoryKey: normalizeMissionCategoryKey(mission.category),
+    riskKey: normalizeRiskTierKey(mission.riskTier),
+  }));
+
+  const filteredEntries = normalizedMissions.filter((entry) => {
+    if (activeCategory && entry.categoryKey !== activeCategory) {
+      return false;
+    }
+    if (activeRisk && entry.riskKey !== activeRisk) {
+      return false;
+    }
+    return true;
+  });
+
+  missionControls.totalMissionCount = missions.length;
+  missionControls.filteredMissionCount = filteredEntries.length;
+  missionControls.missionFiltersActive = Boolean(activeCategory || activeRisk);
+
   const crackdownInfo = describeCrackdownPolicy();
-  const selectionStillValid = missions.some((mission) => mission.id === previousSelection);
+  const selectionStillValid = filteredEntries.some(({ mission }) => mission.id === previousSelection);
 
   select.innerHTML = '';
 
   const placeholderOption = document.createElement('option');
   placeholderOption.value = '';
-  placeholderOption.textContent = 'Select a mission';
   placeholderOption.disabled = true;
   placeholderOption.selected = !selectionStillValid;
+  if (!missions.length) {
+    placeholderOption.textContent = 'No missions available';
+  } else if (!filteredEntries.length) {
+    placeholderOption.textContent = 'No missions match current filters';
+  } else {
+    placeholderOption.textContent = 'Select a mission';
+  }
   select.appendChild(placeholderOption);
 
-  missions.forEach((mission) => {
-    const option = document.createElement('option');
-    option.value = mission.id;
-
-    const progressPercent = Math.round((mission.progress ?? 0) * 100);
-    let statusLabel = mission.status ?? 'unknown';
-    if (mission.status === 'in-progress') {
-      statusLabel = `in progress (${progressPercent}%)`;
-    } else if (mission.status === 'awaiting-resolution') {
-      statusLabel = 'awaiting outcome';
-    } else if (mission.status === 'decision-required') {
-      statusLabel = `decision pending (${progressPercent}%)`;
+  const groups = [];
+  const groupIndex = new Map();
+  filteredEntries.forEach((entry) => {
+    const groupKey = `${entry.categoryKey}|${entry.riskKey}`;
+    if (!groupIndex.has(groupKey)) {
+      groupIndex.set(groupKey, {
+        categoryKey: entry.categoryKey,
+        riskKey: entry.riskKey,
+        missions: [],
+      });
+      groups.push(groupIndex.get(groupKey));
     }
+    groupIndex.get(groupKey).missions.push(entry.mission);
+  });
 
-    const restrictionLabel = mission.restricted ? ' [LOCKED]' : '';
-    const payoutValue = Number.isFinite(mission.payout) ? mission.payout : 0;
-    const isSupportOperation = mission.falloutRecovery && payoutValue === 0;
-    const payoutLabel = isSupportOperation
-      ? 'Support'
-      : `$${Math.max(0, payoutValue).toLocaleString()}`;
-    let categoryLabel = null;
-    if (mission.category === 'crackdown-operation') {
-      const crackdownContext = describeCrackdownOperationContext(mission, crackdownInfo);
-      categoryLabel = crackdownContext
-        ? `CRACKDOWN: ${crackdownContext.tierLabel.toUpperCase()}`
-        : 'CRACKDOWN';
-    } else if (mission.category === 'crew-loyalty') {
-      categoryLabel = 'LOYALTY';
-    } else if (mission.falloutRecovery) {
-      categoryLabel = mission.falloutRecovery.type === 'medical' ? 'MEDICAL' : 'RESCUE';
-    }
-    const prefix = categoryLabel ? `[${categoryLabel}] ` : '';
-    let optionLabel = `${prefix}${mission.name} — ${payoutLabel} (${statusLabel})${restrictionLabel}`;
-    const crackdownEffectSummary = formatCrackdownEffectsSummary(mission.crackdownEffects);
-    if (crackdownEffectSummary) {
-      option.title = `Crackdown effects: ${crackdownEffectSummary}`;
-      if (mission.category === 'crackdown-operation') {
-        optionLabel = `${optionLabel} — ${crackdownEffectSummary}`;
+  groups.forEach((group) => {
+    const optgroup = document.createElement('optgroup');
+    const categoryLabel = formatMissionCategoryLabel(group.categoryKey);
+    const riskLabel = formatRiskTierShortLabel(group.riskKey);
+    optgroup.label = `${categoryLabel} — ${riskLabel}`;
+
+    group.missions.forEach((mission) => {
+      const option = document.createElement('option');
+      option.value = mission.id;
+
+      const progressPercent = Math.round((mission.progress ?? 0) * 100);
+      let statusLabel = mission.status ?? 'unknown';
+      if (mission.status === 'in-progress') {
+        statusLabel = `in progress (${progressPercent}%)`;
+      } else if (mission.status === 'awaiting-resolution') {
+        statusLabel = 'awaiting outcome';
+      } else if (mission.status === 'decision-required') {
+        statusLabel = `decision pending (${progressPercent}%)`;
       }
-    } else {
-      option.removeAttribute('title');
-    }
-    option.textContent = optionLabel;
-    option.selected = selectionStillValid && mission.id === previousSelection;
-    select.appendChild(option);
+
+      const restrictionLabel = mission.restricted ? ' [LOCKED]' : '';
+      const payoutValue = Number.isFinite(mission.payout) ? mission.payout : 0;
+      const isSupportOperation = mission.falloutRecovery && payoutValue === 0;
+      const payoutLabel = isSupportOperation
+        ? 'Support'
+        : `$${Math.max(0, payoutValue).toLocaleString()}`;
+      let categoryLabelPrefix = null;
+      if (mission.category === 'crackdown-operation') {
+        const crackdownContext = describeCrackdownOperationContext(mission, crackdownInfo);
+        categoryLabelPrefix = crackdownContext
+          ? `CRACKDOWN: ${crackdownContext.tierLabel.toUpperCase()}`
+          : 'CRACKDOWN';
+      } else if (mission.category === 'crew-loyalty') {
+        categoryLabelPrefix = 'LOYALTY';
+      } else if (mission.falloutRecovery) {
+        categoryLabelPrefix = mission.falloutRecovery.type === 'medical' ? 'MEDICAL' : 'RESCUE';
+      }
+      const prefix = categoryLabelPrefix ? `[${categoryLabelPrefix}] ` : '';
+      let optionLabel = `${prefix}${mission.name} — ${payoutLabel} (${statusLabel})${restrictionLabel}`;
+      const crackdownEffectSummary = formatCrackdownEffectsSummary(mission.crackdownEffects);
+      if (crackdownEffectSummary) {
+        option.title = `Crackdown effects: ${crackdownEffectSummary}`;
+        if (mission.category === 'crackdown-operation') {
+          optionLabel = `${optionLabel} — ${crackdownEffectSummary}`;
+        }
+      } else {
+        option.removeAttribute('title');
+      }
+      option.textContent = optionLabel;
+      option.selected = selectionStillValid && mission.id === previousSelection;
+      optgroup.appendChild(option);
+    });
+
+    select.appendChild(optgroup);
   });
 
   if (selectionStillValid) {
     select.value = previousSelection;
+  } else {
+    select.value = '';
   }
+
+  select.disabled = filteredEntries.length === 0;
 
   renderMissionLog();
 };
@@ -12710,6 +12952,19 @@ const setupMissionControls = () => {
 
   ensureCrewAttributeControls();
   ensureCrewGearControls();
+
+  missionControls.missionFilterContainer = document.querySelector('.mission-filter');
+  missionControls.missionCategoryFilter = document.getElementById('mission-filter-category');
+  missionControls.missionRiskFilter = document.getElementById('mission-filter-risk');
+  readMissionFilterControls();
+  if (missionControls.missionCategoryFilter && !missionControls.missionCategoryFilter.dataset.filterBound) {
+    missionControls.missionCategoryFilter.addEventListener('change', handleMissionFilterChange);
+    missionControls.missionCategoryFilter.dataset.filterBound = 'true';
+  }
+  if (missionControls.missionRiskFilter && !missionControls.missionRiskFilter.dataset.filterBound) {
+    missionControls.missionRiskFilter.addEventListener('change', handleMissionFilterChange);
+    missionControls.missionRiskFilter.dataset.filterBound = 'true';
+  }
 
   missionControls.select = document.getElementById('mission-select');
   missionControls.startButton = document.getElementById('start-mission-btn');
