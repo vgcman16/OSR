@@ -12050,7 +12050,7 @@ const updateVehicleSelectionOptions = () => {
     });
 
     const descriptor = document.createElement('span');
-    descriptor.className = 'mission-crew__label';
+    descriptor.className = 'mission-crew__label mission-vehicle__label';
 
     const heatLabel = Number.isFinite(vehicle.heat) ? vehicle.heat.toFixed(1) : 'N/A';
     let statusText = 'Ready';
@@ -12113,6 +12113,14 @@ const updateVehicleSelectionOptions = () => {
     optionLabel.setAttribute('aria-label', ariaSummaryParts.join(' '));
 
     optionLabel.appendChild(radio);
+    if (vehicle.image) {
+      const thumbnail = document.createElement('img');
+      thumbnail.className = 'mission-vehicle__image';
+      thumbnail.src = vehicle.image;
+      const imageAltLabel = vehicle.model ? `${vehicle.model} vehicle` : 'Mission vehicle';
+      thumbnail.alt = imageAltLabel;
+      optionLabel.appendChild(thumbnail);
+    }
     optionLabel.appendChild(descriptor);
     entry.appendChild(optionLabel);
 
