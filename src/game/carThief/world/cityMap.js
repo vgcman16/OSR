@@ -350,7 +350,19 @@ const cloneCampaignContract = (contract = {}) => {
           vehicleBlueprint:
             contract.vehicleReward.vehicleBlueprint &&
             typeof contract.vehicleReward.vehicleBlueprint === 'object'
-              ? { ...contract.vehicleReward.vehicleBlueprint }
+              ? (() => {
+                  const blueprint = { ...contract.vehicleReward.vehicleBlueprint };
+                  if (typeof blueprint.image === 'string') {
+                    const trimmed = blueprint.image.trim();
+                    blueprint.image = trimmed || undefined;
+                    if (!trimmed) {
+                      delete blueprint.image;
+                    }
+                  } else if ('image' in blueprint) {
+                    delete blueprint.image;
+                  }
+                  return blueprint;
+                })()
               : undefined,
         }
       : undefined;

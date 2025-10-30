@@ -254,6 +254,7 @@ class Vehicle {
     handling = 5,
     heat = 0,
     installedMods = [],
+    image = null,
   } = {}) {
     this.id = id ?? `vehicle-${Math.random().toString(36).slice(2, 9)}`;
     this.model = model ?? 'Compact Cruiser';
@@ -267,6 +268,8 @@ class Vehicle {
     this.inUse = false;
     this.installedMods = sanitizeInstalledMods(installedMods);
     this.modBonuses = aggregateVehicleModBonuses(this.installedMods);
+    const imagePath = typeof image === 'string' ? image.trim() : '';
+    this.image = imagePath || null;
   }
 
   markStolen() {
@@ -380,6 +383,7 @@ class Vehicle {
       status: this.status,
       inUse: this.inUse,
       installedMods: [...this.installedMods],
+      image: this.image,
     };
   }
 
@@ -400,6 +404,7 @@ class Vehicle {
       handling: data.handling,
       heat: data.heat,
       installedMods: data.installedMods,
+      image: data.image,
     });
 
     if (Number.isFinite(data.condition)) {

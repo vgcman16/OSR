@@ -41,7 +41,7 @@ const resolvePendingDecisions = (missionSystem, mission) => {
 test('Garage maintenance repairs restore condition when funds allow', (t) => {
   const state = createState();
   state.funds = 20_000;
-  const vehicle = new Vehicle({ model: 'Interceptor' });
+  const vehicle = new Vehicle({ model: 'Interceptor', image: '/images/vehicles/car.svg' });
   vehicle.condition = 0.35;
   vehicle.heat = 1.2;
   state.garage.push(vehicle);
@@ -76,7 +76,7 @@ test('Garage maintenance repairs restore condition when funds allow', (t) => {
 test('Garage maintenance heat purges reduce heat and clamp at zero', (t) => {
   const state = createState();
   state.funds = 15_000;
-  const vehicle = new Vehicle({ model: 'Courier' });
+  const vehicle = new Vehicle({ model: 'Courier', image: '/images/vehicles/car.svg' });
   vehicle.condition = 0.9;
   vehicle.heat = 0.8;
   state.garage.push(vehicle);
@@ -106,7 +106,7 @@ test('Garage maintenance heat purges reduce heat and clamp at zero', (t) => {
 test('Garage maintenance aborts when funds are insufficient', (t) => {
   const state = createState();
   state.funds = 500; // below either maintenance cost
-  const vehicle = new Vehicle({ model: 'Runabout' });
+  const vehicle = new Vehicle({ model: 'Runabout', image: '/images/vehicles/car.svg' });
   vehicle.condition = 0.2;
   vehicle.heat = 2.5;
   state.garage.push(vehicle);
@@ -343,6 +343,7 @@ test('infiltration sequence adapts to mission context cues', () => {
     acceleration: 7,
     handling: 7,
     installedMods: ['stealth-plating', 'escape-vector-suite'],
+    image: '/images/vehicles/car.svg',
   });
 
   const safehouse = new Safehouse({
@@ -746,7 +747,7 @@ test('Successful missions block reward vehicles when garage capacity is full', (
   const mission = missionSystem.availableMissions[0];
   assert.ok(mission, 'a mission is available to run');
 
-  const storedVehicle = new Vehicle({ model: 'Stored Ride' });
+  const storedVehicle = new Vehicle({ model: 'Stored Ride', image: '/images/vehicles/car.svg' });
   state.garage.push(storedVehicle);
   assert.equal(state.garage.length, 1, 'garage starts at the storage limit');
 

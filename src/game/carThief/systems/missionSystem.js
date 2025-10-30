@@ -367,9 +367,18 @@ const cloneVehicleBlueprint = (blueprint) => {
   copyIfDefined('acceleration');
   copyIfDefined('handling');
   copyIfDefined('heat');
+  copyIfDefined('image');
 
   if (Array.isArray(blueprint.installedMods)) {
     sanitized.installedMods = blueprint.installedMods.slice();
+  }
+
+  if (typeof sanitized.image === 'string') {
+    const trimmed = sanitized.image.trim();
+    sanitized.image = trimmed || undefined;
+    if (!trimmed) {
+      delete sanitized.image;
+    }
   }
 
   return Object.keys(sanitized).length ? sanitized : null;
