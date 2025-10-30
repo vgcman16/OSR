@@ -40,6 +40,9 @@ let gameInstance = null;
 let onboardingTour = null;
 
 const settingsSerializer = createGameSerializer({ key: 'osr.car-thief.settings.v1' });
+const infiltrationPlanDraftSerializer = createGameSerializer({
+  key: 'osr.car-thief.infiltration-plans.v1',
+});
 const DEFAULT_PLAYER_SETTINGS = { audio: { muted: false } };
 
 const loadPlayerSettings = () => {
@@ -666,7 +669,7 @@ const missionControls = {
   eventPlanStatus: null,
   lastInfiltrationPreviewSignature: '',
   lastInfiltrationTimelineSignature: '',
-  selectedInfiltrationPlan: null,
+  infiltrationPlansByMission: new Map(),
   debtList: null,
   debtStatus: null,
   debtStatusDetail: '',
@@ -765,6 +768,177 @@ const missionControls = {
   lastCrackdownTierName: null,
   lastMissionStatusKey: null,
 };
+
+const ensureMissionInfiltrationPlanCache = () => {
+  if (!(missionControls.infiltrationPlansByMission instanceof Map)) {
+    missionControls.infiltrationPlansByMission = new Map();
+  }
+
+  return missionControls.infiltrationPlansByMission;
+};
+
+const serializePlanStateForStorage = (planState) => {
+  if (!planState || typeof planState !== 'object') {
+    return null;
+  }
+
+  const choices = {};
+  if (planState.choices instanceof Map) {
+    planState.choices.forEach((choiceId, stepId) => {
+      if (typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId) {
+        choices[stepId] = choiceId;
+      }
+    });
+  } else if (planState.choices && typeof planState.choices === 'object') {
+    Object.entries(planState.choices).forEach(([stepId, choiceId]) => {
+      if (typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId) {
+        choices[stepId] = choiceId;
+      }
+    });
+  }
+
+  return {
+    missionId: typeof planState.missionId === 'string' ? planState.missionId : null,
+    choices,
+    updatedAt: Number.isFinite(planState.updatedAt) ? planState.updatedAt : Date.now(),
+    source: planState.source === 'active' ? 'active' : 'preview',
+  };
+};
+
+const persistMissionInfiltrationPlans = () => {
+  const cache = ensureMissionInfiltrationPlanCache();
+  const drafts = {};
+
+  cache.forEach((planState, missionId) => {
+    if (typeof missionId !== 'string' || !missionId || !planState) {
+      return;
+    }
+
+    const payload = serializePlanStateForStorage(planState);
+    if (payload) {
+      drafts[missionId] = payload;
+    }
+  });
+
+  infiltrationPlanDraftSerializer.save({ drafts });
+};
+
+const loadCachedMissionInfiltrationPlans = () => {
+  const cache = new Map();
+  const payload = infiltrationPlanDraftSerializer.load();
+
+  if (!payload || typeof payload !== 'object') {
+    return cache;
+  }
+
+  const drafts = payload?.drafts && typeof payload.drafts === 'object' ? payload.drafts : payload;
+
+  Object.entries(drafts).forEach(([missionId, record]) => {
+    if (typeof missionId !== 'string' || !missionId || !record || typeof record !== 'object') {
+      return;
+    }
+
+    const choices = record.choices && typeof record.choices === 'object' ? record.choices : {};
+    const choiceMap = new Map();
+    Object.entries(choices).forEach(([stepId, choiceId]) => {
+      if (typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId) {
+        choiceMap.set(stepId, choiceId);
+      }
+    });
+
+    cache.set(missionId, {
+      missionId,
+      choices: choiceMap,
+      stepCatalog: [],
+      source: record.source === 'active' ? 'active' : 'preview',
+      updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : Date.now(),
+    });
+  });
+
+  return cache;
+};
+
+const initializeMissionInfiltrationPlanDrafts = () => {
+  missionControls.infiltrationPlansByMission = loadCachedMissionInfiltrationPlans();
+};
+
+const getCachedMissionInfiltrationPlan = (missionId) => {
+  if (typeof missionId !== 'string' || !missionId) {
+    return null;
+  }
+
+  const cache = ensureMissionInfiltrationPlanCache();
+  const planState = cache.get(missionId);
+  return planState ?? null;
+};
+
+const setCachedMissionInfiltrationPlan = (missionId, planState, { persist = true } = {}) => {
+  if (typeof missionId !== 'string' || !missionId) {
+    return;
+  }
+
+  const cache = ensureMissionInfiltrationPlanCache();
+
+  if (!planState) {
+    if (cache.has(missionId)) {
+      cache.delete(missionId);
+      if (persist) {
+        persistMissionInfiltrationPlans();
+      }
+    }
+    return;
+  }
+
+  if (!(planState.choices instanceof Map)) {
+    const choiceMap = new Map();
+    if (planState.choices && typeof planState.choices === 'object') {
+      Object.entries(planState.choices).forEach(([stepId, choiceId]) => {
+        if (typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId) {
+          choiceMap.set(stepId, choiceId);
+        }
+      });
+    }
+    planState.choices = choiceMap;
+  }
+
+  if (!Array.isArray(planState.stepCatalog)) {
+    planState.stepCatalog = [];
+  }
+
+  planState.missionId = missionId;
+  cache.set(missionId, planState);
+
+  if (persist) {
+    persistMissionInfiltrationPlans();
+  }
+};
+
+const clearCachedMissionInfiltrationPlan = (missionId, options = {}) => {
+  setCachedMissionInfiltrationPlan(missionId, null, options);
+};
+
+const pruneCachedMissionInfiltrationPlans = (validMissionIds) => {
+  if (!validMissionIds || typeof validMissionIds.has !== 'function') {
+    return;
+  }
+
+  const cache = ensureMissionInfiltrationPlanCache();
+  let modified = false;
+
+  cache.forEach((_, missionId) => {
+    if (!validMissionIds.has(missionId)) {
+      cache.delete(missionId);
+      modified = true;
+    }
+  });
+
+  if (modified) {
+    persistMissionInfiltrationPlans();
+    missionControls.lastInfiltrationPreviewSignature = '';
+  }
+};
+
+initializeMissionInfiltrationPlanDrafts();
 
 const DEFAULT_MISSION_FILTER_STATE = { category: 'all', risk: 'all' };
 
@@ -13612,19 +13786,29 @@ const renderMissionInfiltrationPreview = ({
     roster = crewPool.filter((member) => mission.assignedCrewIds.includes(member?.id));
   }
 
-  let planState = missionControls.selectedInfiltrationPlan;
-  if (!planState || planState.missionId !== missionId) {
+  const planCacheKey =
+    typeof missionId === 'string' ? missionId : missionId ? String(missionId) : null;
+  let planState = planCacheKey ? getCachedMissionInfiltrationPlan(planCacheKey) : null;
+  const hadCachedPlan = Boolean(planState && planState.missionId === planCacheKey);
+
+  if (!planState || planState.missionId !== planCacheKey) {
     if (isActiveMission && activeMission?.preplannedInfiltration) {
-      planState = hydratePlanStateFromMission(activeMission.preplannedInfiltration, missionId);
+      planState = hydratePlanStateFromMission(
+        activeMission.preplannedInfiltration,
+        planCacheKey ?? missionId,
+      );
     } else {
-      planState = createEmptyInfiltrationPlanState(missionId);
+      planState = createEmptyInfiltrationPlanState(planCacheKey ?? missionId);
     }
   } else if (
     isActiveMission &&
     activeMission?.preplannedInfiltration?.updatedAt &&
     activeMission.preplannedInfiltration.updatedAt > (planState.updatedAt ?? 0)
   ) {
-    planState = hydratePlanStateFromMission(activeMission.preplannedInfiltration, missionId);
+    planState = hydratePlanStateFromMission(
+      activeMission.preplannedInfiltration,
+      planCacheKey ?? missionId,
+    );
   }
 
   const safehouseSignature = safehouseFacilities.slice().map((id) => (typeof id === 'string' ? id.trim().toLowerCase() : ''))
@@ -13692,10 +13876,16 @@ const renderMissionInfiltrationPreview = ({
     return;
   }
 
-  planState = synchronizePlanStateWithSequence({ ...planState, missionId }, sequence);
-  planState.missionId = missionId;
+  planState = synchronizePlanStateWithSequence(
+    { ...planState, missionId: planCacheKey ?? missionId },
+    sequence,
+  );
+  planState.missionId = planCacheKey ?? missionId;
   planState.source = isActiveMission ? 'active' : 'preview';
-  missionControls.selectedInfiltrationPlan = planState;
+  if (planCacheKey) {
+    const shouldPersistPlan = isActiveMission || hadCachedPlan;
+    setCachedMissionInfiltrationPlan(planCacheKey, planState, { persist: shouldPersistPlan });
+  }
 
   if (isActiveMission && activeMission?.preplannedInfiltration) {
     activeMission.preplannedInfiltration.stepCatalog = planState.stepCatalog.map((step) => ({ ...step }));
@@ -14732,6 +14922,27 @@ const updateMissionSelect = () => {
 
   const previousSelection = select.value;
   const missions = missionSystem.availableMissions ?? [];
+  const activeMissionIdRaw = missionSystem.state?.activeMission?.id ?? null;
+  const validMissionIds = new Set(
+    missions
+      .map((mission) => {
+        if (!mission) {
+          return null;
+        }
+        const id = mission.id ?? null;
+        if (typeof id === 'string') {
+          return id;
+        }
+        return id ? String(id) : null;
+      })
+      .filter(Boolean),
+  );
+  if (typeof activeMissionIdRaw === 'string') {
+    validMissionIds.add(activeMissionIdRaw);
+  } else if (activeMissionIdRaw) {
+    validMissionIds.add(String(activeMissionIdRaw));
+  }
+  pruneCachedMissionInfiltrationPlans(validMissionIds);
   syncMissionFilterOptions(missions);
 
   const filterState = getMissionFilterState();
@@ -14918,7 +15129,7 @@ const handleInfiltrationPlanChange = (event) => {
     return;
   }
 
-  let planState = missionControls.selectedInfiltrationPlan;
+  let planState = getCachedMissionInfiltrationPlan(missionId);
   if (!planState || planState.missionId !== missionId) {
     planState = createEmptyInfiltrationPlanState(missionId);
   }
@@ -14930,7 +15141,7 @@ const handleInfiltrationPlanChange = (event) => {
     planState.choices.delete(stepId);
   }
   planState.updatedAt = Date.now();
-  missionControls.selectedInfiltrationPlan = planState;
+  setCachedMissionInfiltrationPlan(missionId, planState);
   missionControls.lastInfiltrationPreviewSignature = '';
 
   const activeMission = missionSystem.state?.activeMission;
@@ -14938,7 +15149,7 @@ const handleInfiltrationPlanChange = (event) => {
     const updatedPlan = missionSystem.updateActiveMissionInfiltrationPlan(serializePlanChoices(planState));
     if (updatedPlan) {
       planState = hydratePlanStateFromMission(updatedPlan, missionId);
-      missionControls.selectedInfiltrationPlan = planState;
+      setCachedMissionInfiltrationPlan(missionId, planState);
       missionControls.lastInfiltrationPreviewSignature = '';
       const stepInfo = planState.stepCatalog.find((step) => step.id === stepId);
       const choiceInfo = stepInfo?.choices?.find((choice) => choice.id === choiceId);
@@ -14978,7 +15189,8 @@ const handleMissionPlanAction = (event) => {
   delete updatedChoices[stepId];
   const updatedPlan = missionSystem.updateActiveMissionInfiltrationPlan(updatedChoices);
   if (updatedPlan) {
-    missionControls.selectedInfiltrationPlan = hydratePlanStateFromMission(updatedPlan, activeMission.id);
+    const planState = hydratePlanStateFromMission(updatedPlan, activeMission.id);
+    setCachedMissionInfiltrationPlan(activeMission.id, planState);
     missionControls.lastInfiltrationPreviewSignature = '';
     const stepInfo = updatedPlan.stepCatalog?.find((step) => step.id === stepId);
     missionControls.eventStatusDetail = `Cleared planned response for ${stepInfo?.label ?? 'infiltration step'}.`;
@@ -15053,11 +15265,7 @@ const handleMissionStart = () => {
     return;
   }
 
-  const planState =
-    missionControls.selectedInfiltrationPlan &&
-    missionControls.selectedInfiltrationPlan.missionId === missionId
-      ? missionControls.selectedInfiltrationPlan
-      : null;
+  const planState = getCachedMissionInfiltrationPlan(missionId);
   const infiltrationPlanPayload = planState
     ? { choices: serializePlanChoices(planState) }
     : null;
@@ -15072,10 +15280,8 @@ const handleMissionStart = () => {
   missionControls.selectedVehicleId = null;
   missionControls.lastEventPromptId = null;
   if (mission.preplannedInfiltration) {
-    missionControls.selectedInfiltrationPlan = hydratePlanStateFromMission(
-      mission.preplannedInfiltration,
-      mission.id,
-    );
+    const hydratedPlan = hydratePlanStateFromMission(mission.preplannedInfiltration, mission.id);
+    setCachedMissionInfiltrationPlan(mission.id, hydratedPlan);
     missionControls.lastInfiltrationPreviewSignature = '';
   }
   clearMaintenanceStatusDetail();
@@ -15766,7 +15972,6 @@ const setupMissionControls = () => {
   select.addEventListener('change', () => {
     missionControls.selectedCrewIds = [];
     missionControls.selectedVehicleId = null;
-    missionControls.selectedInfiltrationPlan = null;
     missionControls.lastInfiltrationPreviewSignature = '';
     clearMaintenanceStatusDetail();
     updateMissionControls();
