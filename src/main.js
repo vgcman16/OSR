@@ -22,6 +22,10 @@ import {
   RECON_APPROACH_CONFIG,
   createApproachModifierSnapshot,
 } from './game/carThief/systems/reconSystem.js';
+import {
+  createInfiltrationSequence,
+  summarizeInfiltrationEffects,
+} from './game/carThief/systems/missionInfiltration.js';
 import { executeHeatMitigation } from './game/carThief/systems/heatMitigationService.js';
 import { getAvailableCrewStorylineMissions } from './game/carThief/systems/crewStorylines.js';
 import { getActiveSafehouseFromState, getActiveStorageCapacityFromState } from './game/carThief/world/safehouse.js';
@@ -156,10 +160,15 @@ const missionControls = {
   eventStatus: null,
   eventStatusDetail: '',
   lastEventPromptId: null,
+  infiltrationPreviewContainer: null,
+  infiltrationPreviewSummary: null,
+  infiltrationPreviewList: null,
+  infiltrationPreviewEmpty: null,
   infiltrationTimelineContainer: null,
   infiltrationTimelineSummary: null,
   infiltrationTimelineList: null,
   infiltrationTimelineEmpty: null,
+  lastInfiltrationPreviewSignature: '',
   lastInfiltrationTimelineSignature: '',
   debtList: null,
   debtStatus: null,
@@ -11662,6 +11671,231 @@ const createInfiltrationTimelineItem = (entry, { condensed = false } = {}) => {
   return item;
 };
 
+const cloneInfiltrationAggregate = (aggregate = {}) => ({
+  payoutMultiplier: Number.isFinite(aggregate.payoutMultiplier) ? aggregate.payoutMultiplier : 1,
+  payoutDelta: Number.isFinite(aggregate.payoutDelta) ? aggregate.payoutDelta : 0,
+  heatDelta: Number.isFinite(aggregate.heatDelta) ? aggregate.heatDelta : 0,
+  successDelta: Number.isFinite(aggregate.successDelta) ? aggregate.successDelta : 0,
+  durationMultiplier: Number.isFinite(aggregate.durationMultiplier) ? aggregate.durationMultiplier : 1,
+  durationDelta: Number.isFinite(aggregate.durationDelta) ? aggregate.durationDelta : 0,
+  crewLoyaltyDelta: Number.isFinite(aggregate.crewLoyaltyDelta) ? aggregate.crewLoyaltyDelta : 0,
+});
+
+const accumulateInfiltrationEffects = (aggregate, effects = {}) => {
+  if (!aggregate) {
+    return aggregate;
+  }
+
+  if (Number.isFinite(effects.payoutMultiplier) && effects.payoutMultiplier !== 1) {
+    aggregate.payoutMultiplier *= effects.payoutMultiplier;
+  }
+  if (Number.isFinite(effects.payoutDelta) && effects.payoutDelta !== 0) {
+    aggregate.payoutDelta += Math.round(effects.payoutDelta);
+  }
+  if (Number.isFinite(effects.heatDelta) && effects.heatDelta !== 0) {
+    aggregate.heatDelta += effects.heatDelta;
+  }
+  if (Number.isFinite(effects.successDelta) && effects.successDelta !== 0) {
+    aggregate.successDelta += effects.successDelta;
+  }
+  if (Number.isFinite(effects.durationMultiplier) && effects.durationMultiplier !== 1) {
+    aggregate.durationMultiplier *= effects.durationMultiplier;
+  }
+  if (Number.isFinite(effects.durationDelta) && effects.durationDelta !== 0) {
+    aggregate.durationDelta += effects.durationDelta;
+  }
+  if (Number.isFinite(effects.crewLoyaltyDelta) && effects.crewLoyaltyDelta !== 0) {
+    aggregate.crewLoyaltyDelta += effects.crewLoyaltyDelta;
+  }
+
+  return aggregate;
+};
+
+const scoreInfiltrationEffects = (effects = {}) => {
+  let score = 0;
+
+  if (Number.isFinite(effects.successDelta)) {
+    score += effects.successDelta * 120;
+  }
+  if (Number.isFinite(effects.payoutMultiplier) && effects.payoutMultiplier !== 1) {
+    score += (effects.payoutMultiplier - 1) * 100;
+  }
+  if (Number.isFinite(effects.payoutDelta) && effects.payoutDelta !== 0) {
+    score += effects.payoutDelta / 500;
+  }
+  if (Number.isFinite(effects.heatDelta) && effects.heatDelta !== 0) {
+    score -= effects.heatDelta * 60;
+  }
+  if (Number.isFinite(effects.durationMultiplier) && effects.durationMultiplier !== 1) {
+    score -= (effects.durationMultiplier - 1) * 80;
+  }
+  if (Number.isFinite(effects.durationDelta) && effects.durationDelta !== 0) {
+    score -= effects.durationDelta / 6;
+  }
+  if (Number.isFinite(effects.crewLoyaltyDelta) && effects.crewLoyaltyDelta !== 0) {
+    score += effects.crewLoyaltyDelta * 8;
+  }
+
+  return score;
+};
+
+const pickProjectedInfiltrationChoice = (step) => {
+  if (!step || !Array.isArray(step.choices) || !step.choices.length) {
+    return null;
+  }
+
+  let bestChoice = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let bestSuccessImpact = Number.NEGATIVE_INFINITY;
+  let bestHeatRelief = Number.NEGATIVE_INFINITY;
+
+  step.choices.forEach((choice) => {
+    if (!choice) {
+      return;
+    }
+
+    const effects = choice.effects ?? {};
+    const score = scoreInfiltrationEffects(effects);
+    const successImpact = Number.isFinite(effects.successDelta) ? effects.successDelta : 0;
+    const heatRelief = Number.isFinite(effects.heatDelta) ? -effects.heatDelta : 0;
+
+    if (
+      score > bestScore ||
+      (score === bestScore &&
+        (successImpact > bestSuccessImpact ||
+          (successImpact === bestSuccessImpact && heatRelief > bestHeatRelief)))
+    ) {
+      bestChoice = choice;
+      bestScore = score;
+      bestSuccessImpact = successImpact;
+      bestHeatRelief = heatRelief;
+    }
+  });
+
+  return bestChoice ?? step.choices[0] ?? null;
+};
+
+const buildInfiltrationPreviewEntries = (sequence) => {
+  if (!sequence) {
+    return { aggregateEffects: cloneInfiltrationAggregate(), entries: [] };
+  }
+
+  const aggregate = cloneInfiltrationAggregate(sequence.aggregateEffects);
+  const entries = [];
+  const steps = Array.isArray(sequence.steps) ? sequence.steps : [];
+
+  steps.forEach((step) => {
+    if (!step) {
+      return;
+    }
+
+    const projectedChoice = pickProjectedInfiltrationChoice(step);
+    const effects = projectedChoice?.effects ?? {};
+    if (projectedChoice) {
+      accumulateInfiltrationEffects(aggregate, effects);
+    }
+
+    const stepLabel = typeof step.label === 'string' ? step.label.trim() : '';
+    const prompt = typeof step.prompt === 'string' ? step.prompt.trim() : '';
+    const choiceLabel = typeof projectedChoice?.label === 'string' ? projectedChoice.label.trim() : '';
+    const effectSummary = projectedChoice ? summarizeInfiltrationEffects(effects) : null;
+
+    entries.push({
+      stepLabel,
+      choiceLabel: choiceLabel ? `Projected: ${choiceLabel}` : '',
+      summary: prompt || stepLabel || '',
+      effects,
+      effectSummary,
+    });
+  });
+
+  return { aggregateEffects: aggregate, entries };
+};
+
+const DEFAULT_INFILTRATION_PREVIEW_EMPTY = 'Assign crew to generate an infiltration preview.';
+
+const buildInfiltrationPreviewSignature = ({ mission, crewMembers = [], vehicleId = null, showPreview }) => {
+  const missionId = mission?.id ?? 'none';
+  const crewSignature = Array.isArray(crewMembers)
+    ? crewMembers
+        .map((member) => (member && member.id ? member.id : null))
+        .filter(Boolean)
+        .sort()
+        .join(',')
+    : 'none';
+  const vehicleSignature = vehicleId ?? 'none';
+  return `${showPreview ? 'show' : 'hide'}|${missionId}|${crewSignature || 'none'}|${vehicleSignature}`;
+};
+
+const renderMissionInfiltrationPreview = ({
+  mission = null,
+  crewMembers = [],
+  vehicleId = null,
+  showPreview = false,
+} = {}) => {
+  const container = missionControls.infiltrationPreviewContainer;
+  const summaryContainer = missionControls.infiltrationPreviewSummary;
+  const list = missionControls.infiltrationPreviewList;
+  const emptyState = missionControls.infiltrationPreviewEmpty;
+  if (!container || !summaryContainer || !list || !emptyState) {
+    return;
+  }
+
+  const roster = Array.isArray(crewMembers) ? crewMembers.filter(Boolean) : [];
+  const signature = buildInfiltrationPreviewSignature({ mission, crewMembers: roster, vehicleId, showPreview });
+  if (missionControls.lastInfiltrationPreviewSignature === signature) {
+    return;
+  }
+  missionControls.lastInfiltrationPreviewSignature = signature;
+
+  if (!showPreview || !mission) {
+    container.hidden = true;
+    summaryContainer.hidden = true;
+    list.hidden = true;
+    list.innerHTML = '';
+    emptyState.hidden = false;
+    emptyState.textContent = DEFAULT_INFILTRATION_PREVIEW_EMPTY;
+    return;
+  }
+
+  const crewNames = roster
+    .map((member) => (typeof member?.name === 'string' ? member.name.trim() : ''))
+    .filter((name) => name);
+  const sequence = createInfiltrationSequence(mission, { crewMembers: roster, crewNames });
+
+  container.hidden = false;
+  list.innerHTML = '';
+  list.hidden = true;
+  summaryContainer.hidden = true;
+  emptyState.hidden = true;
+
+  if (!sequence || !Array.isArray(sequence.steps) || !sequence.steps.length) {
+    emptyState.hidden = false;
+    emptyState.textContent = 'No infiltration preview available for this mission.';
+    return;
+  }
+
+  const { aggregateEffects, entries } = buildInfiltrationPreviewEntries(sequence);
+
+  const renderedSummary = renderInfiltrationAggregateSummary(summaryContainer, aggregateEffects);
+  summaryContainer.hidden = !renderedSummary;
+
+  if (!entries.length) {
+    emptyState.hidden = false;
+    emptyState.textContent = 'Infiltration preview unavailable.';
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  entries.forEach((entry) => {
+    fragment.appendChild(createInfiltrationTimelineItem(entry));
+  });
+  list.appendChild(fragment);
+  list.hidden = false;
+  emptyState.textContent = DEFAULT_INFILTRATION_PREVIEW_EMPTY;
+  emptyState.hidden = true;
+};
+
 const renderMissionInfiltrationTimeline = (mission) => {
   const list = missionControls.infiltrationTimelineList;
   const emptyState = missionControls.infiltrationTimelineEmpty;
@@ -11921,6 +12155,10 @@ const updateMissionControls = () => {
     eventPrompt,
     eventChoices,
     eventHistory,
+    infiltrationPreviewContainer,
+    infiltrationPreviewSummary,
+    infiltrationPreviewList,
+    infiltrationPreviewEmpty,
     infiltrationTimelineList,
     infiltrationTimelineEmpty,
     eventStatus,
@@ -12010,6 +12248,10 @@ const updateMissionControls = () => {
     eventPrompt,
     eventChoices,
     eventHistory,
+    infiltrationPreviewContainer,
+    infiltrationPreviewSummary,
+    infiltrationPreviewList,
+    infiltrationPreviewEmpty,
     eventStatus,
     debtList,
     debtStatus,
@@ -12118,6 +12360,12 @@ const updateMissionControls = () => {
       ? fallbackState.crackdownHistory
       : [];
     renderCrackdownHistory(fallbackHistory);
+    renderMissionInfiltrationPreview({
+      mission: null,
+      crewMembers: [],
+      vehicleId: missionControls.selectedVehicleId ?? null,
+      showPreview: false,
+    });
     updateMissionStatusText();
     updateCrackdownIndicator();
     updateDebtPanel();
@@ -12150,13 +12398,28 @@ const updateMissionControls = () => {
     isMissionRestricted ||
     !hasVehicleSelection;
 
+  const selectedCrewIds = missionControls.selectedCrewIds ?? [];
+  const assignedCrewMembers = chemistryRoster.filter((member) => selectedCrewIds.includes(member.id));
+  const showInfiltrationPreview = Boolean(
+    isReady &&
+      selectedMission &&
+      isMissionAvailable &&
+      !isMissionRestricted &&
+      !isAnotherMissionRunning,
+  );
+  renderMissionInfiltrationPreview({
+    mission: selectedMission ?? null,
+    crewMembers: assignedCrewMembers,
+    vehicleId: missionControls.selectedVehicleId ?? null,
+    showPreview: showInfiltrationPreview,
+  });
+
   let missionForIntel = null;
 
   if (!selectedMission) {
     resetMissionDetails('Select a mission to view its briefing.');
   } else {
     let missionDescription = selectedMission.description ?? 'No description available.';
-    const selectedCrewIds = missionControls.selectedCrewIds ?? [];
     const preview =
       selectedMission.status === 'available'
         ? missionSystem.previewCrewAssignment(
@@ -13150,10 +13413,18 @@ const setupMissionControls = () => {
   missionControls.eventPrompt = document.getElementById('mission-event-prompt');
   missionControls.eventChoices = document.getElementById('mission-event-choices');
   missionControls.eventHistory = document.getElementById('mission-event-history');
-  missionControls.infiltrationTimelineContainer = document.querySelector('.mission-infiltration');
+  missionControls.infiltrationPreviewContainer = document.getElementById('mission-infiltration-preview');
+  missionControls.infiltrationPreviewSummary = document.getElementById(
+    'mission-infiltration-preview-summary',
+  );
+  missionControls.infiltrationPreviewList = document.getElementById('mission-infiltration-preview-timeline');
+  missionControls.infiltrationPreviewEmpty = document.getElementById('mission-infiltration-preview-empty');
   missionControls.infiltrationTimelineSummary = document.getElementById('mission-infiltration-summary');
   missionControls.infiltrationTimelineList = document.getElementById('mission-infiltration-timeline');
   missionControls.infiltrationTimelineEmpty = document.getElementById('mission-infiltration-empty');
+  missionControls.infiltrationTimelineContainer = missionControls.infiltrationTimelineList
+    ? missionControls.infiltrationTimelineList.closest('.mission-infiltration')
+    : document.querySelector('.mission-events .mission-infiltration');
   missionControls.eventStatus = document.getElementById('mission-event-status');
   missionControls.debtList = document.getElementById('mission-debt-list');
   missionControls.debtStatus = document.getElementById('mission-debt-status');
