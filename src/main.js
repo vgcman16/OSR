@@ -24,6 +24,7 @@ import {
 } from './game/carThief/systems/reconSystem.js';
 import { collectSafehouseFacilityIds } from './game/carThief/systems/missionEvents.js';
 import {
+  buildVehicleInfiltrationProfile,
   createInfiltrationSequence,
   summarizeInfiltrationEffects,
 } from './game/carThief/systems/missionInfiltration.js';
@@ -12922,6 +12923,19 @@ const createInfiltrationTimelineItem = (entry, { condensed = false } = {}) => {
   const header = document.createElement('div');
   header.className = 'mission-infiltration__header';
 
+  const badgeIcon = typeof entry?.badgeIcon === 'string' ? entry.badgeIcon.trim() : '';
+  const phaseLabel = typeof entry?.phaseLabel === 'string' ? entry.phaseLabel.trim() : '';
+  if (badgeIcon || phaseLabel) {
+    const phaseEl = document.createElement('span');
+    phaseEl.className = 'mission-infiltration__phase';
+    if (badgeIcon && phaseLabel) {
+      phaseEl.textContent = `${badgeIcon} ${phaseLabel}`;
+    } else {
+      phaseEl.textContent = badgeIcon || phaseLabel;
+    }
+    header.appendChild(phaseEl);
+  }
+
   const stepLabel = typeof entry?.stepLabel === 'string' ? entry.stepLabel.trim() : '';
   if (stepLabel) {
     const stepEl = document.createElement('span');
@@ -13403,12 +13417,15 @@ const buildInfiltrationPreviewEntries = (sequence, { selectedChoices = null } = 
     entries.push({
       stepId: step.id,
       stepLabel,
+      phaseLabel: typeof step.phaseLabel === 'string' ? step.phaseLabel.trim() : '',
+      badgeIcon: typeof step.badgeIcon === 'string' ? step.badgeIcon.trim() : '',
       choiceLabel: choiceLabel ? `${choiceSource === 'planned' ? 'Planned' : 'Projected'}: ${choiceLabel}` : '',
       choiceSource,
       choiceId: choice?.id ?? null,
       summary: prompt || stepLabel || '',
       effects,
       effectSummary,
+      prompt,
     });
   });
 
@@ -13418,7 +13435,16 @@ const buildInfiltrationPreviewEntries = (sequence, { selectedChoices = null } = 
 const DEFAULT_INFILTRATION_PREVIEW_EMPTY = 'Assign crew to generate an infiltration preview.';
 const DEFAULT_INFILTRATION_PLAN_EMPTY = 'Review the projected sequence to preselect responses for each step.';
 
-const buildInfiltrationPreviewSignature = ({ mission, crewMembers = [], vehicleId = null, showPreview }) => {
+const buildInfiltrationPreviewSignature = ({
+  mission,
+  crewMembers = [],
+  vehicleId = null,
+  showPreview,
+  missionTags = [],
+  crackdownTier = null,
+  safehouseSignature = null,
+  vehicleProfile = null,
+}) => {
   const missionId = mission?.id ?? 'none';
   const crewSignature = Array.isArray(crewMembers)
     ? crewMembers
@@ -13428,7 +13454,34 @@ const buildInfiltrationPreviewSignature = ({ mission, crewMembers = [], vehicleI
         .join(',')
     : 'none';
   const vehicleSignature = vehicleId ?? 'none';
-  return `${showPreview ? 'show' : 'hide'}|${missionId}|${crewSignature || 'none'}|${vehicleSignature}`;
+  const tagSignature = Array.isArray(missionTags)
+    ? missionTags
+        .map((tag) => (typeof tag === 'string' ? tag.trim().toLowerCase() : ''))
+        .filter(Boolean)
+        .sort()
+        .join(',')
+    : 'none';
+  const crackdownSignature = typeof crackdownTier === 'string' && crackdownTier.trim()
+    ? crackdownTier.trim().toLowerCase()
+    : 'none';
+  const safehouseIdSignature = typeof safehouseSignature === 'string' && safehouseSignature
+    ? safehouseSignature
+    : Array.isArray(safehouseSignature)
+      ? safehouseSignature
+          .map((id) => (typeof id === 'string' ? id.trim().toLowerCase() : ''))
+          .filter(Boolean)
+          .sort()
+          .join(',') || 'none'
+      : 'none';
+  const vehicleProfileSignature = vehicleProfile
+    ? `${Number.isFinite(vehicleProfile.performanceScore) ? vehicleProfile.performanceScore.toFixed(2) : 'np'}-${
+        Number.isFinite(vehicleProfile.heatMitigationScore) ? vehicleProfile.heatMitigationScore.toFixed(2) : 'nh'
+      }-${vehicleProfile.hasOverdriveFocus ? 'od' : 'no'}-${vehicleProfile.hasStealthFocus ? 'sf' : 'ns'}`
+    : 'none';
+
+  return `${showPreview ? 'show' : 'hide'}|${missionId}|${crewSignature || 'none'}|${vehicleSignature}|tags:${
+    tagSignature || 'none'
+  }|crack:${crackdownSignature}|safe:${safehouseIdSignature}|vprof:${vehicleProfileSignature}`;
 };
 
 const renderMissionInfiltrationPreview = ({
@@ -13455,6 +13508,34 @@ const renderMissionInfiltrationPreview = ({
   const missionId = mission?.id ?? null;
   const isActiveMission = Boolean(activeMission && missionId && activeMission.id === missionId);
 
+  const state = getSharedState();
+  const safehouse = state ? getActiveSafehouseFromState(state) : null;
+  const safehouseBonuses = safehouse ? computeSafehouseFacilityBonuses(safehouse) : null;
+  const safehouseFacilities = Array.isArray(safehouseBonuses?.activeFacilityIds)
+    ? safehouseBonuses.activeFacilityIds.slice()
+    : [];
+  const missionTags = Array.isArray(mission?.tags) ? mission.tags.slice() : [];
+  const crackdownTier = mission?.crackdownTier
+    ?? mission?.activeCrackdownTier
+    ?? missionSystem?.currentCrackdownTier
+    ?? state?.heatTier
+    ?? null;
+  const garage = Array.isArray(state?.garage) ? state.garage : [];
+  const previewVehicleId = vehicleId ?? mission?.assignedVehicleId ?? null;
+  let vehicleProfile = null;
+  if (previewVehicleId) {
+    const assignedVehicle = garage.find((entry) => entry?.id === previewVehicleId);
+    if (assignedVehicle) {
+      vehicleProfile = buildVehicleInfiltrationProfile(assignedVehicle);
+    }
+  }
+  if (!vehicleProfile && mission?.assignedVehicleSnapshot) {
+    vehicleProfile = buildVehicleInfiltrationProfile({
+      ...mission.assignedVehicleSnapshot,
+      model: mission.assignedVehicleLabel ?? mission.assignedVehicleSnapshot.model ?? null,
+    });
+  }
+
   let roster = Array.isArray(crewMembers) ? crewMembers.filter(Boolean) : [];
   if (!roster.length && mission && mission.assignedCrewIds && missionSystem) {
     const crewPool = Array.isArray(missionSystem.state?.crew) ? missionSystem.state.crew : [];
@@ -13476,11 +13557,20 @@ const renderMissionInfiltrationPreview = ({
     planState = hydratePlanStateFromMission(activeMission.preplannedInfiltration, missionId);
   }
 
+  const safehouseSignature = safehouseFacilities.slice().map((id) => (typeof id === 'string' ? id.trim().toLowerCase() : ''))
+    .filter(Boolean)
+    .sort()
+    .join(',');
+
   const signature = `${buildInfiltrationPreviewSignature({
     mission,
     crewMembers: roster,
-    vehicleId,
+    vehicleId: previewVehicleId,
     showPreview,
+    missionTags,
+    crackdownTier,
+    safehouseSignature,
+    vehicleProfile,
   })}|plan:${buildInfiltrationPlanSignature(planState)}|active:${isActiveMission ? 'y' : 'n'}`;
   if (missionControls.lastInfiltrationPreviewSignature === signature) {
     return;
@@ -13504,7 +13594,16 @@ const renderMissionInfiltrationPreview = ({
   const crewNames = roster
     .map((member) => (typeof member?.name === 'string' ? member.name.trim() : ''))
     .filter((name) => name);
-  const sequence = createInfiltrationSequence(mission, { crewMembers: roster, crewNames });
+  const sequence = createInfiltrationSequence(mission, {
+    crewMembers: roster,
+    crewNames,
+    missionTags,
+    crackdownTier,
+    safehouseFacilities,
+    safehouseBonuses,
+    vehicleProfile,
+    vehicleImpact: mission?.assignedCrewImpact?.vehicleImpact ?? mission?.assignedVehicleImpact ?? null,
+  });
 
   container.hidden = false;
   list.innerHTML = '';

@@ -1,3 +1,5 @@
+import { aggregateVehicleModBonuses, VEHICLE_MOD_CATALOG } from '../entities/vehicle.js';
+
 const clamp = (value, min, max) => {
   if (!Number.isFinite(value)) {
     return min;
@@ -103,16 +105,177 @@ const rosterLabel = (crewNames = []) => {
   return `${first}, ${second}${rest.length ? ` +${rest.length}` : ''}`;
 };
 
+const RISK_TIER_ORDER = ['low', 'moderate', 'high', 'severe'];
+const normalizeRiskTier = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return RISK_TIER_ORDER.includes(normalized) ? normalized : null;
+};
+
+const CRACKDOWN_TIER_ORDER = ['calm', 'alert', 'lockdown'];
+const normalizeCrackdownTier = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return CRACKDOWN_TIER_ORDER.includes(normalized) ? normalized : null;
+};
+
+const buildMissionTagSet = (missionTags = [], missionCategory = null) => {
+  const normalized = new Set();
+  missionTags.forEach((tag) => {
+    if (typeof tag === 'string' && tag.trim()) {
+      normalized.add(tag.trim().toLowerCase());
+    }
+  });
+  if (typeof missionCategory === 'string' && missionCategory.trim()) {
+    normalized.add(missionCategory.trim().toLowerCase());
+  }
+  return normalized;
+};
+
+const coerceFinite = (value, fallback = null) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const buildVehicleInfiltrationProfile = (vehicle) => {
+  if (!vehicle || typeof vehicle !== 'object') {
+    return null;
+  }
+
+  const installedMods = typeof vehicle.getInstalledMods === 'function'
+    ? vehicle.getInstalledMods()
+    : Array.isArray(vehicle.installedMods)
+      ? vehicle.installedMods.slice()
+      : [];
+
+  const modBonuses = typeof vehicle.getModBonuses === 'function'
+    ? vehicle.getModBonuses(VEHICLE_MOD_CATALOG)
+    : aggregateVehicleModBonuses(installedMods, VEHICLE_MOD_CATALOG);
+
+  const effectivePerformance = typeof vehicle.getEffectivePerformance === 'function'
+    ? vehicle.getEffectivePerformance(VEHICLE_MOD_CATALOG)
+    : {
+        topSpeed: coerceFinite(vehicle.topSpeed),
+        acceleration: coerceFinite(vehicle.acceleration),
+        handling: coerceFinite(vehicle.handling),
+      };
+
+  const topSpeed = coerceFinite(effectivePerformance.topSpeed, coerceFinite(vehicle.topSpeed, 0));
+  const acceleration = coerceFinite(
+    effectivePerformance.acceleration,
+    coerceFinite(vehicle.acceleration, 0),
+  );
+  const handling = coerceFinite(effectivePerformance.handling, coerceFinite(vehicle.handling, 0));
+  const condition = coerceFinite(vehicle.condition, null);
+  const heat = coerceFinite(vehicle.heat, null);
+
+  const performanceScore =
+    (topSpeed ? Math.max(0.4, topSpeed / 120) : 1)
+    + (acceleration ? Math.max(0.4, acceleration / 5) : 1)
+    + (handling ? Math.max(0.4, handling / 5) : 1);
+
+  const heatMitigationScore =
+    (Number.isFinite(modBonuses.heatMultiplier) && modBonuses.heatMultiplier < 1
+      ? Math.min(0.6, 1 - modBonuses.heatMultiplier)
+      : 0)
+    + (Number.isFinite(modBonuses.heatGainMultiplier) && modBonuses.heatGainMultiplier < 1
+      ? Math.min(0.5, 1 - modBonuses.heatGainMultiplier)
+      : 0)
+    + (Number.isFinite(modBonuses.heatFlatAdjustment) && modBonuses.heatFlatAdjustment < 0
+      ? Math.min(0.3, Math.abs(modBonuses.heatFlatAdjustment))
+      : 0);
+
+  return {
+    label: typeof vehicle.model === 'string' ? vehicle.model : 'Assigned vehicle',
+    installedMods,
+    modBonuses,
+    effectivePerformance: {
+      topSpeed,
+      acceleration,
+      handling,
+    },
+    topSpeed,
+    acceleration,
+    handling,
+    condition,
+    heat,
+    performanceScore,
+    heatMitigationScore,
+    hasOverdriveFocus: performanceScore >= 3.2 || (topSpeed ?? 0) >= 150,
+    hasStealthFocus:
+      heatMitigationScore >= 0.25
+      || installedMods.some((mod) =>
+        typeof mod === 'string'
+        && /stealth|ghost|signal|mask|cloak|specter|decoy/i.test(mod),
+      ),
+  };
+};
+
+const describeRiskTierBrief = (tier) => {
+  switch (tier) {
+    case 'severe':
+      return 'severe-risk';
+    case 'high':
+      return 'high-risk';
+    case 'moderate':
+      return 'moderate-risk';
+    case 'low':
+    default:
+      return 'low-risk';
+  }
+};
+
+const describeCrackdownPosture = (tier) => {
+  switch (tier) {
+    case 'lockdown':
+      return 'lockdown crackdown';
+    case 'alert':
+      return 'alert crackdown';
+    case 'calm':
+    default:
+      return 'calm crackdown';
+  }
+};
+
+const missionHasTag = (tagSet, tagsToMatch = []) => {
+  if (!(tagSet instanceof Set) || !tagsToMatch?.length) {
+    return false;
+  }
+
+  return tagsToMatch.some((tag) => tagSet.has(tag));
+};
+
+const safehouseHasFacility = (facilityIds = [], idsToMatch = []) => {
+  if (!Array.isArray(facilityIds) || !idsToMatch?.length) {
+    return false;
+  }
+
+  const normalized = facilityIds
+    .map((id) => (typeof id === 'string' ? id.trim().toLowerCase() : ''))
+    .filter(Boolean);
+  return idsToMatch.some((match) => normalized.includes(match));
+};
+
 const STEP_LIBRARY = [
   {
     id: 'perimeter-breach',
     phaseLabel: 'Infiltration',
     badgeIcon: '🕶️',
     label: 'Stage the breach',
-    buildPrompt: ({ missionName, crewNames }) => {
+    required: true,
+    priority: 100,
+    matches: () => true,
+    buildPrompt: ({ missionName, crewNames, riskTier }) => {
       const crewLabel = rosterLabel(crewNames);
       const missionLabel = missionName ? ` for ${missionName}` : '';
-      return `${crewLabel} scout access points${missionLabel}. How do they crack the perimeter?`;
+      const riskDescriptor = riskTier ? ` against ${describeRiskTierBrief(riskTier)} defenses` : '';
+      return `${crewLabel} scout access points${missionLabel}${riskDescriptor}. How do they crack the perimeter?`;
     },
     buildChoices: ({ traitSummary }) => {
       const stealthBonus = traitSummary.stealth >= 2 ? ' Their stealth training keeps the noise floor low.' : '';
@@ -162,14 +325,81 @@ const STEP_LIBRARY = [
     },
   },
   {
+    id: 'recon-overwatch',
+    phaseLabel: 'Recon',
+    badgeIcon: '📡',
+    label: 'Secure overwatch lanes',
+    priority: 95,
+    matches: ({ riskTier, crackdownTier, missionTagSet }) =>
+      riskTier === 'high'
+        || riskTier === 'severe'
+        || crackdownTier === 'alert'
+        || crackdownTier === 'lockdown'
+        || missionHasTag(missionTagSet, ['surveillance', 'intel', 'data-heist', 'cyber-raid']),
+    buildPrompt: ({ missionName, riskTier, crackdownTier }) => {
+      const targetLabel = missionName ? missionName : 'the target';
+      const riskDescriptor = riskTier ? describeRiskTierBrief(riskTier) : 'the risk profile';
+      const crackdownDescriptor = describeCrackdownPosture(crackdownTier);
+      return `Overwatch teams map ${targetLabel}, balancing ${riskDescriptor} threats with the ${crackdownDescriptor}. What scouting pattern do they run?`;
+    },
+    buildChoices: ({ traitSummary }) => {
+      const techEdge = traitSummary.tech >= 2 ? ' Specialist hackers accelerate sensor alignment.' : '';
+      const tacticsEdge = traitSummary.tactics >= 2 ? ' Tactical overlays choreograph the recon lanes.' : '';
+
+      return [
+        {
+          id: 'drone-net',
+          label: 'Deploy the drone net',
+          description:
+            'Roll out silent drones to chart patrol arcs, trading minutes for crystal intel.' + techEdge,
+          narrative: 'Micro-drones painted patrol patterns, feeding the crew a living map.',
+          effects: {
+            durationMultiplier: 1.06,
+            successDelta: 0.04,
+            heatDelta: -0.4,
+          },
+        },
+        {
+          id: 'street-lookouts',
+          label: 'Blend with street lookouts',
+          description:
+            'Embed watchers in nearby stalls and cafés to phone in movements. Faster, but noisier.' + tacticsEdge,
+          narrative: 'Lookouts streamed updates from the street, letting the crew slip between sweeps.',
+          effects: {
+            durationMultiplier: 0.96,
+            heatDelta: 0.6,
+            successDelta: -0.02,
+          },
+        },
+        {
+          id: 'skip-recon',
+          label: 'Trust the intel packet',
+          description:
+            'Lean on cached intel and push ahead. Keeps tempo high but gambles on gaps staying quiet.',
+          narrative: 'They pushed past recon, trusting their gut to stay ahead of the clock.',
+          effects: {
+            durationMultiplier: 0.92,
+            successDelta: -0.03,
+            heatDelta: 0.2,
+            payoutMultiplier: 1.02,
+          },
+        },
+      ];
+    },
+  },
+  {
     id: 'objective-lockdown',
     phaseLabel: 'Execution',
     badgeIcon: '🎯',
     label: 'Secure the target',
-    buildPrompt: ({ missionName, crewNames }) => {
+    required: true,
+    priority: 90,
+    matches: () => true,
+    buildPrompt: ({ missionName, crewNames, riskTier }) => {
       const crewLabel = rosterLabel(crewNames);
       const subject = missionName ? `the core objective of ${missionName}` : 'the target';
-      return `${crewLabel} breach ${subject}. How do they handle the lockdown?`;
+      const riskDescriptor = riskTier ? ` amid ${describeRiskTierBrief(riskTier)} resistance` : '';
+      return `${crewLabel} breach ${subject}${riskDescriptor}. How do they handle the lockdown?`;
     },
     buildChoices: ({ traitSummary }) => {
       const techNote = traitSummary.tech >= 2 ? ' Specialist hackers cut through the ICE in record time.' : '';
@@ -219,10 +449,261 @@ const STEP_LIBRARY = [
     },
   },
   {
+    id: 'counter-crackdown-response',
+    phaseLabel: 'Countermeasures',
+    badgeIcon: '🚨',
+    label: 'Blunt crackdown pursuit',
+    priority: 88,
+    matches: ({ crackdownTier }) => crackdownTier === 'alert' || crackdownTier === 'lockdown',
+    buildPrompt: ({ missionName, crackdownTier }) => {
+      const target = missionName ? missionName : 'the score';
+      const crackdownLabel = describeCrackdownPosture(crackdownTier);
+      return `Crackdown units shadow ${target}. How does the crew blunt the ${crackdownLabel}?`;
+    },
+    buildChoices: ({ safehouseFacilities = [], traitSummary }) => {
+      const terminalBoost = safehouseHasFacility(safehouseFacilities, ['ghost-terminal', 'ghost-terminal-core']);
+      const dropSupport = safehouseHasFacility(safehouseFacilities, ['dead-drop-network', 'informant-dead-drops']);
+      const stealthEdge = traitSummary.stealth >= 2 ? ' Veteran infiltrators weave in false signals.' : '';
+
+      return [
+        {
+          id: 'spoof-command-chain',
+          label: 'Spoof the command chain',
+          description:
+            'Hijack the crackdown dispatch uplink to stall their response.' +
+            (terminalBoost ? ' Ghost terminals amplify the spoof, stretching the delay.' : '') +
+            stealthEdge,
+          narrative: 'Hijacked dispatch loops fed the crackdown a sanitized feed while the crew pressed on.',
+          effects: {
+            durationMultiplier: 1.05,
+            heatDelta: -0.9,
+            successDelta: 0.03,
+          },
+        },
+        {
+          id: 'burn-contact-favors',
+          label: 'Burn contact favors',
+          description:
+            'Lean on hush-money and local favors to redirect patrols.' +
+            (dropSupport ? ' Dead drops keep the payoffs invisible.' : ''),
+          narrative: 'Contacts rerouted pursuit teams, cash changing hands in the alleys while the crew slipped by.',
+          effects: {
+            payoutMultiplier: 0.98,
+            heatDelta: -0.6,
+            crewLoyaltyDelta: 1,
+          },
+        },
+        {
+          id: 'break-the-cordon',
+          label: 'Break the cordon head-on',
+          description:
+            'Stage a coordinated strike on the rapid-response perimeter to buy raw speed.',
+          narrative: 'They shattered the cordon with timed charges, sprinting through before the net reset.',
+          effects: {
+            durationMultiplier: 0.9,
+            heatDelta: 0.9,
+            successDelta: -0.02,
+            payoutMultiplier: 1.04,
+          },
+        },
+      ];
+    },
+  },
+  {
+    id: 'vehicle-overdrive',
+    phaseLabel: 'Getaway',
+    badgeIcon: '🚗',
+    label: 'Tune the getaway vector',
+    priority: 86,
+    matches: ({ vehicleProfile }) => Boolean(vehicleProfile && (vehicleProfile.hasOverdriveFocus || vehicleProfile.hasStealthFocus)),
+    buildPrompt: ({ missionName, vehicleProfile }) => {
+      const vehicleLabel = vehicleProfile?.label ?? 'the crew wheels';
+      const missionLabel = missionName ? ` for ${missionName}` : '';
+      return `The crew calibrate ${vehicleLabel}${missionLabel}. Do they push for raw speed or ghost the dragnet?`;
+    },
+    buildChoices: ({ vehicleProfile = {}, traitSummary }) => {
+      const { hasStealthFocus, hasOverdriveFocus } = vehicleProfile;
+      const handlingEdge = traitSummary.driving >= 2 ? ' Veteran wheelmen squeeze every ounce of control.' : '';
+
+      return [
+        {
+          id: 'silent-running',
+          label: 'Silent running tune',
+          description:
+            'Dial the ride into stealth mode, masking signatures at the cost of a slower burn.' +
+            (hasStealthFocus ? ' Installed stealth suites thrive on the low profile.' : ''),
+          narrative: 'Baffled vents and RF scramblers muted the getaway, letting the crew vanish into traffic.',
+          effects: {
+            durationMultiplier: 1.04,
+            heatDelta: -0.7,
+            successDelta: 0.03,
+          },
+        },
+        {
+          id: 'thruster-dash',
+          label: 'Thruster dash plan',
+          description:
+            'Push the throttle mapping for a brutal exit. Faster and richer, but heat flares.' +
+            (hasOverdriveFocus ? ' Overdrive mods gulp the extra output without flinching.' : ''),
+          narrative: 'Boost injectors lit up the streets as the crew rocketed out ahead of the dragnet.',
+          effects: {
+            durationMultiplier: 0.88,
+            payoutMultiplier: 1.05,
+            heatDelta: 0.9,
+            successDelta: -0.04,
+          },
+        },
+        {
+          id: 'relay-handoff',
+          label: 'Safehouse relay handoff',
+          description:
+            'Swap plates and crews mid-flight at prepped relays. Steadies odds but adds paperwork.' +
+            handlingEdge,
+          narrative: 'Mid-route relays swapped drivers and plates, shedding pursuit layers step by step.',
+          effects: {
+            durationMultiplier: 1.06,
+            successDelta: 0.04,
+            crewLoyaltyDelta: 1,
+            heatDelta: -0.3,
+          },
+        },
+      ];
+    },
+  },
+  {
+    id: 'data-ghost-siphon',
+    phaseLabel: 'Payload',
+    badgeIcon: '💾',
+    label: 'Crack the data core',
+    priority: 82,
+    matches: ({ missionTagSet }) =>
+      missionHasTag(missionTagSet, ['surveillance', 'data-heist', 'intel', 'cyber-raid', 'network']),
+    buildPrompt: ({ missionName }) => {
+      const target = missionName ? missionName : 'the target node';
+      return `Sensitive intel inside ${target} waits on a razor-thin window. How does the crew siphon the data?`;
+    },
+    buildChoices: ({ traitSummary }) => {
+      const techEdge = traitSummary.tech >= 2 ? ' Expert coders carve out exploit chains mid-stream.' : '';
+      const charismaEdge = traitSummary.charisma >= 2 ? ' Smooth talkers keep analysts second-guessing the breach.' : '';
+
+      return [
+        {
+          id: 'deep-packet-dive',
+          label: 'Deep packet dive',
+          description:
+            'Spool mirrored nodes and exfil the data quietly. Slower, safer, and steadies success.' + techEdge,
+          narrative: 'Shadow relays spun up quietly, copying shards until the full archive slid free.',
+          effects: {
+            durationMultiplier: 1.07,
+            successDelta: 0.05,
+            heatDelta: -0.4,
+          },
+        },
+        {
+          id: 'flash-burn',
+          label: 'Flash-burn siphon',
+          description:
+            'Spike the core, copy everything, and torch the access log. Blisteringly fast but messy.',
+          narrative: 'They flash-burned the vault, ripping the data before failsafes crashed the system.',
+          effects: {
+            durationMultiplier: 0.9,
+            payoutMultiplier: 1.06,
+            heatDelta: 1.0,
+            successDelta: -0.05,
+          },
+        },
+        {
+          id: 'seed-backdoor',
+          label: 'Seed a long-play backdoor',
+          description:
+            'Install a silent tap for recurring intel streams. Takes finesse but cements leverage.' + charismaEdge,
+          narrative: 'A ghost backdoor took root, promising months of drip-fed intel after the crew slipped away.',
+          effects: {
+            payoutMultiplier: 1.02,
+            successDelta: 0.03,
+            crewLoyaltyDelta: 1,
+          },
+        },
+      ];
+    },
+  },
+  {
+    id: 'safehouse-lifeline',
+    phaseLabel: 'Logistics',
+    badgeIcon: '🏠',
+    label: 'Leverage the safehouse network',
+    priority: 78,
+    matches: ({ safehouseFacilities = [] }) =>
+      safehouseHasFacility(
+        safehouseFacilities,
+        [
+          'dead-drop-network',
+          'ghost-terminal',
+          'ghost-terminal-core',
+          'escape-tunnel-grid',
+          'ops-sim-lab',
+          'shell-company-hub',
+        ],
+      ),
+    buildPrompt: ({ missionName }) => {
+      const missionLabel = missionName ? missionName : 'the op';
+      return `Safehouse assets stand ready to backstop ${missionLabel}. Which logistics play anchors the run?`;
+    },
+    buildChoices: ({ safehouseFacilities = [], traitSummary }) => {
+      const hasTunnels = safehouseHasFacility(safehouseFacilities, ['escape-tunnel-grid']);
+      const hasShellHub = safehouseHasFacility(safehouseFacilities, ['shell-company-hub', 'shell-finance-desk']);
+      const tacticsEdge = traitSummary.tactics >= 2 ? ' Coordinators choreograph the shifts flawlessly.' : '';
+
+      return [
+        {
+          id: 'dead-drop-relay',
+          label: 'Dead drop relay chain',
+          description:
+            'Cycle loot and comms through dead drops to scrub signatures.' +
+            (hasShellHub ? ' Shell accounts launder the transfers instantly.' : ''),
+          narrative: 'Courier relays kept the score moving, every packet vanishing into shell networks.',
+          effects: {
+            durationMultiplier: 1.05,
+            heatDelta: -0.7,
+            successDelta: 0.02,
+          },
+        },
+        {
+          id: 'ops-sim-dry-run',
+          label: 'Ops sim dry run',
+          description:
+            'Run a last-minute sim lab rehearsal to sharpen execution. Adds prep time but tightens odds.' +
+            tacticsEdge,
+          narrative: 'Sim lab holo-scenarios ironed out the playbook before the crew moved.',
+          effects: {
+            durationMultiplier: 1.04,
+            successDelta: 0.04,
+            heatDelta: -0.2,
+          },
+        },
+        {
+          id: 'tunnel-exfil',
+          label: 'Tunnel exfil staging',
+          description:
+            'Pre-stage tunnel grids and alternate exits for the pull-out.' +
+            (hasTunnels ? ' Existing escape tunnels snap online instantly.' : ''),
+          narrative: 'Hidden tunnel nodes synced with the plan, promising a clean vanish on the way out.',
+          effects: {
+            durationMultiplier: 0.97,
+            successDelta: 0.02,
+            heatDelta: -0.3,
+          },
+        },
+      ];
+    },
+  },
+  {
     id: 'escape-route',
     phaseLabel: 'Exfiltration',
     badgeIcon: '🏁',
     label: 'Run the escape',
+    priority: 70,
+    matches: ({ difficulty, riskTier }) => difficulty >= 3 || riskTier === 'moderate' || riskTier === 'high' || riskTier === 'severe',
     buildPrompt: ({ missionName, crewNames }) => {
       const crewLabel = rosterLabel(crewNames);
       const missionSuffix = missionName ? ` after ${missionName}` : '';
@@ -276,22 +757,81 @@ const STEP_LIBRARY = [
   },
 ];
 
-const pickStepTemplates = (mission) => {
+const pickStepTemplates = (mission, context = {}) => {
   if (!mission) {
     return [];
   }
 
-  const difficulty = Number.isFinite(mission.difficulty) ? mission.difficulty : 3;
-  const steps = [];
+  const difficulty = Number.isFinite(context.difficulty)
+    ? context.difficulty
+    : Number.isFinite(mission.difficulty)
+      ? mission.difficulty
+      : 3;
 
-  steps.push(STEP_LIBRARY[0]);
-  steps.push(STEP_LIBRARY[1]);
+  const riskTier = normalizeRiskTier(context.riskTier ?? mission.riskTier) ?? 'low';
+  const crackdownTier = normalizeCrackdownTier(context.crackdownTier ?? mission.crackdownTier);
+  const missionTagSet = buildMissionTagSet(context.missionTags ?? mission.tags, mission.category);
+  const safehouseFacilities = Array.isArray(context.safehouseFacilities)
+    ? context.safehouseFacilities
+    : [];
+  const baseContext = {
+    ...context,
+    difficulty,
+    riskTier,
+    crackdownTier,
+    missionTagSet,
+    safehouseFacilities,
+  };
 
-  if (difficulty >= 3) {
-    steps.push(STEP_LIBRARY[2]);
+  const matched = STEP_LIBRARY.filter((template) => {
+    if (typeof template.matches === 'function') {
+      try {
+        return template.matches(baseContext);
+      } catch (error) {
+        return false;
+      }
+    }
+    return true;
+  }).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+
+  if (!matched.length) {
+    return [];
   }
 
-  return steps;
+  const selected = [];
+  matched.forEach((template) => {
+    if (template.required && !selected.includes(template)) {
+      selected.push(template);
+    }
+  });
+
+  let targetCount;
+  if (difficulty <= 1) {
+    targetCount = 2;
+  } else if (difficulty >= 6) {
+    targetCount = 5;
+  } else if (difficulty >= 4) {
+    targetCount = 4;
+  } else {
+    targetCount = 3;
+  }
+
+  const optionalPhaseCount = matched.filter((template) => !template.required).length;
+  const minimumCount = Math.min(
+    matched.length,
+    Math.min(6, Math.max(targetCount, selected.length + optionalPhaseCount)),
+  );
+
+  matched.forEach((template) => {
+    if (selected.length >= minimumCount) {
+      return;
+    }
+    if (!selected.includes(template)) {
+      selected.push(template);
+    }
+  });
+
+  return selected;
 };
 
 const instantiateStep = (template, context) => {
@@ -347,18 +887,56 @@ const instantiateStep = (template, context) => {
   };
 };
 
-const createInfiltrationSequence = (mission, { crewMembers = [], crewNames = [] } = {}) => {
+const createInfiltrationSequence = (
+  mission,
+  {
+    crewMembers = [],
+    crewNames = [],
+    missionTags = null,
+    crackdownTier = null,
+    safehouseFacilities = null,
+    safehouseBonuses = null,
+    vehicleProfile = null,
+    vehicleImpact = null,
+  } = {},
+) => {
   if (!mission) {
     return null;
   }
 
   const traitSummary = buildTraitSummary(crewMembers);
-  const stepTemplates = pickStepTemplates(mission);
+  const difficulty = Number.isFinite(mission.difficulty) ? mission.difficulty : 3;
+  const riskTier = normalizeRiskTier(mission.riskTier) ?? 'low';
+  const normalizedCrackdownTier = normalizeCrackdownTier(crackdownTier ?? mission.crackdownTier ?? null);
+  const normalizedMissionTags = Array.isArray(missionTags)
+    ? missionTags.filter((tag) => typeof tag === 'string' && tag.trim())
+    : Array.isArray(mission.tags)
+      ? mission.tags.filter((tag) => typeof tag === 'string' && tag.trim())
+      : [];
+  const normalizedSafehouseFacilities = Array.isArray(safehouseFacilities)
+    ? safehouseFacilities
+    : [];
+
+  const stepTemplates = pickStepTemplates(mission, {
+    difficulty,
+    riskTier,
+    crackdownTier: normalizedCrackdownTier,
+    missionTags: normalizedMissionTags,
+    safehouseFacilities: normalizedSafehouseFacilities,
+    vehicleProfile,
+  });
   const steps = stepTemplates
     .map((template) => instantiateStep(template, {
       missionName: mission.name,
       crewNames,
       traitSummary,
+      riskTier,
+      crackdownTier: normalizedCrackdownTier,
+      missionTags: normalizedMissionTags,
+      safehouseFacilities: normalizedSafehouseFacilities,
+      safehouseBonuses,
+      vehicleProfile,
+      vehicleImpact,
     }))
     .filter(Boolean);
 
@@ -534,6 +1112,7 @@ const cloneSequence = (sequence) => {
 
 export {
   applyInfiltrationChoice,
+  buildVehicleInfiltrationProfile,
   cloneSequence,
   createInfiltrationSequence,
   getNextInfiltrationStep,

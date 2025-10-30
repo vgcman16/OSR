@@ -24,6 +24,7 @@ import { getVehicleModRecipe, assessVehicleModAffordability } from './vehicleMod
 import { createCrewRelationshipService } from './crewRelationships.js';
 import {
   applyInfiltrationChoice,
+  buildVehicleInfiltrationProfile,
   createInfiltrationSequence,
   getNextInfiltrationStep,
   summarizeInfiltrationEffects,
@@ -3247,14 +3248,80 @@ class MissionSystem {
     return crewPool.filter((member) => assignedIds.includes(member?.id));
   }
 
+  _buildVehicleProfileForMission(mission) {
+    if (!mission) {
+      return null;
+    }
+
+    const garage = Array.isArray(this.state?.garage) ? this.state.garage : [];
+    if (mission.assignedVehicleId) {
+      const vehicle = garage.find((entry) => entry?.id === mission.assignedVehicleId);
+      if (vehicle) {
+        return buildVehicleInfiltrationProfile(vehicle);
+      }
+    }
+
+    if (mission.assignedVehicleSnapshot) {
+      return buildVehicleInfiltrationProfile({
+        ...mission.assignedVehicleSnapshot,
+        model: mission.assignedVehicleLabel ?? mission.assignedVehicleSnapshot.model ?? null,
+      });
+    }
+
+    return null;
+  }
+
+  _buildInfiltrationContext(mission, { assignedCrew = null } = {}) {
+    if (!mission) {
+      return {
+        crewMembers: [],
+        crewNames: [],
+        missionTags: [],
+        crackdownTier: null,
+        safehouseFacilities: [],
+        safehouseBonuses: null,
+        vehicleProfile: null,
+        vehicleImpact: null,
+      };
+    }
+
+    const crewMembers = Array.isArray(assignedCrew) ? assignedCrew : this._getAssignedCrewMembers(mission);
+    const crewNames = crewMembers.map((member) => member?.name ?? 'Crew member');
+    const safehouse = this.state ? getActiveSafehouseFromState(this.state) : null;
+    const safehouseBonuses = safehouse ? computeSafehouseFacilityBonuses(safehouse) : null;
+    const safehouseFacilities = Array.isArray(safehouseBonuses?.activeFacilityIds)
+      ? safehouseBonuses.activeFacilityIds.slice()
+      : [];
+    const crackdownTier =
+      mission.crackdownTier
+      ?? mission.activeCrackdownTier
+      ?? this.currentCrackdownTier
+      ?? (this.heatSystem && typeof this.heatSystem.getCurrentTier === 'function'
+        ? this.heatSystem.getCurrentTier()
+        : null);
+    const missionTags = normalizeTextArray(mission.tags);
+    const vehicleProfile = this._buildVehicleProfileForMission(mission);
+    const vehicleImpact = mission.assignedCrewImpact?.vehicleImpact ?? mission.assignedVehicleImpact ?? null;
+
+    return {
+      crewMembers,
+      crewNames,
+      missionTags,
+      crackdownTier,
+      safehouseFacilities,
+      safehouseBonuses,
+      vehicleProfile,
+      vehicleImpact,
+    };
+  }
+
   _buildInfiltrationPlanForMission(mission, planPayload = null, { assignedCrew = null } = {}) {
     if (!mission) {
       return { missionId: null, updatedAt: Date.now(), choices: {}, stepCatalog: [] };
     }
 
-    const crewMembers = Array.isArray(assignedCrew) ? assignedCrew : this._getAssignedCrewMembers(mission);
-    const crewNames = crewMembers.map((member) => member?.name ?? 'Crew member');
-    const sequence = createInfiltrationSequence(mission, { crewMembers, crewNames });
+    const context = this._buildInfiltrationContext(mission, { assignedCrew });
+    const sequence = createInfiltrationSequence(mission, context);
     if (!sequence) {
       return {
         missionId: mission.id ?? null,
@@ -3272,11 +3339,11 @@ class MissionSystem {
       return false;
     }
 
-    const crewMembers = Array.isArray(assignedCrew) ? assignedCrew : this._getAssignedCrewMembers(mission);
-    const crewNames = crewMembers.map((member) => member?.name ?? 'Crew member');
+    const context = this._buildInfiltrationContext(mission, { assignedCrew });
+    const { crewNames } = context;
 
     if (!mission.infiltrationState || mission.infiltrationState.status === 'completed') {
-      const sequence = createInfiltrationSequence(mission, { crewMembers, crewNames });
+      const sequence = createInfiltrationSequence(mission, context);
       if (!sequence) {
         mission.infiltrationState = null;
         return false;

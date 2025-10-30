@@ -7,6 +7,11 @@ import { EconomySystem } from '../src/game/carThief/systems/economySystem.js';
 import { Vehicle } from '../src/game/carThief/entities/vehicle.js';
 import { Safehouse, SafehouseCollection } from '../src/game/carThief/world/safehouse.js';
 import { CrewMember, CREW_FATIGUE_CONFIG } from '../src/game/carThief/entities/crewMember.js';
+import { computeSafehouseFacilityBonuses } from '../src/game/carThief/world/safehouseEffects.js';
+import {
+  createInfiltrationSequence,
+  buildVehicleInfiltrationProfile,
+} from '../src/game/carThief/systems/missionInfiltration.js';
 
 const createState = () => ({
   funds: 1000,
@@ -323,6 +328,69 @@ test('mission event deck favors low-risk events for easier contracts', () => {
   if (weightedEntry) {
     assert.ok(weightedEntry.selectionWeight > 1, 'low-risk event gains weight for matching context');
   }
+});
+
+test('infiltration sequence adapts to mission context cues', () => {
+  const crew = [
+    new CrewMember({ id: 'scout', name: 'Scout', traits: { stealth: 4, tech: 3 } }),
+    new CrewMember({ id: 'driver', name: 'Driver', traits: { driving: 4, tactics: 3 } }),
+  ];
+
+  const vehicle = new Vehicle({
+    id: 'veh-ctx',
+    model: 'Specter Runner',
+    topSpeed: 160,
+    acceleration: 7,
+    handling: 7,
+    installedMods: ['stealth-plating', 'escape-vector-suite'],
+  });
+
+  const safehouse = new Safehouse({
+    id: 'safe-ctx',
+    owned: true,
+    tiers: [
+      {
+        amenities: [
+          { id: 'dead-drop-network', status: 'active' },
+          { id: 'escape-tunnel-grid', status: 'active' },
+        ],
+      },
+    ],
+  });
+  safehouse.tierIndex = 0;
+  const safehouseBonuses = computeSafehouseFacilityBonuses(safehouse);
+
+  const mission = {
+    id: 'mission-ctx',
+    name: 'Lockdown Data Lift',
+    difficulty: 5,
+    riskTier: 'high',
+    crackdownTier: 'lockdown',
+    tags: ['surveillance', 'data-heist'],
+  };
+
+  const vehicleProfile = buildVehicleInfiltrationProfile(vehicle);
+  const sequence = createInfiltrationSequence(mission, {
+    crewMembers: crew,
+    crewNames: crew.map((member) => member.name),
+    missionTags: mission.tags,
+    crackdownTier: mission.crackdownTier,
+    safehouseFacilities: safehouseBonuses.activeFacilityIds,
+    safehouseBonuses,
+    vehicleProfile,
+  });
+
+  assert.ok(sequence, 'sequence builds under rich context');
+  const stepIds = sequence.steps.map((step) => step.id);
+  assert.ok(stepIds.includes('perimeter-breach'), 'perimeter breach step present');
+  assert.ok(stepIds.includes('objective-lockdown'), 'objective step present');
+  assert.ok(stepIds.includes('counter-crackdown-response'), 'crackdown countermeasure step included');
+  assert.ok(stepIds.includes('data-ghost-siphon'), 'data-focused payload step included for surveillance tags');
+  assert.ok(stepIds.includes('vehicle-overdrive'), 'vehicle-focused step included when performance vehicle assigned');
+
+  const crackdownStep = sequence.steps.find((step) => step.id === 'counter-crackdown-response');
+  assert.equal(crackdownStep.phaseLabel, 'Countermeasures', 'crackdown step carries phase label');
+  assert.ok(crackdownStep.badgeIcon, 'crackdown step exposes badge icon');
 });
 
 test('mission event deck surfaces low-risk lockdown responses', () => {
