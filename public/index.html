@@ -137,6 +137,21 @@
                     Assign crew to generate an infiltration preview.
                   </p>
                   <div
+                    id="mission-infiltration-preview-plan"
+                    class="mission-infiltration__plan"
+                    aria-label="Plan infiltration choices"
+                    role="group"
+                    hidden
+                  >
+                    <p id="mission-infiltration-preview-plan-empty" class="mission-infiltration__plan-empty">
+                      Review the projected sequence to preselect responses for each step.
+                    </p>
+                    <ul
+                      id="mission-infiltration-preview-plan-list"
+                      class="mission-details__list mission-infiltration__plan-list"
+                    ></ul>
+                  </div>
+                  <div
                     id="mission-infiltration-preview-summary"
                     class="mission-infiltration__aggregate"
                     hidden
@@ -451,6 +466,13 @@
             class="mission-events__choices"
             role="group"
             aria-live="polite"
+          ></div>
+          <div
+            id="mission-event-plan"
+            class="mission-events__plan"
+            role="region"
+            aria-live="polite"
+            hidden
           ></div>
           <p
             id="mission-event-status"

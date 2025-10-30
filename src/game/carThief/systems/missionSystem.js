@@ -63,6 +63,86 @@ const normalizeTextArray = (value) => {
   return [];
 };
 
+const extractPlanChoiceEntries = (planPayload) => {
+  if (!planPayload) {
+    return [];
+  }
+
+  if (planPayload instanceof Map) {
+    return Array.from(planPayload.entries());
+  }
+
+  if (typeof planPayload === 'object') {
+    if (planPayload.choices && typeof planPayload.choices === 'object') {
+      return Object.entries(planPayload.choices);
+    }
+
+    return Object.entries(planPayload).filter(([key]) =>
+      key !== 'missionId' && key !== 'updatedAt' && key !== 'stepCatalog',
+    );
+  }
+
+  return [];
+};
+
+const buildInfiltrationPlanCatalog = (sequence) => {
+  const steps = Array.isArray(sequence?.steps) ? sequence.steps : [];
+  return steps.map((step) => ({
+    id: step?.id ?? null,
+    label: typeof step?.label === 'string' ? step.label : 'Infiltration step',
+    prompt: typeof step?.prompt === 'string' ? step.prompt : '',
+    choices: Array.isArray(step?.choices)
+      ? step.choices.map((choice) => ({
+          id: choice?.id ?? null,
+          label: typeof choice?.label === 'string' ? choice.label : 'Choice',
+          summary: summarizeInfiltrationEffects(choice?.effects ?? {}),
+        }))
+      : [],
+  }));
+};
+
+const sanitizeInfiltrationPlanPayload = (planPayload, { missionId = null, sequence = null } = {}) => {
+  const catalog = buildInfiltrationPlanCatalog(sequence);
+  const validChoices = new Map();
+  catalog.forEach((step) => {
+    const choiceMap = new Map();
+    if (Array.isArray(step.choices)) {
+      step.choices.forEach((choice) => {
+        if (choice?.id) {
+          choiceMap.set(choice.id, choice);
+        }
+      });
+    }
+    if (step?.id) {
+      validChoices.set(step.id, choiceMap);
+    }
+  });
+
+  const sanitized = {
+    missionId,
+    updatedAt: Date.now(),
+    choices: {},
+    stepCatalog: catalog,
+  };
+
+  const entries = extractPlanChoiceEntries(planPayload);
+  entries.forEach(([stepId, choiceId]) => {
+    if (typeof stepId !== 'string' || typeof choiceId !== 'string' || !stepId || !choiceId) {
+      return;
+    }
+    const choiceMap = validChoices.get(stepId);
+    if (choiceMap && choiceMap.has(choiceId)) {
+      sanitized.choices[stepId] = choiceId;
+    }
+  });
+
+  if (planPayload && Number.isFinite(planPayload.updatedAt)) {
+    sanitized.updatedAt = planPayload.updatedAt;
+  }
+
+  return sanitized;
+};
+
 const sanitizeFacilityDowntime = (
   downtime,
   { facilityId = null, label = null, currentDay = null } = {},
@@ -3167,6 +3247,26 @@ class MissionSystem {
     return crewPool.filter((member) => assignedIds.includes(member?.id));
   }
 
+  _buildInfiltrationPlanForMission(mission, planPayload = null, { assignedCrew = null } = {}) {
+    if (!mission) {
+      return { missionId: null, updatedAt: Date.now(), choices: {}, stepCatalog: [] };
+    }
+
+    const crewMembers = Array.isArray(assignedCrew) ? assignedCrew : this._getAssignedCrewMembers(mission);
+    const crewNames = crewMembers.map((member) => member?.name ?? 'Crew member');
+    const sequence = createInfiltrationSequence(mission, { crewMembers, crewNames });
+    if (!sequence) {
+      return {
+        missionId: mission.id ?? null,
+        updatedAt: Date.now(),
+        choices: {},
+        stepCatalog: [],
+      };
+    }
+
+    return sanitizeInfiltrationPlanPayload(planPayload, { missionId: mission.id ?? null, sequence });
+  }
+
   _maybeTriggerInfiltrationSequence(mission, { assignedCrew = null } = {}) {
     if (!mission) {
       return false;
@@ -3222,6 +3322,18 @@ class MissionSystem {
 
     mission.pendingDecision = pendingDecision;
     mission.status = 'decision-required';
+    const plannedChoiceId = mission?.preplannedInfiltration?.choices?.[nextStep.id];
+    if (plannedChoiceId) {
+      pendingDecision.source = 'infiltration-preplan';
+      const historyEntry = this._resolveInfiltrationChoice(mission, pendingDecision, plannedChoiceId);
+      if (historyEntry) {
+        mission.lastInfiltrationPlanStatus = `Preplanned action executed: ${historyEntry.choiceLabel ?? historyEntry.summary ?? nextStep.label}.`;
+        return true;
+      }
+      return false;
+    }
+
+    mission.lastInfiltrationPlanStatus = '';
     return true;
   }
 
@@ -3367,6 +3479,12 @@ class MissionSystem {
     mission.eventHistory.push(historyEntry);
     if (mission.eventHistory.length > 10) {
       mission.eventHistory = mission.eventHistory.slice(-10);
+    }
+
+    if (pendingDecision.source === 'infiltration-preplan') {
+      mission.lastInfiltrationPlanStatus = `Preplanned action executed: ${historyEntry.choiceLabel ?? historyEntry.summary ?? pendingDecision.label}.`;
+    } else if (mission.lastInfiltrationPlanStatus) {
+      mission.lastInfiltrationPlanStatus = '';
     }
 
     mission.infiltrationSummary = Array.isArray(mission.infiltrationState?.history)
@@ -4296,7 +4414,7 @@ class MissionSystem {
     this.applyHeatRestrictions();
   }
 
-  startMission(missionId, crewIds = [], vehicleId = null) {
+  startMission(missionId, crewIds = [], vehicleId = null, infiltrationPlan = null) {
     if (this.state.activeMission && this.state.activeMission.status !== 'completed') {
       return null;
     }
@@ -4413,6 +4531,10 @@ class MissionSystem {
         }
       : null;
     mission.assignedVehicleLabel = assignedVehicle ? assignedVehicle.model ?? 'Assigned vehicle' : null;
+    mission.preplannedInfiltration = this._buildInfiltrationPlanForMission(mission, infiltrationPlan, {
+      assignedCrew,
+    });
+    mission.lastInfiltrationPlanStatus = '';
     mission.assignedCrewFatigue = computeMissionFatigueImpact(mission);
 
     assignedCrew.forEach((member) => {
@@ -4451,6 +4573,28 @@ class MissionSystem {
     this.advanceMissionEvents(mission);
     this.state.activeMission = mission;
     return mission;
+  }
+
+  updateActiveMissionInfiltrationPlan(planChoices = {}) {
+    const mission = this.state.activeMission;
+    if (!mission || mission.status === 'completed') {
+      return null;
+    }
+
+    const crewMembers = this._getAssignedCrewMembers(mission);
+    const crewNames = crewMembers.map((member) => member?.name ?? 'Crew member');
+    const baseSequence = mission.infiltrationState
+      ? mission.infiltrationState
+      : createInfiltrationSequence(mission, { crewMembers, crewNames });
+
+    const sanitized = sanitizeInfiltrationPlanPayload({ choices: planChoices }, {
+      missionId: mission.id ?? null,
+      sequence: baseSequence,
+    });
+
+    mission.preplannedInfiltration = sanitized;
+    mission.lastInfiltrationPlanStatus = '';
+    return sanitized;
   }
 
   resolveMission(missionId, outcome) {
