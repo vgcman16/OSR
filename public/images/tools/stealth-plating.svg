@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Stealth Plating Icon</title>
+  <defs>
+    <linearGradient id="stealthGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c6f2ff" />
+      <stop offset="100%" stop-color="#3c63c7" />
+    </linearGradient>
+  </defs>
+  <rect x="10" y="12" width="44" height="40" rx="6" fill="#070c18" stroke="#87c9ff" stroke-width="2" />
+  <path d="M18 20l14-6 14 6v12l-14 6-14-6z" fill="url(#stealthGradient)" stroke="#4ba3f5" stroke-width="1.5" />
+  <path d="M18 32l14 6 14-6" stroke="#09132c" stroke-width="2" opacity="0.45" />
+  <path d="M18 26l14 6 14-6" stroke="#0f2147" stroke-width="2" opacity="0.6" />
+  <path d="M22 36l10 4 10-4v6l-10 4-10-4z" fill="#11213f" stroke="#4ba3f5" stroke-width="1.5" />
+</svg>

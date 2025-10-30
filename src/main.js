@@ -8672,6 +8672,16 @@ const updateMaintenancePanel = () => {
       const header = document.createElement('div');
       header.className = 'mission-maintenance__crafting-header';
 
+      if (modProfile?.icon) {
+        const icon = document.createElement('img');
+        icon.className = 'mission-maintenance__crafting-icon';
+        icon.src = modProfile.icon;
+        icon.alt = '';
+        icon.loading = 'lazy';
+        icon.decoding = 'async';
+        header.appendChild(icon);
+      }
+
       const name = document.createElement('span');
       name.className = 'mission-maintenance__crafting-name';
       name.textContent = label;

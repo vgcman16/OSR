@@ -2048,13 +2048,25 @@ body {
 .mission-maintenance__crafting-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 0.75rem;
 }
 
 .mission-maintenance__crafting-name {
   font-weight: 600;
   color: rgba(209, 234, 255, 0.95);
+  flex: 1;
+}
+
+.mission-maintenance__crafting-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: rgba(120, 190, 255, 0.1);
+  box-shadow: 0 0 12px rgba(120, 190, 255, 0.25);
+  padding: 4px;
+  flex-shrink: 0;
 }
 
 .mission-maintenance__crafting-cost {
