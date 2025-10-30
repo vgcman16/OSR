@@ -34,6 +34,20 @@
           Show tutorial
         </button>
         <label for="mission-select">Available contracts</label>
+        <div class="mission-filter" role="group" aria-label="Filter available contracts">
+          <div class="mission-filter__group">
+            <label class="mission-filter__label" for="mission-filter-category">Category</label>
+            <select id="mission-filter-category" name="mission-filter-category">
+              <option value="all">All categories</option>
+            </select>
+          </div>
+          <div class="mission-filter__group">
+            <label class="mission-filter__label" for="mission-filter-risk">Risk tier</label>
+            <select id="mission-filter-risk" name="mission-filter-risk">
+              <option value="all">All risk tiers</option>
+            </select>
+          </div>
+        </div>
         <select id="mission-select" name="mission-select" aria-describedby="mission-status-text">
           <option value="" disabled selected>Select a mission</option>
         </select>

@@ -134,6 +134,25 @@ body {
   width: 100%;
 }
 
+.mission-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.mission-filter__group {
+  flex: 1 1 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mission-filter__label {
+  font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.75);
+}
+
 .control-panel button {
   cursor: pointer;
 }
