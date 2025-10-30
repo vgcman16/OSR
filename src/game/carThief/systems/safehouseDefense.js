@@ -223,13 +223,25 @@ const buildLayout = (safehouse, savedLayout = null) => {
     }
   });
 
+  const layoutSource = typeof savedLayout?.source === 'string' ? savedLayout.source.trim().toLowerCase() : '';
+  const isCustomLayout = layoutSource === 'custom';
+
   const unassignedFacilityIds = [];
 
   facilityIds
     .map((facilityId) => (typeof facilityId === 'string' ? facilityId.trim() : ''))
     .filter(Boolean)
     .forEach((facilityId) => {
-      const zoneId = resolveZoneId(facilityId, savedLayout, assignments);
+      const assignment = assignments.get(facilityId);
+
+      if (assignment === 'unassigned' || (isCustomLayout && assignment === undefined)) {
+        if (!unassignedFacilityIds.includes(facilityId)) {
+          unassignedFacilityIds.push(facilityId);
+        }
+        return;
+      }
+
+      const zoneId = assignment ?? resolveZoneId(facilityId, savedLayout, null);
       if (zoneId === 'unassigned') {
         if (!unassignedFacilityIds.includes(facilityId)) {
           unassignedFacilityIds.push(facilityId);
