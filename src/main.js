@@ -758,6 +758,7 @@ const missionControls = {
   trainingGearAcquireButton: null,
   trainingGearEquipButton: null,
   trainingGearVendorStatus: null,
+  trainingGearVendorMessages: null,
   trainingGearList: null,
   trainingRestCrewSelect: null,
   trainingRestDurationSelect: null,
@@ -10522,11 +10523,9 @@ const updateTrainingOptions = () => {
   gearPlaceholder.selected = true;
   gearSelect.appendChild(gearPlaceholder);
 
-  vendorOptions.forEach((entry) => {
-    const option = document.createElement('option');
-    option.value = entry.gearId;
-    const owned = currentSelection ? crewOwnsGear(currentSelection, entry.gearId) : false;
-    const equipped = currentSelection ? crewHasEquippedGear(currentSelection, entry.gearId) : false;
+  const vendorDescriptors = vendorOptions.map((entry) => {
+    const optionOwned = currentSelection ? crewOwnsGear(currentSelection, entry.gearId) : false;
+    const optionEquipped = currentSelection ? crewHasEquippedGear(currentSelection, entry.gearId) : false;
     const statusSegments = [];
     if (entry.locked) {
       statusSegments.push('locked');
@@ -10535,16 +10534,61 @@ const updateTrainingOptions = () => {
     } else if (Number.isFinite(entry.quantity)) {
       statusSegments.push(`${entry.quantity} in stock`);
     }
-    if (owned) {
-      statusSegments.push(equipped ? 'equipped' : 'owned');
+    if (optionOwned) {
+      statusSegments.push(optionEquipped ? 'equipped' : 'owned');
     }
-    const statusLabel = statusSegments.length ? ` (${statusSegments.join(', ')})` : '';
+
+    const rawMessages = Array.isArray(entry.messages)
+      ? entry.messages.filter((message) => typeof message === 'string' && message.trim())
+      : [];
+    const messageText = rawMessages.join(' ');
+
+    let detailText = messageText;
+    if (!detailText) {
+      if (entry.locked) {
+        detailText = 'Locked until prerequisites are met.';
+      } else if (entry.soldOut) {
+        detailText = 'Vendor is sold out and awaiting restock.';
+      } else if (!entry.available) {
+        detailText = 'Unavailable from the vendor at this time.';
+      } else if (Number.isFinite(entry.quantity)) {
+        detailText = `${entry.quantity} in stock and ready for acquisition.`;
+      } else {
+        detailText = 'Available for acquisition.';
+      }
+    } else if (entry.soldOut && !/restock/i.test(detailText)) {
+      detailText = `${detailText} Vendor is currently restocking.`;
+    }
+
+    const availabilityState = entry.locked
+      ? 'locked'
+      : entry.available && !entry.soldOut
+        ? 'available'
+        : 'restocking';
+
+    return {
+      entry,
+      statusLabel: statusSegments.length ? ` (${statusSegments.join(', ')})` : '',
+      messageText,
+      detailText,
+      availabilityState,
+    };
+  });
+
+  vendorDescriptors.forEach(({ entry, statusLabel, messageText, detailText }) => {
+    const option = document.createElement('option');
+    option.value = entry.gearId;
     option.textContent = `${entry.label}${statusLabel}`;
     option.dataset.available = entry.available ? 'true' : 'false';
     option.dataset.locked = entry.locked ? 'true' : 'false';
     option.dataset.soldOut = entry.soldOut ? 'true' : 'false';
-    option.dataset.messages = entry.messages.join(' ');
+    option.dataset.messages = messageText;
     option.dataset.cost = entry.cost;
+    if (detailText) {
+      option.title = detailText;
+    } else {
+      option.removeAttribute('title');
+    }
     gearSelect.appendChild(option);
   });
 
@@ -10561,6 +10605,44 @@ const updateTrainingOptions = () => {
   }
 
   gearSelect.disabled = !currentSelection || !vendorOptions.length;
+
+  const vendorMessagesList = missionControls.trainingGearVendorMessages;
+  if (vendorMessagesList) {
+    vendorMessagesList.innerHTML = '';
+    if (vendorDescriptors.length) {
+      vendorDescriptors.forEach(({ entry, detailText, availabilityState }) => {
+        const listItem = document.createElement('li');
+        listItem.className = 'mission-training__vendor-hint';
+        listItem.dataset.gearId = entry.gearId;
+        if (availabilityState === 'locked') {
+          listItem.classList.add('mission-training__vendor-hint--locked');
+        } else if (availabilityState === 'available') {
+          listItem.classList.add('mission-training__vendor-hint--available');
+        } else {
+          listItem.classList.add('mission-training__vendor-hint--restocking');
+        }
+        if (entry.gearId === gearSelect.value) {
+          listItem.classList.add('mission-training__vendor-hint--active');
+        }
+
+        const labelNode = document.createElement('span');
+        labelNode.className = 'mission-training__vendor-hint-label';
+        labelNode.textContent = entry.label;
+
+        const detailNode = document.createElement('span');
+        detailNode.className = 'mission-training__vendor-hint-detail';
+        detailNode.textContent = detailText;
+
+        listItem.append(labelNode, detailNode);
+        vendorMessagesList.appendChild(listItem);
+      });
+    } else {
+      const placeholderItem = document.createElement('li');
+      placeholderItem.className = 'mission-training__vendor-hint mission-training__vendor-hint--empty';
+      placeholderItem.textContent = 'Crew gear vendors are currently offline.';
+      vendorMessagesList.appendChild(placeholderItem);
+    }
+  }
 
   const selectedVendorOption = vendorOptions.find((entry) => entry.gearId === gearSelect.value) ?? null;
   const vendorStatusNode = missionControls.trainingGearVendorStatus;
@@ -15612,6 +15694,18 @@ const setupMissionControls = () => {
     const gearSelect = document.createElement('select');
     gearSelect.id = 'mission-training-gear';
     gearSelect.name = 'mission-training-gear';
+    gearSelect.setAttribute(
+      'aria-describedby',
+      'mission-training-gear-vendor-messages mission-training-gear-vendor-status',
+    );
+
+    const vendorMessages = document.createElement('ul');
+    vendorMessages.id = 'mission-training-gear-vendor-messages';
+    vendorMessages.className = 'mission-training__vendor-hints';
+    const vendorMessagesPlaceholder = document.createElement('li');
+    vendorMessagesPlaceholder.className = 'mission-training__vendor-hint mission-training__vendor-hint--empty';
+    vendorMessagesPlaceholder.textContent = 'Vendor intel unavailable.';
+    vendorMessages.appendChild(vendorMessagesPlaceholder);
 
     const vendorStatus = document.createElement('div');
     vendorStatus.id = 'mission-training-gear-vendor-status';
@@ -15643,11 +15737,12 @@ const setupMissionControls = () => {
     if (insertBeforeNode) {
       trainingSection.insertBefore(gearLabel, insertBeforeNode);
       trainingSection.insertBefore(gearSelect, insertBeforeNode);
+      trainingSection.insertBefore(vendorMessages, insertBeforeNode);
       trainingSection.insertBefore(vendorStatus, insertBeforeNode);
       trainingSection.insertBefore(actions, insertBeforeNode);
       trainingSection.insertBefore(gearList, insertBeforeNode);
     } else {
-      trainingSection.append(gearLabel, gearSelect, vendorStatus, actions, gearList);
+      trainingSection.append(gearLabel, gearSelect, vendorMessages, vendorStatus, actions, gearList);
     }
   };
 
@@ -16046,6 +16141,7 @@ const setupMissionControls = () => {
   missionControls.trainingGearAcquireButton = document.getElementById('mission-training-gear-buy-btn');
   missionControls.trainingGearEquipButton = document.getElementById('mission-training-gear-equip-btn');
   missionControls.trainingGearVendorStatus = document.getElementById('mission-training-gear-vendor-status');
+  missionControls.trainingGearVendorMessages = document.getElementById('mission-training-gear-vendor-messages');
   missionControls.trainingGearList = document.getElementById('mission-training-gear-list');
   missionControls.trainingRestCrewSelect = document.getElementById('mission-training-rest-crew');
   missionControls.trainingRestDurationSelect = document.getElementById('mission-training-rest-duration');
