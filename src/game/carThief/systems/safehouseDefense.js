@@ -22,12 +22,40 @@ const clamp = (value, min, max) => {
   return value;
 };
 
-const resolveZoneId = (facilityId) => {
+const resolveZoneId = (facilityId, savedLayout = null, assignmentMap = null) => {
   if (!facilityId || typeof facilityId !== 'string') {
     return 'support';
   }
 
-  const id = facilityId.toLowerCase();
+  const normalized = facilityId.trim();
+  if (!normalized) {
+    return 'support';
+  }
+
+  if (assignmentMap && assignmentMap.has(normalized)) {
+    return assignmentMap.get(normalized);
+  }
+
+  if (savedLayout && Array.isArray(savedLayout.zones) && !assignmentMap) {
+    for (const zone of savedLayout.zones) {
+      if (!zone || !Array.isArray(zone.facilityIds)) {
+        continue;
+      }
+      if (zone.facilityIds.some((entry) => (typeof entry === 'string' ? entry.trim() : '') === normalized)) {
+        return zone.id ?? 'support';
+      }
+    }
+  }
+
+  if (
+    savedLayout
+    && Array.isArray(savedLayout.unassignedFacilityIds)
+    && savedLayout.unassignedFacilityIds.some((entry) => (typeof entry === 'string' ? entry.trim() : '') === normalized)
+  ) {
+    return 'unassigned';
+  }
+
+  const id = normalized.toLowerCase();
   if (id.includes('ops') || id.includes('command') || id.includes('terminal') || id.includes('theater')) {
     return 'operations';
   }
@@ -75,8 +103,19 @@ const cloneScenario = (scenario) => {
                 label: zone.label,
                 facilityIds: Array.isArray(zone.facilityIds) ? zone.facilityIds.slice() : [],
                 defenseScore: zone.defenseScore,
+                ordinal: zone.ordinal,
               }))
             : [],
+          zoneOrder: Array.isArray(scenario.layout.zoneOrder) ? scenario.layout.zoneOrder.slice() : [],
+          unassignedFacilityIds: Array.isArray(scenario.layout.unassignedFacilityIds)
+            ? scenario.layout.unassignedFacilityIds.slice()
+            : [],
+          assignmentsByFacility:
+            scenario.layout.assignmentsByFacility && typeof scenario.layout.assignmentsByFacility === 'object'
+              ? { ...scenario.layout.assignmentsByFacility }
+              : {},
+          source: scenario.layout.source === 'custom' ? 'custom' : 'heuristic',
+          updatedAt: Number.isFinite(scenario.layout.updatedAt) ? scenario.layout.updatedAt : null,
         }
       : null,
     escalationTracks: Array.isArray(scenario.escalationTracks)
@@ -105,39 +144,218 @@ const cloneScenario = (scenario) => {
   };
 };
 
-const buildLayout = (safehouse) => {
-  if (!safehouse) {
-    return {
-      safehouseId: null,
-      zones: Object.values(ZONE_CONFIG).map((zone) => ({ ...zone, facilityIds: [], defenseScore: 0 })),
-    };
+const buildLayout = (safehouse, savedLayout = null) => {
+  const safehouseId = safehouse?.id ?? savedLayout?.safehouseId ?? null;
+  const facilityIds = collectSafehouseFacilityIds(safehouse).map((facilityId) =>
+    typeof facilityId === 'string' ? facilityId.trim() : '',
+  );
+
+  const assignments = new Map();
+  if (savedLayout && savedLayout.assignmentsByFacility && typeof savedLayout.assignmentsByFacility === 'object') {
+    Object.entries(savedLayout.assignmentsByFacility).forEach(([facilityId, zoneId]) => {
+      const normalizedFacilityId = typeof facilityId === 'string' ? facilityId.trim() : '';
+      if (!normalizedFacilityId || assignments.has(normalizedFacilityId)) {
+        return;
+      }
+      const normalizedZoneId = typeof zoneId === 'string' ? zoneId.trim() : '';
+      assignments.set(normalizedFacilityId, normalizedZoneId || 'support');
+    });
+  }
+  if (savedLayout) {
+    if (Array.isArray(savedLayout.zones)) {
+      savedLayout.zones.forEach((zone) => {
+        if (!zone || !Array.isArray(zone.facilityIds)) {
+          return;
+        }
+        const zoneId = typeof zone.id === 'string' ? zone.id.trim() : null;
+        if (!zoneId) {
+          return;
+        }
+        zone.facilityIds.forEach((facilityId) => {
+          const normalized = typeof facilityId === 'string' ? facilityId.trim() : '';
+          if (normalized && !assignments.has(normalized)) {
+            assignments.set(normalized, zoneId);
+          }
+        });
+      });
+    }
+    if (Array.isArray(savedLayout.unassignedFacilityIds)) {
+      savedLayout.unassignedFacilityIds.forEach((facilityId) => {
+        const normalized = typeof facilityId === 'string' ? facilityId.trim() : '';
+        if (normalized && !assignments.has(normalized)) {
+          assignments.set(normalized, 'unassigned');
+        }
+      });
+    }
   }
 
-  const facilityIds = collectSafehouseFacilityIds(safehouse);
   const zoneMap = new Map();
+  const registerZone = (zoneId, label = null) => {
+    const normalizedZoneId = zoneId ?? 'support';
+    if (!zoneMap.has(normalizedZoneId)) {
+      const baseConfig = ZONE_CONFIG[normalizedZoneId] ?? { id: normalizedZoneId, label: label ?? normalizedZoneId };
+      zoneMap.set(normalizedZoneId, {
+        id: normalizedZoneId,
+        label: label ?? baseConfig.label ?? normalizedZoneId,
+        facilityIds: [],
+        defenseScore: 0,
+        ordinal: null,
+      });
+    }
+    return zoneMap.get(normalizedZoneId);
+  };
 
   Object.values(ZONE_CONFIG).forEach((config) => {
-    zoneMap.set(config.id, { ...config, facilityIds: [], defenseScore: 0 });
+    registerZone(config.id, config.label);
   });
 
-  facilityIds.forEach((facilityId) => {
-    const zoneId = resolveZoneId(facilityId);
-    if (!zoneMap.has(zoneId)) {
-      zoneMap.set(zoneId, { ...ZONE_CONFIG[zoneId] ?? { id: zoneId, label: zoneId }, facilityIds: [], defenseScore: 0 });
+  const savedZones = Array.isArray(savedLayout?.zones) ? savedLayout.zones : [];
+  savedZones.forEach((zone) => {
+    const zoneId = typeof zone?.id === 'string' ? zone.id.trim() : null;
+    if (!zoneId) {
+      return;
     }
-
-    const zone = zoneMap.get(zoneId);
-    zone.facilityIds.push(facilityId);
-    zone.defenseScore += 1;
+    const label = typeof zone.label === 'string' && zone.label.trim() ? zone.label.trim() : ZONE_CONFIG[zoneId]?.label;
+    const container = registerZone(zoneId, label ?? zoneId);
+    container.label = label ?? container.label;
+    if (Number.isFinite(zone.ordinal)) {
+      container.ordinal = clamp(Math.round(zone.ordinal), 0, 50);
+    }
   });
+
+  const unassignedFacilityIds = [];
+
+  facilityIds
+    .map((facilityId) => (typeof facilityId === 'string' ? facilityId.trim() : ''))
+    .filter(Boolean)
+    .forEach((facilityId) => {
+      const zoneId = resolveZoneId(facilityId, savedLayout, assignments);
+      if (zoneId === 'unassigned') {
+        if (!unassignedFacilityIds.includes(facilityId)) {
+          unassignedFacilityIds.push(facilityId);
+        }
+        return;
+      }
+
+      const zone = registerZone(zoneId);
+      if (!zone.facilityIds.includes(facilityId)) {
+        zone.facilityIds.push(facilityId);
+      }
+    });
+
+  const preferredOrder = Array.isArray(savedLayout?.zoneOrder)
+    ? savedLayout.zoneOrder
+        .map((zoneId) => (typeof zoneId === 'string' ? zoneId.trim() : ''))
+        .filter(Boolean)
+    : [];
 
   const zones = Array.from(zoneMap.values());
-  zones.sort((a, b) => a.label.localeCompare(b.label));
+  const zoneOrder = (() => {
+    if (preferredOrder.length) {
+      const seen = new Set();
+      const ordered = [];
+      preferredOrder.forEach((zoneId) => {
+        if (zoneMap.has(zoneId) && !seen.has(zoneId)) {
+          ordered.push(zoneId);
+          seen.add(zoneId);
+        }
+      });
+      zones
+        .map((zone) => zone.id)
+        .filter((zoneId) => !seen.has(zoneId))
+        .forEach((zoneId) => {
+          ordered.push(zoneId);
+          seen.add(zoneId);
+        });
+      return ordered;
+    }
 
-  return {
-    safehouseId: safehouse?.id ?? null,
-    zones,
+    if (savedZones.length) {
+      const seen = new Set();
+      const ordered = [];
+      savedZones.forEach((zone) => {
+        const zoneId = typeof zone?.id === 'string' ? zone.id.trim() : null;
+        if (zoneId && zoneMap.has(zoneId) && !seen.has(zoneId)) {
+          ordered.push(zoneId);
+          seen.add(zoneId);
+        }
+      });
+      zones
+        .map((zone) => zone.id)
+        .filter((zoneId) => !seen.has(zoneId))
+        .forEach((zoneId) => {
+          ordered.push(zoneId);
+          seen.add(zoneId);
+        });
+      return ordered;
+    }
+
+    return zones
+      .slice()
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map((zone) => zone.id);
+  })();
+
+  const normalizedZones = zoneOrder
+    .map((zoneId) => zoneMap.get(zoneId))
+    .filter(Boolean)
+    .map((zone) => {
+      const savedZone = savedZones.find((entry) => {
+        const entryId = typeof entry?.id === 'string' ? entry.id.trim() : null;
+        return entryId === zone.id;
+      });
+
+      const savedScore = Number.isFinite(savedZone?.defenseScore)
+        ? clamp(Math.round(savedZone.defenseScore), 0, 20)
+        : null;
+
+      const result = {
+        id: zone.id,
+        label: zone.label,
+        facilityIds: zone.facilityIds.slice(),
+        defenseScore: savedScore ?? zone.facilityIds.length,
+      };
+
+      if (Number.isFinite(zone.ordinal)) {
+        result.ordinal = clamp(Math.round(zone.ordinal), 0, 50);
+      } else if (Number.isFinite(savedZone?.ordinal)) {
+        result.ordinal = clamp(Math.round(savedZone.ordinal), 0, 50);
+      }
+
+      return result;
+    });
+
+  const layout = {
+    safehouseId,
+    zones: normalizedZones,
+    zoneOrder,
+    source: savedLayout?.source === 'custom' ? 'custom' : 'heuristic',
+    updatedAt:
+      savedLayout?.source === 'custom' && Number.isFinite(savedLayout?.updatedAt)
+        ? savedLayout.updatedAt
+        : Date.now(),
   };
+
+  if (unassignedFacilityIds.length) {
+    layout.unassignedFacilityIds = unassignedFacilityIds;
+  }
+
+  const assignmentsByFacility = {};
+  normalizedZones.forEach((zone) => {
+    zone.facilityIds.forEach((facilityId) => {
+      if (facilityId && !assignmentsByFacility[facilityId]) {
+        assignmentsByFacility[facilityId] = zone.id;
+      }
+    });
+  });
+  unassignedFacilityIds.forEach((facilityId) => {
+    if (facilityId && !assignmentsByFacility[facilityId]) {
+      assignmentsByFacility[facilityId] = 'unassigned';
+    }
+  });
+  layout.assignmentsByFacility = assignmentsByFacility;
+
+  return layout;
 };
 
 const heatTierEscalation = (heatTier) => {
@@ -157,8 +375,8 @@ const buildRecommendedActions = (scenario) => {
   }
 
   const actions = [];
-  const weakestZone = [...scenario.layout.zones]
-    .sort((a, b) => (a.defenseScore ?? 0) - (b.defenseScore ?? 0))[0];
+  const candidateZones = [...scenario.layout.zones].filter((zone) => zone?.id !== 'unassigned');
+  const weakestZone = candidateZones.sort((a, b) => (a.defenseScore ?? 0) - (b.defenseScore ?? 0))[0];
   if (weakestZone) {
     actions.push({
       id: `fortify-${weakestZone.id}`,
@@ -178,7 +396,7 @@ const buildRecommendedActions = (scenario) => {
     });
   }
 
-  if (!actions.length && scenario.layout.zones.length) {
+  if (!actions.length && candidateZones.length) {
     actions.push({
       id: 'rotate-crews',
       label: 'Rotate safehouse crews',
@@ -272,8 +490,11 @@ const createSafehouseDefenseManager = (state) => {
     }
 
     const defenseState = ensureState();
-    const layout = buildLayout(safehouse);
-    defenseState.layoutsBySafehouse[layout.safehouseId ?? safehouse?.id ?? 'default'] = layout;
+    const safehouseId = safehouse?.id ?? null;
+    const savedLayout = safehouseId ? defenseState.layoutsBySafehouse?.[safehouseId] ?? null : null;
+    const layout = buildLayout(safehouse, savedLayout);
+    const layoutKey = layout.safehouseId ?? safehouseId ?? 'default';
+    defenseState.layoutsBySafehouse[layoutKey] = layout;
 
     const alertId = alertEntry.id ?? alertEntry.alertId ?? null;
     if (!alertId) {

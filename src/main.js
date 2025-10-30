@@ -22,6 +22,7 @@ import {
   RECON_APPROACH_CONFIG,
   createApproachModifierSnapshot,
 } from './game/carThief/systems/reconSystem.js';
+import { collectSafehouseFacilityIds } from './game/carThief/systems/missionEvents.js';
 import {
   createInfiltrationSequence,
   summarizeInfiltrationEffects,
@@ -58,6 +59,447 @@ const loadPlayerSettings = () => {
 
 let playerSettings = loadPlayerSettings();
 const soundboard = createSoundboard({ muted: playerSettings?.audio?.muted });
+
+const SAFEHOUSE_ZONE_CONFIG = {
+  operations: { id: 'operations', label: 'Operations Deck' },
+  logistics: { id: 'logistics', label: 'Logistics Wing' },
+  security: { id: 'security', label: 'Security Core' },
+  support: { id: 'support', label: 'Support Lanes' },
+};
+
+const SAFEHOUSE_UNASSIGNED_ZONE_ID = 'unassigned';
+const SAFEHOUSE_UNASSIGNED_LABEL = 'Unassigned Facilities';
+const SAFEHOUSE_LAYOUT_DEFAULT_STATUS = 'Drag or select facilities to customize your defenses.';
+
+const normalizeFacilityId = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const normalized = value.trim();
+  return normalized;
+};
+
+const normalizeZoneId = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value.trim();
+};
+
+const resolveHeuristicSafehouseZoneId = (facilityId) => {
+  const normalized = normalizeFacilityId(facilityId).toLowerCase();
+  if (!normalized) {
+    return 'support';
+  }
+
+  if (
+    normalized.includes('ops')
+    || normalized.includes('command')
+    || normalized.includes('terminal')
+    || normalized.includes('theater')
+  ) {
+    return 'operations';
+  }
+
+  if (
+    normalized.includes('dead-drop')
+    || normalized.includes('courier')
+    || normalized.includes('network')
+    || normalized.includes('logistics')
+  ) {
+    return 'logistics';
+  }
+
+  if (
+    normalized.includes('rapid-response')
+    || normalized.includes('security')
+    || normalized.includes('armory')
+    || normalized.includes('vault')
+  ) {
+    return 'security';
+  }
+
+  return 'support';
+};
+
+const createHeuristicLayoutSnapshot = (safehouse) => {
+  const facilityIds = collectSafehouseFacilityIds(safehouse)
+    .map((facilityId) => normalizeFacilityId(facilityId))
+    .filter(Boolean);
+
+  const zoneMap = new Map();
+  const registerZone = (zoneId, label = null) => {
+    const normalizedZoneId = zoneId ?? 'support';
+    if (!zoneMap.has(normalizedZoneId)) {
+      const config = SAFEHOUSE_ZONE_CONFIG[normalizedZoneId] ?? { id: normalizedZoneId, label: label ?? normalizedZoneId };
+      zoneMap.set(normalizedZoneId, {
+        id: normalizedZoneId,
+        label: label ?? config.label ?? normalizedZoneId,
+        facilityIds: [],
+        defenseScore: 0,
+      });
+    }
+    return zoneMap.get(normalizedZoneId);
+  };
+
+  Object.values(SAFEHOUSE_ZONE_CONFIG).forEach((config) => {
+    registerZone(config.id, config.label);
+  });
+
+  facilityIds.forEach((facilityId) => {
+    const zoneId = resolveHeuristicSafehouseZoneId(facilityId);
+    const zone = registerZone(zoneId);
+    zone.facilityIds.push(facilityId);
+  });
+
+  const zones = Array.from(zoneMap.values())
+    .map((zone) => ({
+      ...zone,
+      defenseScore: zone.facilityIds.length,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return {
+    safehouseId: safehouse?.id ?? null,
+    zones,
+    zoneOrder: zones.map((zone) => zone.id),
+    unassignedFacilityIds: [],
+    source: 'heuristic',
+    updatedAt: Date.now(),
+  };
+};
+
+const buildSafehouseLayoutDraftFromLayout = ({ layout, facilityIds, safehouseId }) => {
+  const zoneMap = new Map();
+  const baseOrder = [];
+
+  const registerZone = (zoneId, label = null) => {
+    const normalizedZoneId = normalizeZoneId(zoneId) || 'support';
+    if (!zoneMap.has(normalizedZoneId)) {
+      const config = SAFEHOUSE_ZONE_CONFIG[normalizedZoneId];
+      zoneMap.set(normalizedZoneId, {
+        id: normalizedZoneId,
+        label: label ?? config?.label ?? normalizedZoneId,
+        facilityIds: [],
+      });
+      baseOrder.push(normalizedZoneId);
+    } else if (label) {
+      zoneMap.get(normalizedZoneId).label = label;
+    }
+    return zoneMap.get(normalizedZoneId);
+  };
+
+  Object.values(SAFEHOUSE_ZONE_CONFIG).forEach((config) => {
+    registerZone(config.id, config.label);
+  });
+
+  const activeFacilities = new Set(facilityIds);
+  const assignedFacilities = new Set();
+
+  const layoutZones = Array.isArray(layout?.zones) ? layout.zones : [];
+  layoutZones.forEach((zone) => {
+    const zoneId = normalizeZoneId(zone?.id);
+    if (!zoneId) {
+      return;
+    }
+
+    const label = typeof zone?.label === 'string' && zone.label.trim() ? zone.label.trim() : SAFEHOUSE_ZONE_CONFIG[zoneId]?.label;
+    const zoneDraft = registerZone(zoneId, label ?? undefined);
+    if (Array.isArray(zone?.facilityIds)) {
+      zone.facilityIds
+        .map((facilityId) => normalizeFacilityId(facilityId))
+        .filter((facilityId) => facilityId && activeFacilities.has(facilityId))
+        .forEach((facilityId) => {
+          if (!assignedFacilities.has(facilityId)) {
+            zoneDraft.facilityIds.push(facilityId);
+            assignedFacilities.add(facilityId);
+          }
+        });
+    }
+  });
+
+  const unassigned = [];
+  const layoutUnassigned = Array.isArray(layout?.unassignedFacilityIds) ? layout.unassignedFacilityIds : [];
+  layoutUnassigned
+    .map((facilityId) => normalizeFacilityId(facilityId))
+    .filter((facilityId) => facilityId && activeFacilities.has(facilityId))
+    .forEach((facilityId) => {
+      if (!assignedFacilities.has(facilityId)) {
+        unassigned.push(facilityId);
+        assignedFacilities.add(facilityId);
+      }
+    });
+
+  facilityIds.forEach((facilityId) => {
+    if (assignedFacilities.has(facilityId)) {
+      return;
+    }
+
+    if (layout?.source === 'custom') {
+      unassigned.push(facilityId);
+      assignedFacilities.add(facilityId);
+      return;
+    }
+
+    const zoneId = resolveHeuristicSafehouseZoneId(facilityId);
+    const zoneDraft = registerZone(zoneId);
+    zoneDraft.facilityIds.push(facilityId);
+    assignedFacilities.add(facilityId);
+  });
+
+  const orderSource = Array.isArray(layout?.zoneOrder)
+    ? layout.zoneOrder.map((zoneId) => normalizeZoneId(zoneId)).filter(Boolean)
+    : baseOrder;
+
+  const seenOrder = new Set();
+  const zoneOrder = [];
+  orderSource.forEach((zoneId) => {
+    if (zoneMap.has(zoneId) && !seenOrder.has(zoneId)) {
+      zoneOrder.push(zoneId);
+      seenOrder.add(zoneId);
+    }
+  });
+  zoneMap.forEach((_, zoneId) => {
+    if (!seenOrder.has(zoneId)) {
+      zoneOrder.push(zoneId);
+      seenOrder.add(zoneId);
+    }
+  });
+
+  const zones = zoneOrder.map((zoneId) => {
+    const zone = zoneMap.get(zoneId);
+    return {
+      id: zone.id,
+      label: zone.label,
+      facilityIds: zone.facilityIds.slice(),
+      defenseScore: zone.facilityIds.length,
+    };
+  });
+
+  return {
+    safehouseId,
+    zones,
+    zoneOrder,
+    unassigned,
+    source: layout?.source === 'custom' ? 'custom' : 'heuristic',
+    updatedAt: Number.isFinite(layout?.updatedAt) ? layout.updatedAt : null,
+  };
+};
+
+const buildSafehouseLayoutDraftFromHeuristics = ({ facilityIds, safehouseId }) => {
+  const zoneMap = new Map();
+  Object.values(SAFEHOUSE_ZONE_CONFIG).forEach((config) => {
+    zoneMap.set(config.id, {
+      id: config.id,
+      label: config.label,
+      facilityIds: [],
+    });
+  });
+
+  facilityIds.forEach((facilityId) => {
+    const zoneId = resolveHeuristicSafehouseZoneId(facilityId);
+    if (!zoneMap.has(zoneId)) {
+      zoneMap.set(zoneId, { id: zoneId, label: zoneId, facilityIds: [] });
+    }
+    zoneMap.get(zoneId).facilityIds.push(facilityId);
+  });
+
+  const zones = Array.from(zoneMap.values())
+    .map((zone) => ({ ...zone, defenseScore: zone.facilityIds.length }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return {
+    safehouseId,
+    zones,
+    zoneOrder: zones.map((zone) => zone.id),
+    unassigned: [],
+    source: 'heuristic',
+    updatedAt: Date.now(),
+  };
+};
+
+const buildSafehouseLayoutDraft = ({ layout, facilityIds, safehouseId }) => {
+  if (layout && Array.isArray(layout.zones) && layout.zones.length) {
+    return buildSafehouseLayoutDraftFromLayout({ layout, facilityIds, safehouseId });
+  }
+
+  return buildSafehouseLayoutDraftFromHeuristics({ facilityIds, safehouseId });
+};
+
+const syncSafehouseLayoutDraftFacilities = (draft, facilityIds) => {
+  if (!draft) {
+    return;
+  }
+
+  const activeSet = new Set(facilityIds);
+  const assigned = new Set();
+
+  draft.zones = Array.isArray(draft.zones) ? draft.zones : [];
+  draft.zones.forEach((zone) => {
+    const nextFacilities = [];
+    zone.facilityIds
+      .map((facilityId) => normalizeFacilityId(facilityId))
+      .forEach((facilityId) => {
+        if (!facilityId || !activeSet.has(facilityId) || assigned.has(facilityId)) {
+          return;
+        }
+        nextFacilities.push(facilityId);
+        assigned.add(facilityId);
+      });
+    zone.facilityIds = nextFacilities;
+    zone.defenseScore = zone.facilityIds.length;
+  });
+
+  const nextUnassigned = [];
+  (Array.isArray(draft.unassigned) ? draft.unassigned : [])
+    .map((facilityId) => normalizeFacilityId(facilityId))
+    .forEach((facilityId) => {
+      if (!facilityId || !activeSet.has(facilityId) || assigned.has(facilityId)) {
+        return;
+      }
+      nextUnassigned.push(facilityId);
+      assigned.add(facilityId);
+    });
+
+  facilityIds.forEach((facilityId) => {
+    if (!assigned.has(facilityId)) {
+      nextUnassigned.push(facilityId);
+      assigned.add(facilityId);
+    }
+  });
+
+  draft.unassigned = nextUnassigned;
+
+  const existingOrder = Array.isArray(draft.zoneOrder) ? draft.zoneOrder.filter(Boolean) : [];
+  const seen = new Set(existingOrder);
+  draft.zones.forEach((zone) => {
+    if (!seen.has(zone.id)) {
+      existingOrder.push(zone.id);
+      seen.add(zone.id);
+    }
+  });
+  draft.zoneOrder = existingOrder;
+};
+
+const moveFacilityInSafehouseDraft = (draft, facilityId, targetZoneId, { beforeFacilityId = null } = {}) => {
+  if (!draft) {
+    return false;
+  }
+
+  const normalizedFacilityId = normalizeFacilityId(facilityId);
+  if (!normalizedFacilityId) {
+    return false;
+  }
+
+  const normalizedTargetZoneId = normalizeZoneId(targetZoneId) || SAFEHOUSE_UNASSIGNED_ZONE_ID;
+
+  let originalZoneId = null;
+  let originalIndex = -1;
+
+  draft.zones = Array.isArray(draft.zones) ? draft.zones : [];
+  draft.zones.forEach((zone) => {
+    const index = zone.facilityIds.indexOf(normalizedFacilityId);
+    if (index !== -1) {
+      originalZoneId = zone.id;
+      originalIndex = index;
+      zone.facilityIds.splice(index, 1);
+      zone.defenseScore = zone.facilityIds.length;
+    }
+  });
+
+  if (originalZoneId === null) {
+    const index = (Array.isArray(draft.unassigned) ? draft.unassigned : []).indexOf(normalizedFacilityId);
+    if (index !== -1) {
+      originalZoneId = SAFEHOUSE_UNASSIGNED_ZONE_ID;
+      originalIndex = index;
+      draft.unassigned.splice(index, 1);
+    }
+  }
+
+  if (normalizedTargetZoneId === SAFEHOUSE_UNASSIGNED_ZONE_ID) {
+    const beforeId = normalizeFacilityId(beforeFacilityId);
+    let insertIndex = beforeId ? draft.unassigned.indexOf(beforeId) : -1;
+    if (insertIndex < 0 || insertIndex > draft.unassigned.length) {
+      insertIndex = draft.unassigned.length;
+    }
+    draft.unassigned.splice(insertIndex, 0, normalizedFacilityId);
+    return originalZoneId !== SAFEHOUSE_UNASSIGNED_ZONE_ID || originalIndex !== insertIndex;
+  }
+
+  let targetZone = draft.zones.find((zone) => zone.id === normalizedTargetZoneId);
+  if (!targetZone) {
+    targetZone = {
+      id: normalizedTargetZoneId,
+      label: SAFEHOUSE_ZONE_CONFIG[normalizedTargetZoneId]?.label ?? normalizedTargetZoneId,
+      facilityIds: [],
+      defenseScore: 0,
+    };
+    draft.zones.push(targetZone);
+    if (Array.isArray(draft.zoneOrder)) {
+      draft.zoneOrder.push(targetZone.id);
+    } else {
+      draft.zoneOrder = draft.zones.map((zone) => zone.id);
+    }
+  }
+
+  const beforeId = normalizeFacilityId(beforeFacilityId);
+  let insertIndex = beforeId ? targetZone.facilityIds.indexOf(beforeId) : -1;
+  if (insertIndex < 0 || insertIndex > targetZone.facilityIds.length) {
+    insertIndex = targetZone.facilityIds.length;
+  }
+  targetZone.facilityIds.splice(insertIndex, 0, normalizedFacilityId);
+  targetZone.defenseScore = targetZone.facilityIds.length;
+
+  return originalZoneId !== normalizedTargetZoneId || originalIndex !== insertIndex;
+};
+
+const computeScenarioRecommendedActionsFromLayout = (scenario) => {
+  if (!scenario?.layout || !Array.isArray(scenario.layout.zones)) {
+    return [];
+  }
+
+  const actions = [];
+  const candidateZones = scenario.layout.zones.filter((zone) => zone && zone.id !== SAFEHOUSE_UNASSIGNED_ZONE_ID);
+  if (candidateZones.length) {
+    const weakestZone = [...candidateZones].sort((a, b) => (a.defenseScore ?? 0) - (b.defenseScore ?? 0))[0];
+    if (weakestZone) {
+      actions.push({
+        id: `fortify-${weakestZone.id}`,
+        label: `Fortify ${weakestZone.label}`,
+        summary: `${weakestZone.label} hosts ${weakestZone.facilityIds?.length || 'no'} facilities — reinforce patrols and counter-surveillance.`,
+      });
+    }
+  }
+
+  const tracks = Array.isArray(scenario.escalationTracks) ? scenario.escalationTracks : [];
+  const hottestTrack = tracks.length ? [...tracks].sort((a, b) => (b.value ?? 0) - (a.value ?? 0))[0] : null;
+  if (hottestTrack && hottestTrack.value >= (hottestTrack.max ?? 6) - 1) {
+    actions.push({
+      id: `stabilize-${hottestTrack.id}`,
+      label: `Stabilize ${hottestTrack.label}`,
+      summary: `${hottestTrack.label} is at ${hottestTrack.value}/${hottestTrack.max}. Deploy countermeasures now to avoid a breach.`,
+    });
+  }
+
+  if (!actions.length && candidateZones.length) {
+    actions.push({
+      id: 'rotate-crews',
+      label: 'Rotate safehouse crews',
+      summary: 'No critical hotspots detected — rotate watchers and reset traps to stay ahead of incursions.',
+    });
+  }
+
+  return actions.slice(0, 3);
+};
+
+const getSafehouseZoneOptions = (draft) => {
+  const zones = Array.isArray(draft?.zones) ? draft.zones : [];
+  const options = zones.map((zone) => ({ id: zone.id, label: zone.label }));
+  options.push({ id: SAFEHOUSE_UNASSIGNED_ZONE_ID, label: SAFEHOUSE_UNASSIGNED_LABEL });
+  return options;
+};
 
 const persistPlayerSettings = () => {
   playerSettings = {
@@ -248,6 +690,16 @@ const missionControls = {
   safehouseLayoutSection: null,
   safehouseLayoutWarnings: null,
   safehouseLayoutZones: null,
+  safehouseLayoutActions: null,
+  safehouseLayoutSaveButton: null,
+  safehouseLayoutResetButton: null,
+  safehouseLayoutStatusLabel: null,
+  safehouseLayoutDraft: null,
+  safehouseLayoutDraftDirty: false,
+  safehouseLayoutDraftSignature: null,
+  safehouseLayoutStatusText: '',
+  safehouseLayoutActiveSafehouseId: null,
+  safehouseLayoutRenderContext: null,
   safehouseSelectedProjectId: null,
   lastSafehouseAlertSignature: null,
   selectedCrewIds: [],
@@ -4751,6 +5203,361 @@ const formatEventEffectSummary = (effects) => {
   return parts.join(', ');
 };
 
+function rerenderSafehouseLayoutFromContext() {
+  const context = missionControls.safehouseLayoutRenderContext;
+  if (!context) {
+    return;
+  }
+
+  renderSafehouseLayout(context.layout, { ...(context.options ?? {}), safehouse: context.safehouse });
+}
+
+function handleSafehouseLayoutSave() {
+  const state = getSharedState();
+  const draft = missionControls.safehouseLayoutDraft;
+  const safehouse = state ? getActiveSafehouseFromState(state) : null;
+  const safehouseId = draft?.safehouseId ?? safehouse?.id ?? null;
+
+  if (!state || !draft || !safehouseId) {
+    missionControls.safehouseLayoutStatusText = 'No safehouse layout available to save.';
+    rerenderSafehouseLayoutFromContext();
+    return;
+  }
+
+  if (!state.safehouseDefense || typeof state.safehouseDefense !== 'object') {
+    state.safehouseDefense = { layoutsBySafehouse: {}, scenariosByAlert: {}, history: [] };
+  }
+
+  if (!state.safehouseDefense.layoutsBySafehouse || typeof state.safehouseDefense.layoutsBySafehouse !== 'object') {
+    state.safehouseDefense.layoutsBySafehouse = {};
+  }
+
+  const assignmentsByFacility = {};
+  draft.zones.forEach((zone) => {
+    zone.facilityIds.forEach((facilityId) => {
+      if (facilityId && !assignmentsByFacility[facilityId]) {
+        assignmentsByFacility[facilityId] = zone.id;
+      }
+    });
+  });
+  (Array.isArray(draft.unassigned) ? draft.unassigned : []).forEach((facilityId) => {
+    if (facilityId && !assignmentsByFacility[facilityId]) {
+      assignmentsByFacility[facilityId] = SAFEHOUSE_UNASSIGNED_ZONE_ID;
+    }
+  });
+
+  const layout = {
+    safehouseId,
+    zones: draft.zones.map((zone) => ({
+      id: zone.id,
+      label: zone.label,
+      facilityIds: zone.facilityIds.slice(),
+      defenseScore: zone.facilityIds.length,
+    })),
+    zoneOrder: Array.isArray(draft.zoneOrder) && draft.zoneOrder.length ? draft.zoneOrder.slice() : draft.zones.map((zone) => zone.id),
+    unassignedFacilityIds: Array.isArray(draft.unassigned) ? draft.unassigned.slice() : [],
+    assignmentsByFacility,
+    source: 'custom',
+    updatedAt: Date.now(),
+  };
+
+  state.safehouseDefense.layoutsBySafehouse[safehouseId] = layout;
+
+  if (state.safehouseDefense.scenariosByAlert && typeof state.safehouseDefense.scenariosByAlert === 'object') {
+    Object.values(state.safehouseDefense.scenariosByAlert).forEach((scenario) => {
+      if (scenario && scenario.safehouseId === safehouseId) {
+        scenario.layout = {
+          safehouseId: layout.safehouseId,
+          zones: layout.zones.map((zone) => ({ ...zone, facilityIds: zone.facilityIds.slice() })),
+          zoneOrder: layout.zoneOrder.slice(),
+          unassignedFacilityIds: layout.unassignedFacilityIds.slice(),
+          assignmentsByFacility: { ...(layout.assignmentsByFacility ?? {}) },
+          source: layout.source,
+          updatedAt: layout.updatedAt,
+        };
+        scenario.recommendedActions = computeScenarioRecommendedActionsFromLayout(scenario);
+      }
+    });
+  }
+
+  missionControls.safehouseLayoutDraftDirty = false;
+  missionControls.safehouseLayoutStatusText = 'Layout saved.';
+  missionControls.safehouseLayoutDraftSignature = null;
+  draft.source = 'custom';
+  draft.updatedAt = layout.updatedAt;
+
+  rerenderSafehouseLayoutFromContext();
+  triggerHudRender();
+}
+
+function handleSafehouseLayoutReset() {
+  const state = getSharedState();
+  const activeSafehouse = state ? getActiveSafehouseFromState(state) : null;
+  const draft = missionControls.safehouseLayoutDraft;
+  const safehouseId = activeSafehouse?.id ?? draft?.safehouseId ?? null;
+
+  if (!state || !safehouseId) {
+    missionControls.safehouseLayoutStatusText = 'Select a safehouse before resetting layout.';
+    rerenderSafehouseLayoutFromContext();
+    return;
+  }
+
+  if (!state.safehouseDefense || typeof state.safehouseDefense !== 'object') {
+    state.safehouseDefense = { layoutsBySafehouse: {}, scenariosByAlert: {}, history: [] };
+  }
+
+  if (!state.safehouseDefense.layoutsBySafehouse || typeof state.safehouseDefense.layoutsBySafehouse !== 'object') {
+    state.safehouseDefense.layoutsBySafehouse = {};
+  }
+
+  const facilityIds = Array.from(
+    new Set(
+      collectSafehouseFacilityIds(activeSafehouse)
+        .map((facilityId) => normalizeFacilityId(facilityId))
+        .filter(Boolean),
+    ),
+  );
+
+  const heuristicDraft = buildSafehouseLayoutDraftFromHeuristics({ facilityIds, safehouseId });
+  const assignmentsByFacility = {};
+  heuristicDraft.zones.forEach((zone) => {
+    zone.facilityIds.forEach((facilityId) => {
+      if (facilityId && !assignmentsByFacility[facilityId]) {
+        assignmentsByFacility[facilityId] = zone.id;
+      }
+    });
+  });
+
+  const layout = {
+    safehouseId,
+    zones: heuristicDraft.zones.map((zone) => ({
+      id: zone.id,
+      label: zone.label,
+      facilityIds: zone.facilityIds.slice(),
+      defenseScore: zone.facilityIds.length,
+    })),
+    zoneOrder: heuristicDraft.zoneOrder.slice(),
+    unassignedFacilityIds: [],
+    assignmentsByFacility,
+    source: 'heuristic',
+    updatedAt: Date.now(),
+  };
+
+  state.safehouseDefense.layoutsBySafehouse[safehouseId] = layout;
+
+  if (state.safehouseDefense.scenariosByAlert && typeof state.safehouseDefense.scenariosByAlert === 'object') {
+    Object.values(state.safehouseDefense.scenariosByAlert).forEach((scenario) => {
+      if (scenario && scenario.safehouseId === safehouseId) {
+        scenario.layout = {
+          safehouseId: layout.safehouseId,
+          zones: layout.zones.map((zone) => ({ ...zone, facilityIds: zone.facilityIds.slice() })),
+          zoneOrder: layout.zoneOrder.slice(),
+          unassignedFacilityIds: [],
+          assignmentsByFacility: { ...(layout.assignmentsByFacility ?? {}) },
+          source: layout.source,
+          updatedAt: layout.updatedAt,
+        };
+        scenario.recommendedActions = computeScenarioRecommendedActionsFromLayout(scenario);
+      }
+    });
+  }
+
+  missionControls.safehouseLayoutDraft = buildSafehouseLayoutDraft({ layout, facilityIds, safehouseId });
+  missionControls.safehouseLayoutDraftDirty = false;
+  missionControls.safehouseLayoutDraftSignature = null;
+  missionControls.safehouseLayoutStatusText = 'Layout reset to recommended defaults.';
+  missionControls.safehouseLayoutActiveSafehouseId = safehouseId;
+
+  rerenderSafehouseLayoutFromContext();
+  triggerHudRender();
+}
+
+function ensureSafehouseLayoutActions() {
+  const { safehouseLayoutSection } = missionControls;
+  if (!safehouseLayoutSection) {
+    return null;
+  }
+
+  if (!missionControls.safehouseLayoutActions) {
+    const actions = document.createElement('div');
+    actions.className = 'mission-safehouse__layout-actions';
+
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.className = 'button button--primary mission-safehouse__layout-save-btn';
+    saveButton.id = 'mission-safehouse-layout-save';
+    saveButton.textContent = 'Save Layout';
+
+    const resetButton = document.createElement('button');
+    resetButton.type = 'button';
+    resetButton.className = 'button button--secondary mission-safehouse__layout-reset-btn';
+    resetButton.id = 'mission-safehouse-layout-reset';
+    resetButton.textContent = 'Reset to Recommended';
+
+    const statusLabel = document.createElement('span');
+    statusLabel.className = 'mission-safehouse__layout-statusline';
+    statusLabel.textContent = SAFEHOUSE_LAYOUT_DEFAULT_STATUS;
+
+    actions.append(saveButton, resetButton, statusLabel);
+    safehouseLayoutSection.appendChild(actions);
+
+    missionControls.safehouseLayoutActions = actions;
+    missionControls.safehouseLayoutSaveButton = saveButton;
+    missionControls.safehouseLayoutResetButton = resetButton;
+    missionControls.safehouseLayoutStatusLabel = statusLabel;
+
+    saveButton.addEventListener('click', handleSafehouseLayoutSave);
+    resetButton.addEventListener('click', handleSafehouseLayoutReset);
+  }
+
+  return missionControls.safehouseLayoutActions;
+}
+
+function getSafehouseLayoutZoneFromEventTarget(target) {
+  if (!target || typeof target.closest !== 'function') {
+    return null;
+  }
+  return target.closest('.mission-safehouse__layout-zone');
+}
+
+function clearSafehouseLayoutZoneHighlight(zoneCard) {
+  if (zoneCard) {
+    zoneCard.classList.remove('mission-safehouse__layout-zone--drop-target');
+  }
+}
+
+function handleSafehouseLayoutDragStart(event) {
+  const item = event.target && event.target.closest('[data-facility-id]');
+  if (!item || !item.draggable) {
+    return;
+  }
+
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('application/x-safehouse-facility', item.dataset.facilityId ?? '');
+  event.dataTransfer.setData('text/plain', item.dataset.facilityId ?? '');
+  item.classList.add('mission-safehouse__facility--dragging');
+}
+
+function handleSafehouseLayoutDragEnd(event) {
+  const item = event.target && event.target.closest('.mission-safehouse__facility--dragging');
+  if (item) {
+    item.classList.remove('mission-safehouse__facility--dragging');
+  }
+  const zoneCard = getSafehouseLayoutZoneFromEventTarget(event.target);
+  clearSafehouseLayoutZoneHighlight(zoneCard);
+}
+
+function handleSafehouseLayoutDragEnter(event) {
+  const zoneCard = getSafehouseLayoutZoneFromEventTarget(event.target);
+  if (!zoneCard) {
+    return;
+  }
+  zoneCard.classList.add('mission-safehouse__layout-zone--drop-target');
+}
+
+function handleSafehouseLayoutDragOver(event) {
+  const zoneCard = getSafehouseLayoutZoneFromEventTarget(event.target);
+  if (!zoneCard) {
+    return;
+  }
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  zoneCard.classList.add('mission-safehouse__layout-zone--drop-target');
+}
+
+function handleSafehouseLayoutDragLeave(event) {
+  const zoneCard = getSafehouseLayoutZoneFromEventTarget(event.target);
+  if (!zoneCard) {
+    return;
+  }
+  const related = event.relatedTarget && getSafehouseLayoutZoneFromEventTarget(event.relatedTarget);
+  if (related !== zoneCard) {
+    clearSafehouseLayoutZoneHighlight(zoneCard);
+  }
+}
+
+function handleSafehouseLayoutDrop(event) {
+  const zoneCard = getSafehouseLayoutZoneFromEventTarget(event.target);
+  if (!zoneCard) {
+    return;
+  }
+  event.preventDefault();
+
+  const facilityId = event.dataTransfer?.getData('application/x-safehouse-facility')
+    || event.dataTransfer?.getData('text/plain');
+  if (!facilityId) {
+    clearSafehouseLayoutZoneHighlight(zoneCard);
+    return;
+  }
+
+  const zonesContainer = missionControls.safehouseLayoutZones;
+  if (zonesContainer) {
+    const dragging = zonesContainer.querySelector('.mission-safehouse__facility--dragging');
+    if (dragging) {
+      dragging.classList.remove('mission-safehouse__facility--dragging');
+    }
+  }
+
+  const beforeTarget = event.target && event.target.closest('[data-facility-id]');
+  const beforeFacilityId = beforeTarget?.dataset?.facilityId ?? null;
+
+  const changed = moveFacilityInSafehouseDraft(
+    missionControls.safehouseLayoutDraft,
+    facilityId,
+    zoneCard.dataset.zoneId ?? SAFEHOUSE_UNASSIGNED_ZONE_ID,
+    { beforeFacilityId },
+  );
+
+  clearSafehouseLayoutZoneHighlight(zoneCard);
+
+  if (changed) {
+    missionControls.safehouseLayoutDraftDirty = true;
+    missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
+    rerenderSafehouseLayoutFromContext();
+  } else {
+    rerenderSafehouseLayoutFromContext();
+  }
+}
+
+function handleSafehouseLayoutSelectChange(event) {
+  const select = event.target;
+  if (!select || !select.matches('[data-zone-select]')) {
+    return;
+  }
+
+  const item = select.closest('[data-facility-id]');
+  if (!item) {
+    return;
+  }
+
+  const facilityId = item.dataset.facilityId;
+  const targetZoneId = select.value;
+  const changed = moveFacilityInSafehouseDraft(missionControls.safehouseLayoutDraft, facilityId, targetZoneId);
+
+  if (changed) {
+    missionControls.safehouseLayoutDraftDirty = true;
+    missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
+  }
+
+  rerenderSafehouseLayoutFromContext();
+}
+
+function ensureSafehouseLayoutInteractionHandlers() {
+  const { safehouseLayoutZones } = missionControls;
+  if (!safehouseLayoutZones || safehouseLayoutZones.dataset.layoutInteractionBound === 'true') {
+    return;
+  }
+
+  safehouseLayoutZones.addEventListener('dragstart', handleSafehouseLayoutDragStart);
+  safehouseLayoutZones.addEventListener('dragend', handleSafehouseLayoutDragEnd);
+  safehouseLayoutZones.addEventListener('dragenter', handleSafehouseLayoutDragEnter);
+  safehouseLayoutZones.addEventListener('dragover', handleSafehouseLayoutDragOver);
+  safehouseLayoutZones.addEventListener('dragleave', handleSafehouseLayoutDragLeave);
+  safehouseLayoutZones.addEventListener('drop', handleSafehouseLayoutDrop);
+  safehouseLayoutZones.addEventListener('change', handleSafehouseLayoutSelectChange);
+  safehouseLayoutZones.dataset.layoutInteractionBound = 'true';
+}
+
 const formatEventBadgeLabel = (badge) => {
   if (!badge || typeof badge !== 'object') {
     return '';
@@ -4807,6 +5614,8 @@ const updateSafehousePanel = () => {
   ) {
     return;
   }
+
+  ensureSafehouseLayoutInteractionHandlers();
 
   const economySystem = getEconomySystem();
   const missionSystem = getMissionSystem();
@@ -4980,6 +5789,7 @@ const updateSafehousePanel = () => {
       recommendedActions = [],
       emptyMessage = 'Assign a safehouse to map defensive zones.',
       idleMessage = 'No active incursions — watchers rotating patrols.',
+      safehouse = null,
     } = {},
   ) => {
     safehouseLayoutZones.innerHTML = '';
@@ -5022,14 +5832,118 @@ const updateSafehousePanel = () => {
       safehouseLayoutSection.dataset.layoutState = 'ready';
     }
 
-    if (!layout || !Array.isArray(layout.zones) || !layout.zones.length) {
+    const safehouseId = layout?.safehouseId ?? safehouse?.id ?? null;
+    const facilityIds = safehouse
+      ? Array.from(
+          new Set(
+            collectSafehouseFacilityIds(safehouse)
+              .map((facilityId) => normalizeFacilityId(facilityId))
+              .filter(Boolean),
+          ),
+        )
+      : [];
+
+    const layoutUpdatedAt = Number.isFinite(layout?.updatedAt) ? layout.updatedAt : 'na';
+    const layoutZoneCount = Array.isArray(layout?.zones) ? layout.zones.length : 0;
+    const layoutSource = layout?.source === 'custom' ? 'custom' : 'heuristic';
+    const facilitySignature = facilityIds.join('|');
+    const incomingSignature = `${safehouseId ?? 'none'}:${layoutUpdatedAt}:${layoutZoneCount}:${layoutSource}:${facilitySignature}`;
+
+    let draft = missionControls.safehouseLayoutDraft;
+    const safehouseChanged = missionControls.safehouseLayoutActiveSafehouseId !== (safehouseId ?? null);
+    const signatureChanged = missionControls.safehouseLayoutDraftSignature !== incomingSignature;
+
+    if (safehouseChanged) {
+      missionControls.safehouseLayoutStatusText = SAFEHOUSE_LAYOUT_DEFAULT_STATUS;
+    }
+
+    if (!draft || safehouseChanged || (!missionControls.safehouseLayoutDraftDirty && signatureChanged)) {
+      draft = buildSafehouseLayoutDraft({ layout, facilityIds, safehouseId });
+      missionControls.safehouseLayoutDraft = draft;
+      missionControls.safehouseLayoutDraftDirty = false;
+      missionControls.safehouseLayoutDraftSignature = incomingSignature;
+      missionControls.safehouseLayoutActiveSafehouseId = safehouseId ?? null;
+      if (!missionControls.safehouseLayoutStatusText) {
+        missionControls.safehouseLayoutStatusText = SAFEHOUSE_LAYOUT_DEFAULT_STATUS;
+      }
+    } else {
+      syncSafehouseLayoutDraftFacilities(draft, facilityIds);
+      missionControls.safehouseLayoutDraftSignature = incomingSignature;
+    }
+
+    const actionsContainer = ensureSafehouseLayoutActions();
+    if (actionsContainer) {
+      actionsContainer.hidden = !safehouseId;
+    }
+
+    if (!draft) {
       const placeholder = document.createElement('p');
       placeholder.className = 'mission-safehouse__layout-empty';
       placeholder.textContent = emptyMessage;
       safehouseLayoutZones.appendChild(placeholder);
       safehouseLayoutSection.dataset.layoutState = 'empty';
+      missionControls.safehouseLayoutRenderContext = {
+        layout,
+        safehouse,
+        options: { warningLines, recommendedActions, emptyMessage, idleMessage },
+      };
+      if (actionsContainer) {
+        if (missionControls.safehouseLayoutSaveButton) {
+          missionControls.safehouseLayoutSaveButton.disabled = true;
+        }
+        if (missionControls.safehouseLayoutResetButton) {
+          missionControls.safehouseLayoutResetButton.disabled = true;
+        }
+        if (missionControls.safehouseLayoutStatusLabel) {
+          missionControls.safehouseLayoutStatusLabel.textContent = SAFEHOUSE_LAYOUT_DEFAULT_STATUS;
+        }
+      }
       return;
     }
+
+    draft.safehouseId = safehouseId;
+
+    const shouldShowPlaceholder = !safehouse && (!layout || !Array.isArray(layout?.zones) || !layout.zones.length);
+    if (shouldShowPlaceholder) {
+      const placeholder = document.createElement('p');
+      placeholder.className = 'mission-safehouse__layout-empty';
+      placeholder.textContent = emptyMessage;
+      safehouseLayoutZones.appendChild(placeholder);
+      safehouseLayoutSection.dataset.layoutState = 'empty';
+      missionControls.safehouseLayoutRenderContext = {
+        layout,
+        safehouse,
+        options: { warningLines, recommendedActions, emptyMessage, idleMessage },
+      };
+      if (actionsContainer) {
+        if (missionControls.safehouseLayoutSaveButton) {
+          missionControls.safehouseLayoutSaveButton.disabled = true;
+        }
+        if (missionControls.safehouseLayoutResetButton) {
+          missionControls.safehouseLayoutResetButton.disabled = true;
+        }
+        if (missionControls.safehouseLayoutStatusLabel) {
+          missionControls.safehouseLayoutStatusLabel.textContent = SAFEHOUSE_LAYOUT_DEFAULT_STATUS;
+        }
+      }
+      return;
+    }
+
+    const zoneDisplayList = (Array.isArray(draft.zones) ? draft.zones : []).map((zone) => ({
+      id: zone.id,
+      label: zone.label,
+      facilityIds: Array.isArray(zone.facilityIds) ? zone.facilityIds.slice() : [],
+      defenseScore: Number.isFinite(zone.defenseScore) ? Math.max(0, zone.defenseScore) : (Array.isArray(zone.facilityIds) ? zone.facilityIds.length : 0),
+      zoneType: 'zone',
+    }));
+
+    zoneDisplayList.push({
+      id: SAFEHOUSE_UNASSIGNED_ZONE_ID,
+      label: SAFEHOUSE_UNASSIGNED_LABEL,
+      facilityIds: Array.isArray(draft.unassigned) ? draft.unassigned.slice() : [],
+      defenseScore: Array.isArray(draft.unassigned) ? draft.unassigned.length : 0,
+      zoneType: 'unassigned',
+    });
 
     const formatFacilityLabel = (facilityId) => {
       if (typeof facilityId !== 'string' || !facilityId.trim()) {
@@ -5046,7 +5960,7 @@ const updateSafehousePanel = () => {
         .join(' ');
     };
 
-    layout.zones.forEach((zone) => {
+    zoneDisplayList.forEach((zone) => {
       const zoneCard = document.createElement('article');
       zoneCard.className = 'mission-safehouse__layout-zone';
       zoneCard.dataset.zoneId = zone?.id ?? '';
@@ -5061,12 +5975,16 @@ const updateSafehousePanel = () => {
       const scoreValue = Number.isFinite(zone?.defenseScore) ? Math.max(0, zone.defenseScore) : 0;
       const score = document.createElement('span');
       score.className = 'mission-safehouse__layout-zone-score';
-      score.dataset.score = String(scoreValue);
-      score.textContent = `Defense ${scoreValue}`;
-      if (scoreValue <= 3) {
-        score.classList.add('mission-safehouse__layout-zone-score--critical');
-      } else if (scoreValue <= 6) {
-        score.classList.add('mission-safehouse__layout-zone-score--weak');
+      if (zone.zoneType === 'unassigned') {
+        score.textContent = 'Holding';
+      } else {
+        score.dataset.score = String(scoreValue);
+        score.textContent = `Defense ${scoreValue}`;
+        if (scoreValue <= 3) {
+          score.classList.add('mission-safehouse__layout-zone-score--critical');
+        } else if (scoreValue <= 6) {
+          score.classList.add('mission-safehouse__layout-zone-score--weak');
+        }
       }
 
       header.append(name, score);
@@ -5074,17 +5992,52 @@ const updateSafehousePanel = () => {
 
       const facilities = Array.isArray(zone?.facilityIds) ? zone.facilityIds : [];
       const list = document.createElement('ul');
-      list.className = 'mission-safehouse__layout-zone-facilities';
+      list.className = 'mission-safehouse__layout-zone-facilities mission-safehouse__layout-zone-facilities--interactive';
       if (facilities.length) {
         facilities.forEach((facilityId) => {
           const item = document.createElement('li');
-          item.textContent = formatFacilityLabel(facilityId);
+          item.className = 'mission-safehouse__facility';
+          item.dataset.facilityId = facilityId;
+          item.dataset.zoneId = zone?.id ?? '';
+          item.draggable = true;
+
+          const label = document.createElement('span');
+          label.className = 'mission-safehouse__facility-label';
+          label.textContent = formatFacilityLabel(facilityId);
+
+          const controls = document.createElement('div');
+          controls.className = 'mission-safehouse__facility-controls';
+
+          const select = document.createElement('select');
+          select.className = 'mission-safehouse__facility-zone-select';
+          select.dataset.zoneSelect = 'true';
+          select.title = 'Assign facility to a zone';
+
+          const zoneOptions = getSafehouseZoneOptions(draft);
+          zoneOptions.forEach((option) => {
+            const opt = document.createElement('option');
+            opt.value = option.id;
+            opt.textContent = option.label;
+            select.appendChild(opt);
+          });
+          select.value = zone.id ?? SAFEHOUSE_UNASSIGNED_ZONE_ID;
+
+          const dragHandle = document.createElement('span');
+          dragHandle.className = 'mission-safehouse__facility-drag-handle';
+          dragHandle.setAttribute('aria-hidden', 'true');
+          dragHandle.textContent = '⋮⋮';
+
+          controls.append(select, dragHandle);
+          item.append(label, controls);
           list.appendChild(item);
         });
       } else {
         const emptyItem = document.createElement('li');
         emptyItem.className = 'mission-safehouse__layout-zone-facilities-empty';
-        emptyItem.textContent = 'No facilities installed.';
+        emptyItem.textContent =
+          zone.zoneType === 'unassigned'
+            ? 'No facilities waiting for assignment.'
+            : 'No facilities installed.';
         list.appendChild(emptyItem);
       }
 
@@ -5092,6 +6045,39 @@ const updateSafehousePanel = () => {
       safehouseLayoutZones.appendChild(zoneCard);
     });
 
+    if (actionsContainer) {
+      const saveButton = missionControls.safehouseLayoutSaveButton;
+      const resetButton = missionControls.safehouseLayoutResetButton;
+      const statusLabel = missionControls.safehouseLayoutStatusLabel;
+
+      if (saveButton) {
+        saveButton.disabled = !missionControls.safehouseLayoutDraftDirty || !safehouseId;
+      }
+
+      if (resetButton) {
+        const hasCustomLayout = layout?.source === 'custom';
+        resetButton.disabled = !safehouseId || (!hasCustomLayout && !missionControls.safehouseLayoutDraftDirty);
+      }
+
+      if (statusLabel) {
+        const statusMessage =
+          missionControls.safehouseLayoutStatusText
+          || (missionControls.safehouseLayoutDraftDirty
+            ? 'Unsaved changes — save to commit.'
+            : SAFEHOUSE_LAYOUT_DEFAULT_STATUS);
+        statusLabel.textContent = statusMessage;
+      }
+    }
+
+    if (missionControls.safehouseLayoutDraftDirty) {
+      safehouseLayoutSection.dataset.layoutState = 'alert';
+    }
+
+    missionControls.safehouseLayoutRenderContext = {
+      layout,
+      safehouse,
+      options: { warningLines, recommendedActions, emptyMessage, idleMessage },
+    };
   };
 
   const renderEffects = (lines) => {
@@ -5575,6 +6561,7 @@ const updateSafehousePanel = () => {
     idleMessage: scenarioRecommendedActions.length
       ? 'Alerts resolved — crews rotating watch for next incursion.'
       : 'No active incursions — watchers rotating patrols.',
+    safehouse,
   });
 
   if (safehouse) {

@@ -33,6 +33,7 @@ const sanitizeSafehouseDefenseLayout = (layout) => {
 
   const safehouseId = typeof layout.safehouseId === 'string' ? layout.safehouseId.trim() : null;
 
+  const seenFacilityIds = new Set();
   const zones = Array.isArray(layout.zones)
     ? layout.zones
         .map((zone) => {
@@ -49,26 +50,90 @@ const sanitizeSafehouseDefenseLayout = (layout) => {
           const facilityIds = Array.isArray(zone.facilityIds)
             ? zone.facilityIds
                 .map((facilityId) => (typeof facilityId === 'string' ? facilityId.trim() : ''))
-                .filter(Boolean)
+                .filter((facilityId) => {
+                  if (!facilityId) {
+                    return false;
+                  }
+                  if (seenFacilityIds.has(facilityId)) {
+                    return false;
+                  }
+                  seenFacilityIds.add(facilityId);
+                  return true;
+                })
             : [];
 
           const defenseScore = Number.isFinite(zone.defenseScore)
             ? clampNumber(Math.round(zone.defenseScore), 0, 20)
-            : 0;
+            : facilityIds.length;
 
-          return {
+          const normalizedZone = {
             id,
             label,
             facilityIds,
             defenseScore,
           };
+
+          if (Number.isFinite(zone.ordinal)) {
+            normalizedZone.ordinal = clampNumber(Math.round(zone.ordinal), 0, 50);
+          }
+
+          return normalizedZone;
         })
         .filter(Boolean)
     : [];
 
+  const zoneOrder = Array.isArray(layout.zoneOrder)
+    ? layout.zoneOrder
+        .map((zoneId) => (typeof zoneId === 'string' ? zoneId.trim() : ''))
+        .filter(Boolean)
+    : [];
+
+  const unassignedFacilityIds = Array.isArray(layout.unassignedFacilityIds ?? layout.unassigned)
+    ? (layout.unassignedFacilityIds ?? layout.unassigned)
+        .map((facilityId) => (typeof facilityId === 'string' ? facilityId.trim() : ''))
+        .filter((facilityId) => {
+          if (!facilityId) {
+            return false;
+          }
+          if (seenFacilityIds.has(facilityId)) {
+            return false;
+          }
+          seenFacilityIds.add(facilityId);
+          return true;
+        })
+    : [];
+
+  const assignmentsByFacility = {};
+  zones.forEach((zone) => {
+    if (!zone || !Array.isArray(zone.facilityIds)) {
+      return;
+    }
+    zone.facilityIds.forEach((facilityId) => {
+      if (facilityId && !assignmentsByFacility[facilityId]) {
+        assignmentsByFacility[facilityId] = zone.id;
+      }
+    });
+  });
+
+  unassignedFacilityIds.forEach((facilityId) => {
+    if (facilityId && !assignmentsByFacility[facilityId]) {
+      assignmentsByFacility[facilityId] = 'unassigned';
+    }
+  });
+
+  const sourceRaw = typeof layout.source === 'string' ? layout.source.trim().toLowerCase() : '';
+  const source = sourceRaw === 'custom' ? 'custom' : 'heuristic';
+
+  const updatedAt = Number.isFinite(layout.updatedAt) ? layout.updatedAt : null;
+
   return {
     safehouseId,
     zones,
+    zoneOrder,
+    unassignedFacilityIds,
+    assignmentsByFacility,
+    source,
+    updatedAt,
   };
 };
 
