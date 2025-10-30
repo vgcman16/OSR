@@ -13989,8 +13989,13 @@ const renderMissionInfiltrationPreview = ({
       item.appendChild(prompt);
     }
 
-    const options = document.createElement('div');
+    const options = document.createElement('fieldset');
     options.className = 'mission-infiltration__plan-options';
+    const legend = document.createElement('legend');
+    legend.className = 'visually-hidden';
+    const legendLabel = step.label || 'Infiltration step';
+    legend.textContent = step.prompt ? `${legendLabel}: ${step.prompt}` : legendLabel;
+    options.appendChild(legend);
 
     const groupName = `infiltration-plan-${missionId ?? 'mission'}-${step.id}`;
     const manualOption = document.createElement('label');
@@ -14012,7 +14017,7 @@ const renderMissionInfiltrationPreview = ({
     options.appendChild(manualOption);
 
     if (Array.isArray(step.choices)) {
-      step.choices.forEach((choice) => {
+      step.choices.forEach((choice, choiceIndex) => {
         if (!choice) {
           return;
         }
@@ -14038,6 +14043,12 @@ const renderMissionInfiltrationPreview = ({
           const summary = document.createElement('span');
           summary.className = 'mission-infiltration__plan-option-summary';
           summary.textContent = `Effects: ${choice.summary}`;
+          const summaryId = `${groupName}-${String(choice.id ?? choiceIndex)}-summary`.replace(
+            /[^a-zA-Z0-9_-]/g,
+            '-'
+          );
+          summary.id = summaryId;
+          input.setAttribute('aria-describedby', summaryId);
           option.appendChild(summary);
         }
 

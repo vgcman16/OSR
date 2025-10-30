@@ -560,6 +560,49 @@ body {
   color: rgba(180, 215, 255, 0.6);
 }
 
+.mission-infiltration__plan-options {
+  border: 0;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-inline-size: auto;
+}
+
+.mission-infiltration__plan-option {
+  display: grid;
+  grid-template-columns: min-content 1fr;
+  align-items: start;
+  gap: 0.45rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  background: rgba(10, 16, 28, 0.42);
+  border: 1px solid rgba(120, 190, 255, 0.18);
+  box-shadow: inset 0 0 10px rgba(120, 190, 255, 0.08);
+}
+
+.mission-infiltration__plan-option--manual {
+  background: rgba(10, 16, 28, 0.32);
+  border-style: dashed;
+}
+
+.mission-infiltration__plan-option input[type='radio'] {
+  margin: 0.15rem 0 0 0.1rem;
+}
+
+.mission-infiltration__plan-option-label {
+  font-weight: 600;
+  color: rgba(227, 239, 255, 0.9);
+}
+
+.mission-infiltration__plan-option-summary {
+  grid-column: 2 / -1;
+  margin-top: 0.1rem;
+  font-size: 0.78rem;
+  color: rgba(209, 234, 255, 0.76);
+}
+
 .mission-infiltration__aggregate {
   display: flex;
   flex-direction: column;
