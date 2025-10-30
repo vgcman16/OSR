@@ -71,6 +71,39 @@ const SAFEHOUSE_UNASSIGNED_ZONE_ID = 'unassigned';
 const SAFEHOUSE_UNASSIGNED_LABEL = 'Unassigned Facilities';
 const SAFEHOUSE_LAYOUT_DEFAULT_STATUS = 'Drag or select facilities to customize your defenses.';
 
+const computeZoneFacilityEffects = (facilityIds) => {
+  const normalizedIds = Array.isArray(facilityIds)
+    ? facilityIds.map((facilityId) => normalizeFacilityId(facilityId)).filter(Boolean)
+    : [];
+
+  if (!normalizedIds.length) {
+    return computeSafehouseFacilityBonuses({
+      getUnlockedAmenities: () => [],
+      getActiveProjects: () => [],
+      getDisabledFacilityIds: () => [],
+    });
+  }
+
+  const facilities = normalizedIds.map((id) => ({ id }));
+  const stubSafehouse = {
+    getUnlockedAmenities: () => facilities,
+    getActiveProjects: () => [],
+    getDisabledFacilityIds: () => [],
+  };
+
+  return computeSafehouseFacilityBonuses(stubSafehouse);
+};
+
+const updateSafehouseLayoutDraftEffects = (draft) => {
+  if (!draft || !Array.isArray(draft.zones)) {
+    return;
+  }
+
+  draft.zones.forEach((zone) => {
+    zone.effects = computeZoneFacilityEffects(zone?.facilityIds);
+  });
+};
+
 const normalizeFacilityId = (value) => {
   if (typeof value !== 'string') {
     return '';
@@ -158,6 +191,7 @@ const createHeuristicLayoutSnapshot = (safehouse) => {
     .map((zone) => ({
       ...zone,
       defenseScore: zone.facilityIds.length,
+      effects: computeZoneFacilityEffects(zone.facilityIds),
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
@@ -275,6 +309,7 @@ const buildSafehouseLayoutDraftFromLayout = ({ layout, facilityIds, safehouseId 
       label: zone.label,
       facilityIds: zone.facilityIds.slice(),
       defenseScore: zone.facilityIds.length,
+      effects: computeZoneFacilityEffects(zone.facilityIds),
     };
   });
 
@@ -307,7 +342,11 @@ const buildSafehouseLayoutDraftFromHeuristics = ({ facilityIds, safehouseId }) =
   });
 
   const zones = Array.from(zoneMap.values())
-    .map((zone) => ({ ...zone, defenseScore: zone.facilityIds.length }))
+    .map((zone) => ({
+      ...zone,
+      defenseScore: zone.facilityIds.length,
+      effects: computeZoneFacilityEffects(zone.facilityIds),
+    }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
   return {
@@ -321,11 +360,15 @@ const buildSafehouseLayoutDraftFromHeuristics = ({ facilityIds, safehouseId }) =
 };
 
 const buildSafehouseLayoutDraft = ({ layout, facilityIds, safehouseId }) => {
+  let draft;
   if (layout && Array.isArray(layout.zones) && layout.zones.length) {
-    return buildSafehouseLayoutDraftFromLayout({ layout, facilityIds, safehouseId });
+    draft = buildSafehouseLayoutDraftFromLayout({ layout, facilityIds, safehouseId });
+  } else {
+    draft = buildSafehouseLayoutDraftFromHeuristics({ facilityIds, safehouseId });
   }
 
-  return buildSafehouseLayoutDraftFromHeuristics({ facilityIds, safehouseId });
+  updateSafehouseLayoutDraftEffects(draft);
+  return draft;
 };
 
 const syncSafehouseLayoutDraftFacilities = (draft, facilityIds) => {
@@ -381,6 +424,8 @@ const syncSafehouseLayoutDraftFacilities = (draft, facilityIds) => {
     }
   });
   draft.zoneOrder = existingOrder;
+
+  updateSafehouseLayoutDraftEffects(draft);
 };
 
 const moveFacilityInSafehouseDraft = (draft, facilityId, targetZoneId, { beforeFacilityId = null } = {}) => {
@@ -425,7 +470,9 @@ const moveFacilityInSafehouseDraft = (draft, facilityId, targetZoneId, { beforeF
       insertIndex = draft.unassigned.length;
     }
     draft.unassigned.splice(insertIndex, 0, normalizedFacilityId);
-    return originalZoneId !== SAFEHOUSE_UNASSIGNED_ZONE_ID || originalIndex !== insertIndex;
+    const changed = originalZoneId !== SAFEHOUSE_UNASSIGNED_ZONE_ID || originalIndex !== insertIndex;
+    updateSafehouseLayoutDraftEffects(draft);
+    return changed;
   }
 
   let targetZone = draft.zones.find((zone) => zone.id === normalizedTargetZoneId);
@@ -452,7 +499,9 @@ const moveFacilityInSafehouseDraft = (draft, facilityId, targetZoneId, { beforeF
   targetZone.facilityIds.splice(insertIndex, 0, normalizedFacilityId);
   targetZone.defenseScore = targetZone.facilityIds.length;
 
-  return originalZoneId !== normalizedTargetZoneId || originalIndex !== insertIndex;
+  const changed = originalZoneId !== normalizedTargetZoneId || originalIndex !== insertIndex;
+  updateSafehouseLayoutDraftEffects(draft);
+  return changed;
 };
 
 const computeScenarioRecommendedActionsFromLayout = (scenario) => {
@@ -5251,6 +5300,8 @@ function handleSafehouseLayoutSave() {
     }
   });
 
+  updateSafehouseLayoutDraftEffects(draft);
+
   const layout = {
     safehouseId,
     zones: draft.zones.map((zone) => ({
@@ -5258,6 +5309,7 @@ function handleSafehouseLayoutSave() {
       label: zone.label,
       facilityIds: zone.facilityIds.slice(),
       defenseScore: zone.facilityIds.length,
+      effects: computeZoneFacilityEffects(zone.facilityIds),
     })),
     zoneOrder: Array.isArray(draft.zoneOrder) && draft.zoneOrder.length ? draft.zoneOrder.slice() : draft.zones.map((zone) => zone.id),
     unassignedFacilityIds: Array.isArray(draft.unassigned) ? draft.unassigned.slice() : [],
@@ -5273,7 +5325,11 @@ function handleSafehouseLayoutSave() {
       if (scenario && scenario.safehouseId === safehouseId) {
         scenario.layout = {
           safehouseId: layout.safehouseId,
-          zones: layout.zones.map((zone) => ({ ...zone, facilityIds: zone.facilityIds.slice() })),
+          zones: layout.zones.map((zone) => ({
+            ...zone,
+            facilityIds: zone.facilityIds.slice(),
+            effects: computeZoneFacilityEffects(zone.facilityIds),
+          })),
           zoneOrder: layout.zoneOrder.slice(),
           unassignedFacilityIds: layout.unassignedFacilityIds.slice(),
           assignmentsByFacility: { ...(layout.assignmentsByFacility ?? {}) },
@@ -5324,6 +5380,7 @@ function handleSafehouseLayoutReset() {
   );
 
   const heuristicDraft = buildSafehouseLayoutDraftFromHeuristics({ facilityIds, safehouseId });
+  updateSafehouseLayoutDraftEffects(heuristicDraft);
   const assignmentsByFacility = {};
   heuristicDraft.zones.forEach((zone) => {
     zone.facilityIds.forEach((facilityId) => {
@@ -5340,6 +5397,7 @@ function handleSafehouseLayoutReset() {
       label: zone.label,
       facilityIds: zone.facilityIds.slice(),
       defenseScore: zone.facilityIds.length,
+      effects: computeZoneFacilityEffects(zone.facilityIds),
     })),
     zoneOrder: heuristicDraft.zoneOrder.slice(),
     unassignedFacilityIds: [],
@@ -5355,7 +5413,11 @@ function handleSafehouseLayoutReset() {
       if (scenario && scenario.safehouseId === safehouseId) {
         scenario.layout = {
           safehouseId: layout.safehouseId,
-          zones: layout.zones.map((zone) => ({ ...zone, facilityIds: zone.facilityIds.slice() })),
+          zones: layout.zones.map((zone) => ({
+            ...zone,
+            facilityIds: zone.facilityIds.slice(),
+            effects: computeZoneFacilityEffects(zone.facilityIds),
+          })),
           zoneOrder: layout.zoneOrder.slice(),
           unassignedFacilityIds: [],
           assignmentsByFacility: { ...(layout.assignmentsByFacility ?? {}) },
@@ -5939,6 +6001,7 @@ const updateSafehousePanel = () => {
       label: zone.label,
       facilityIds: Array.isArray(zone.facilityIds) ? zone.facilityIds.slice() : [],
       defenseScore: Number.isFinite(zone.defenseScore) ? Math.max(0, zone.defenseScore) : (Array.isArray(zone.facilityIds) ? zone.facilityIds.length : 0),
+      effects: zone.effects ?? computeZoneFacilityEffects(zone.facilityIds),
       zoneType: 'zone',
     }));
 
@@ -5947,6 +6010,7 @@ const updateSafehousePanel = () => {
       label: SAFEHOUSE_UNASSIGNED_LABEL,
       facilityIds: Array.isArray(draft.unassigned) ? draft.unassigned.slice() : [],
       defenseScore: Array.isArray(draft.unassigned) ? draft.unassigned.length : 0,
+      effects: computeZoneFacilityEffects(draft.unassigned),
       zoneType: 'unassigned',
     });
 
@@ -5963,6 +6027,102 @@ const updateSafehousePanel = () => {
         .split(' ')
         .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ''))
         .join(' ');
+    };
+
+    const createSignedPercent = (value, { fractionDigits = 1, epsilon = 0.05 } = {}) => {
+      if (!Number.isFinite(value) || Math.abs(value) < epsilon) {
+        return null;
+      }
+      const formatted = Math.abs(value).toFixed(fractionDigits);
+      return `${value >= 0 ? '+' : '-'}${formatted}%`;
+    };
+
+    const describeZoneEffectStats = (effects, { zoneType } = {}) => {
+      if (!effects || zoneType === 'unassigned') {
+        return [];
+      }
+
+      const stats = [];
+
+      const heatSegments = [];
+      if (Number.isFinite(effects.dailyHeatReductionBonus) && Math.abs(effects.dailyHeatReductionBonus) >= 0.01) {
+        heatSegments.push(
+          `${effects.dailyHeatReductionBonus >= 0 ? '+' : '-'}${Math.abs(effects.dailyHeatReductionBonus).toFixed(2)} heat/day`,
+        );
+      }
+      if (Number.isFinite(effects.missionHeatFlatAdjustment) && Math.abs(effects.missionHeatFlatAdjustment) >= 0.01) {
+        heatSegments.push(
+          `${effects.missionHeatFlatAdjustment >= 0 ? '+' : '-'}${Math.abs(effects.missionHeatFlatAdjustment).toFixed(2)} heat/score`,
+        );
+      }
+      const missionHeatPercent = createSignedPercent((1 - effects.missionHeatMultiplier) * 100, { fractionDigits: 1 });
+      if (missionHeatPercent) {
+        heatSegments.push(`${missionHeatPercent} sig`);
+      }
+      if (heatSegments.length) {
+        stats.push({ label: 'Heat Relief', value: heatSegments.join(', ') });
+      }
+
+      const payoutDelta = createSignedPercent((effects.missionPayoutMultiplier - 1) * 100, { fractionDigits: 1 });
+      if (payoutDelta) {
+        stats.push({ label: 'Payout Boost', value: payoutDelta });
+      }
+
+      const durationDelta = createSignedPercent((effects.missionDurationMultiplier - 1) * 100, { fractionDigits: 1 });
+      if (durationDelta) {
+        stats.push({ label: 'Mission Duration', value: durationDelta });
+      }
+
+      const successDelta = createSignedPercent(effects.missionSuccessBonus * 100, { fractionDigits: 1, epsilon: 0.05 });
+      if (successDelta) {
+        stats.push({ label: 'Success Rate', value: successDelta });
+      }
+
+      const restDelta = createSignedPercent(effects.crewRestBonus * 100, { fractionDigits: 0, epsilon: 0.5 });
+      if (restDelta) {
+        stats.push({ label: 'Crew Recovery', value: restDelta });
+      }
+
+      if (Number.isFinite(effects.passiveIncomeBonus) && Math.abs(effects.passiveIncomeBonus) >= 1) {
+        const prefix = effects.passiveIncomeBonus >= 0 ? '+' : '-';
+        stats.push({
+          label: 'Passive Income',
+          value: `${prefix}${formatCurrency(Math.abs(effects.passiveIncomeBonus))}/day`,
+        });
+      }
+
+      if (Number.isFinite(effects.overheadModifierBonus) && Math.abs(effects.overheadModifierBonus) >= 1) {
+        const prefix = effects.overheadModifierBonus <= 0 ? '-' : '+';
+        stats.push({
+          label: 'Overhead',
+          value: `${prefix}${formatCurrency(Math.abs(effects.overheadModifierBonus))}/day`,
+        });
+      }
+
+      const mitigationSegments = [];
+      if (Number.isFinite(effects.heatMitigationBonus) && Math.abs(effects.heatMitigationBonus) >= 0.01) {
+        mitigationSegments.push(
+          `${effects.heatMitigationBonus >= 0 ? '+' : '-'}${Math.abs(effects.heatMitigationBonus).toFixed(1)} heat`,
+        );
+      }
+      const mitigationPercent = createSignedPercent((effects.heatMitigationMultiplier - 1) * 100, {
+        fractionDigits: 1,
+      });
+      if (mitigationPercent) {
+        mitigationSegments.push(`${mitigationPercent} potency`);
+      }
+      if (Number.isFinite(effects.heatMitigationCostReduction) && Math.abs(effects.heatMitigationCostReduction) >= 1) {
+        mitigationSegments.push(
+          `${effects.heatMitigationCostReduction >= 0 ? '-' : '+'}${formatCurrency(
+            Math.abs(effects.heatMitigationCostReduction),
+          )} cost`,
+        );
+      }
+      if (mitigationSegments.length) {
+        stats.push({ label: 'Heat Mitigation', value: mitigationSegments.join(', ') });
+      }
+
+      return stats.slice(0, 5);
     };
 
     zoneDisplayList.forEach((zone) => {
@@ -5994,6 +6154,28 @@ const updateSafehousePanel = () => {
 
       header.append(name, score);
       zoneCard.appendChild(header);
+
+      const statEntries = describeZoneEffectStats(zone.effects, { zoneType: zone.zoneType });
+      if (statEntries.length) {
+        const statsContainer = document.createElement('div');
+        statsContainer.className = 'mission-safehouse__layout-zone-stats';
+        statEntries.forEach((entry) => {
+          const statItem = document.createElement('div');
+          statItem.className = 'mission-safehouse__layout-zone-stat';
+
+          const statLabel = document.createElement('span');
+          statLabel.className = 'mission-safehouse__layout-zone-stat-label';
+          statLabel.textContent = entry.label;
+
+          const statValue = document.createElement('span');
+          statValue.className = 'mission-safehouse__layout-zone-stat-value';
+          statValue.textContent = entry.value;
+
+          statItem.append(statLabel, statValue);
+          statsContainer.appendChild(statItem);
+        });
+        zoneCard.appendChild(statsContainer);
+      }
 
       const facilities = Array.isArray(zone?.facilityIds) ? zone.facilityIds : [];
       const list = document.createElement('ul');
