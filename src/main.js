@@ -606,12 +606,17 @@ const missionControls = {
   infiltrationPreviewSummary: null,
   infiltrationPreviewList: null,
   infiltrationPreviewEmpty: null,
+  infiltrationPreviewPlan: null,
+  infiltrationPreviewPlanList: null,
+  infiltrationPreviewPlanEmpty: null,
   infiltrationTimelineContainer: null,
   infiltrationTimelineSummary: null,
   infiltrationTimelineList: null,
   infiltrationTimelineEmpty: null,
+  eventPlanStatus: null,
   lastInfiltrationPreviewSignature: '',
   lastInfiltrationTimelineSignature: '',
+  selectedInfiltrationPlan: null,
   debtList: null,
   debtStatus: null,
   debtStatusDetail: '',
@@ -12872,7 +12877,272 @@ const pickProjectedInfiltrationChoice = (step) => {
   return bestChoice ?? step.choices[0] ?? null;
 };
 
-const buildInfiltrationPreviewEntries = (sequence) => {
+const createEmptyInfiltrationPlanState = (missionId = null) => ({
+  missionId,
+  choices: new Map(),
+  stepCatalog: [],
+  source: 'preview',
+  updatedAt: Date.now(),
+});
+
+const hydratePlanStateFromMission = (missionPlan, missionId) => {
+  const planState = createEmptyInfiltrationPlanState(missionId);
+  if (!missionPlan || typeof missionPlan !== 'object') {
+    return planState;
+  }
+
+  if (Array.isArray(missionPlan.stepCatalog)) {
+    planState.stepCatalog = missionPlan.stepCatalog.map((step) => ({
+      id: step.id,
+      label: typeof step.label === 'string' ? step.label : '',
+      prompt: typeof step.prompt === 'string' ? step.prompt : '',
+      choices: Array.isArray(step.choices)
+        ? step.choices.map((choice) => ({
+            id: choice.id,
+            label: typeof choice.label === 'string' ? choice.label : '',
+            summary: typeof choice.summary === 'string' ? choice.summary : '',
+          }))
+        : [],
+    }));
+  }
+
+  const choiceEntries = missionPlan.choices && typeof missionPlan.choices === 'object'
+    ? Object.entries(missionPlan.choices)
+    : [];
+
+  const catalogLookup = new Map();
+  planState.stepCatalog.forEach((step) => {
+    const validChoices = new Set();
+    if (Array.isArray(step.choices)) {
+      step.choices.forEach((choice) => {
+        if (choice?.id) {
+          validChoices.add(choice.id);
+        }
+      });
+    }
+    catalogLookup.set(step.id, validChoices);
+  });
+
+  choiceEntries.forEach(([stepId, choiceId]) => {
+    if (typeof stepId !== 'string' || typeof choiceId !== 'string') {
+      return;
+    }
+    const validChoices = catalogLookup.get(stepId);
+    if (validChoices && validChoices.has(choiceId)) {
+      planState.choices.set(stepId, choiceId);
+    }
+  });
+
+  planState.source = 'active';
+  planState.updatedAt = Number.isFinite(missionPlan.updatedAt) ? missionPlan.updatedAt : Date.now();
+  return planState;
+};
+
+const synchronizePlanStateWithSequence = (planState, sequence) => {
+  const state = planState ?? createEmptyInfiltrationPlanState();
+  const steps = Array.isArray(sequence?.steps) ? sequence.steps : [];
+  const stepCatalog = steps.map((step) => ({
+    id: step.id,
+    label: typeof step.label === 'string' ? step.label.trim() : 'Infiltration step',
+    prompt: typeof step.prompt === 'string' ? step.prompt.trim() : '',
+    choices: Array.isArray(step.choices)
+      ? step.choices.map((choice) => ({
+          id: choice.id,
+          label: typeof choice.label === 'string' ? choice.label.trim() : 'Choice',
+          summary: summarizeInfiltrationEffects(choice.effects ?? {}),
+        }))
+      : [],
+  }));
+
+  const validChoices = new Map();
+  stepCatalog.forEach((step) => {
+    const choiceMap = new Map();
+    step.choices.forEach((choice) => {
+      if (choice?.id) {
+        choiceMap.set(choice.id, choice);
+      }
+    });
+    validChoices.set(step.id, choiceMap);
+  });
+
+  const normalizedChoices = new Map();
+  if (state.choices instanceof Map) {
+    state.choices.forEach((choiceId, stepId) => {
+      if (!choiceId) {
+        return;
+      }
+      const choiceMap = validChoices.get(stepId);
+      if (choiceMap && choiceMap.has(choiceId)) {
+        normalizedChoices.set(stepId, choiceId);
+      }
+    });
+  }
+
+  state.stepCatalog = stepCatalog;
+  state.choices = normalizedChoices;
+  state.updatedAt = Date.now();
+  return state;
+};
+
+const buildInfiltrationPlanSignature = (planState) => {
+  if (!planState || !(planState.choices instanceof Map)) {
+    return 'none';
+  }
+
+  const entries = Array.from(planState.choices.entries())
+    .filter(([stepId, choiceId]) => typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId)
+    .sort(([stepA, choiceA], [stepB, choiceB]) => {
+      if (stepA === stepB) {
+        return choiceA.localeCompare(choiceB);
+      }
+      return stepA.localeCompare(stepB);
+    });
+
+  if (!entries.length) {
+    return 'none';
+  }
+
+  return entries.map(([stepId, choiceId]) => `${stepId}:${choiceId}`).join('|');
+};
+
+const serializePlanChoices = (planState) => {
+  if (!planState || !(planState.choices instanceof Map)) {
+    return {};
+  }
+
+  const payload = {};
+  planState.choices.forEach((choiceId, stepId) => {
+    if (typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId) {
+      payload[stepId] = choiceId;
+    }
+  });
+  return payload;
+};
+
+const renderActiveMissionPlanStatus = (mission) => {
+  const container = missionControls.eventPlanStatus;
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = '';
+  container.hidden = true;
+
+  if (!mission || mission.status === 'completed') {
+    return;
+  }
+
+  const plan = mission.preplannedInfiltration;
+  if (!plan || typeof plan !== 'object') {
+    return;
+  }
+
+  const choiceEntries = plan.choices && typeof plan.choices === 'object'
+    ? Object.entries(plan.choices).filter(
+        ([stepId, choiceId]) => typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId,
+      )
+    : [];
+
+  if (!choiceEntries.length) {
+    return;
+  }
+
+  const stepCatalog = Array.isArray(plan.stepCatalog) ? plan.stepCatalog : [];
+  const stepLookup = new Map(stepCatalog.map((step) => [step.id, step]));
+
+  const resolvedStepIds = new Set();
+  if (Array.isArray(mission?.infiltrationState?.history)) {
+    mission.infiltrationState.history.forEach((entry) => {
+      if (entry?.stepId) {
+        resolvedStepIds.add(entry.stepId);
+      }
+    });
+  }
+
+  const pendingStepId = mission?.pendingDecision?.infiltrationStepId ?? null;
+
+  const rows = [];
+  let unresolvedCount = 0;
+  let resolvedCount = 0;
+
+  choiceEntries.forEach(([stepId, choiceId]) => {
+    const step = stepLookup.get(stepId);
+    if (!step) {
+      return;
+    }
+    const choice = Array.isArray(step.choices)
+      ? step.choices.find((entry) => entry?.id === choiceId)
+      : null;
+
+    const row = document.createElement('div');
+    row.className = 'mission-events__plan-item';
+
+    const label = document.createElement('span');
+    label.className = 'mission-events__plan-label';
+    const choiceLabel = choice?.label ?? 'Selected choice unavailable';
+    label.textContent = `${step.label ?? 'Infiltration step'} — ${choiceLabel}`;
+    row.appendChild(label);
+
+    if (choice?.summary) {
+      const summary = document.createElement('span');
+      summary.className = 'mission-events__plan-summary';
+      summary.textContent = `Effects: ${choice.summary}`;
+      row.appendChild(summary);
+    }
+
+    if (resolvedStepIds.has(stepId)) {
+      resolvedCount += 1;
+      row.className += ' mission-events__plan-item--resolved';
+      const status = document.createElement('span');
+      status.className = 'mission-events__plan-status';
+      status.textContent = 'Resolved';
+      row.appendChild(status);
+    } else {
+      if (pendingStepId && pendingStepId === stepId) {
+        row.className += ' mission-events__plan-item--active';
+      }
+      const clearButton = document.createElement('button');
+      clearButton.type = 'button';
+      clearButton.className = 'mission-events__plan-action';
+      clearButton.dataset.infiltrationPlanStep = stepId;
+      clearButton.textContent = 'Clear step plan';
+      row.appendChild(clearButton);
+      unresolvedCount += 1;
+    }
+
+    rows.push(row);
+  });
+
+  if (!rows.length) {
+    return;
+  }
+
+  const statusMessage = typeof mission?.lastInfiltrationPlanStatus === 'string'
+    ? mission.lastInfiltrationPlanStatus.trim()
+    : '';
+
+  const header = document.createElement('p');
+  header.className = 'mission-events__plan-hint';
+  header.textContent = statusMessage
+    ? statusMessage
+    : 'Infiltration plan ready. Upcoming steps will auto-resolve unless cleared.';
+  container.appendChild(header);
+
+  rows.forEach((row) => container.appendChild(row));
+
+  const footer = document.createElement('p');
+  footer.className = 'mission-events__plan-note';
+  footer.textContent = unresolvedCount
+    ? 'Adjust selections above or in the Mission Briefing to change upcoming steps.'
+    : resolvedCount
+      ? 'All planned steps resolved. Future events will prompt for input.'
+      : '';
+  container.appendChild(footer);
+
+  container.hidden = false;
+};
+
+const buildInfiltrationPreviewEntries = (sequence, { selectedChoices = null } = {}) => {
   if (!sequence) {
     return { aggregateEffects: cloneInfiltrationAggregate(), entries: [] };
   }
@@ -12881,25 +13151,60 @@ const buildInfiltrationPreviewEntries = (sequence) => {
   const entries = [];
   const steps = Array.isArray(sequence.steps) ? sequence.steps : [];
 
+  const selectionMap = (() => {
+    if (!selectedChoices) {
+      return null;
+    }
+    if (selectedChoices instanceof Map) {
+      return selectedChoices;
+    }
+    if (typeof selectedChoices === 'object') {
+      const map = new Map();
+      Object.entries(selectedChoices).forEach(([stepId, choiceId]) => {
+        if (typeof stepId === 'string' && typeof choiceId === 'string') {
+          map.set(stepId, choiceId);
+        }
+      });
+      return map;
+    }
+    return null;
+  })();
+
   steps.forEach((step) => {
     if (!step) {
       return;
     }
 
-    const projectedChoice = pickProjectedInfiltrationChoice(step);
-    const effects = projectedChoice?.effects ?? {};
-    if (projectedChoice) {
+    let choice = null;
+    let choiceSource = 'projected';
+    const selectedChoiceId = selectionMap?.get(step.id);
+    if (selectedChoiceId) {
+      choice = step.choices?.find((entry) => entry?.id === selectedChoiceId) ?? null;
+      if (choice) {
+        choiceSource = 'planned';
+      }
+    }
+
+    if (!choice) {
+      choice = pickProjectedInfiltrationChoice(step);
+    }
+
+    const effects = choice?.effects ?? {};
+    if (choice) {
       accumulateInfiltrationEffects(aggregate, effects);
     }
 
     const stepLabel = typeof step.label === 'string' ? step.label.trim() : '';
     const prompt = typeof step.prompt === 'string' ? step.prompt.trim() : '';
-    const choiceLabel = typeof projectedChoice?.label === 'string' ? projectedChoice.label.trim() : '';
-    const effectSummary = projectedChoice ? summarizeInfiltrationEffects(effects) : null;
+    const choiceLabel = typeof choice?.label === 'string' ? choice.label.trim() : '';
+    const effectSummary = choice ? summarizeInfiltrationEffects(effects) : null;
 
     entries.push({
+      stepId: step.id,
       stepLabel,
-      choiceLabel: choiceLabel ? `Projected: ${choiceLabel}` : '',
+      choiceLabel: choiceLabel ? `${choiceSource === 'planned' ? 'Planned' : 'Projected'}: ${choiceLabel}` : '',
+      choiceSource,
+      choiceId: choice?.id ?? null,
       summary: prompt || stepLabel || '',
       effects,
       effectSummary,
@@ -12910,6 +13215,7 @@ const buildInfiltrationPreviewEntries = (sequence) => {
 };
 
 const DEFAULT_INFILTRATION_PREVIEW_EMPTY = 'Assign crew to generate an infiltration preview.';
+const DEFAULT_INFILTRATION_PLAN_EMPTY = 'Review the projected sequence to preselect responses for each step.';
 
 const buildInfiltrationPreviewSignature = ({ mission, crewMembers = [], vehicleId = null, showPreview }) => {
   const missionId = mission?.id ?? 'none';
@@ -12934,24 +13240,63 @@ const renderMissionInfiltrationPreview = ({
   const summaryContainer = missionControls.infiltrationPreviewSummary;
   const list = missionControls.infiltrationPreviewList;
   const emptyState = missionControls.infiltrationPreviewEmpty;
-  if (!container || !summaryContainer || !list || !emptyState) {
+  const planContainer = missionControls.infiltrationPreviewPlan;
+  const planList = missionControls.infiltrationPreviewPlanList;
+  const planEmpty = missionControls.infiltrationPreviewPlanEmpty;
+  if (!container || !summaryContainer || !list || !emptyState || !planContainer || !planList || !planEmpty) {
     return;
   }
 
-  const roster = Array.isArray(crewMembers) ? crewMembers.filter(Boolean) : [];
-  const signature = buildInfiltrationPreviewSignature({ mission, crewMembers: roster, vehicleId, showPreview });
+  planEmpty.textContent = DEFAULT_INFILTRATION_PLAN_EMPTY;
+
+  const missionSystem = getMissionSystem();
+  const activeMission = missionSystem?.state?.activeMission ?? null;
+  const missionId = mission?.id ?? null;
+  const isActiveMission = Boolean(activeMission && missionId && activeMission.id === missionId);
+
+  let roster = Array.isArray(crewMembers) ? crewMembers.filter(Boolean) : [];
+  if (!roster.length && mission && mission.assignedCrewIds && missionSystem) {
+    const crewPool = Array.isArray(missionSystem.state?.crew) ? missionSystem.state.crew : [];
+    roster = crewPool.filter((member) => mission.assignedCrewIds.includes(member?.id));
+  }
+
+  let planState = missionControls.selectedInfiltrationPlan;
+  if (!planState || planState.missionId !== missionId) {
+    if (isActiveMission && activeMission?.preplannedInfiltration) {
+      planState = hydratePlanStateFromMission(activeMission.preplannedInfiltration, missionId);
+    } else {
+      planState = createEmptyInfiltrationPlanState(missionId);
+    }
+  } else if (
+    isActiveMission &&
+    activeMission?.preplannedInfiltration?.updatedAt &&
+    activeMission.preplannedInfiltration.updatedAt > (planState.updatedAt ?? 0)
+  ) {
+    planState = hydratePlanStateFromMission(activeMission.preplannedInfiltration, missionId);
+  }
+
+  const signature = `${buildInfiltrationPreviewSignature({
+    mission,
+    crewMembers: roster,
+    vehicleId,
+    showPreview,
+  })}|plan:${buildInfiltrationPlanSignature(planState)}|active:${isActiveMission ? 'y' : 'n'}`;
   if (missionControls.lastInfiltrationPreviewSignature === signature) {
     return;
   }
   missionControls.lastInfiltrationPreviewSignature = signature;
 
-  if (!showPreview || !mission) {
+  if ((!showPreview && !isActiveMission) || !mission) {
     container.hidden = true;
     summaryContainer.hidden = true;
     list.hidden = true;
     list.innerHTML = '';
     emptyState.hidden = false;
     emptyState.textContent = DEFAULT_INFILTRATION_PREVIEW_EMPTY;
+    planContainer.hidden = true;
+    planList.innerHTML = '';
+    planList.hidden = true;
+    planEmpty.hidden = false;
     return;
   }
 
@@ -12965,14 +13310,32 @@ const renderMissionInfiltrationPreview = ({
   list.hidden = true;
   summaryContainer.hidden = true;
   emptyState.hidden = true;
+  planContainer.hidden = false;
+  planList.innerHTML = '';
+  planList.hidden = true;
+  planEmpty.hidden = false;
 
   if (!sequence || !Array.isArray(sequence.steps) || !sequence.steps.length) {
     emptyState.hidden = false;
     emptyState.textContent = 'No infiltration preview available for this mission.';
+    planContainer.hidden = true;
     return;
   }
 
-  const { aggregateEffects, entries } = buildInfiltrationPreviewEntries(sequence);
+  planState = synchronizePlanStateWithSequence({ ...planState, missionId }, sequence);
+  planState.missionId = missionId;
+  planState.source = isActiveMission ? 'active' : 'preview';
+  missionControls.selectedInfiltrationPlan = planState;
+
+  if (isActiveMission && activeMission?.preplannedInfiltration) {
+    activeMission.preplannedInfiltration.stepCatalog = planState.stepCatalog.map((step) => ({ ...step }));
+    activeMission.preplannedInfiltration.choices = serializePlanChoices(planState);
+    activeMission.preplannedInfiltration.updatedAt = planState.updatedAt;
+  }
+
+  const { aggregateEffects, entries } = buildInfiltrationPreviewEntries(sequence, {
+    selectedChoices: planState.choices,
+  });
 
   const renderedSummary = renderInfiltrationAggregateSummary(summaryContainer, aggregateEffects);
   summaryContainer.hidden = !renderedSummary;
@@ -12980,6 +13343,8 @@ const renderMissionInfiltrationPreview = ({
   if (!entries.length) {
     emptyState.hidden = false;
     emptyState.textContent = 'Infiltration preview unavailable.';
+    planList.hidden = true;
+    planEmpty.hidden = false;
     return;
   }
 
@@ -12991,6 +13356,130 @@ const renderMissionInfiltrationPreview = ({
   list.hidden = false;
   emptyState.textContent = DEFAULT_INFILTRATION_PREVIEW_EMPTY;
   emptyState.hidden = true;
+
+  const resolvedStepIds = new Set();
+  if (isActiveMission && Array.isArray(mission?.infiltrationState?.history)) {
+    mission.infiltrationState.history.forEach((entry) => {
+      if (entry?.stepId) {
+        resolvedStepIds.add(entry.stepId);
+      }
+    });
+  }
+  const pendingStepId = isActiveMission ? mission?.pendingDecision?.infiltrationStepId ?? null : null;
+
+  const planFragment = document.createDocumentFragment();
+  planState.stepCatalog.forEach((step) => {
+    if (!step) {
+      return;
+    }
+
+    const item = document.createElement('li');
+    item.className = 'mission-infiltration__plan-step';
+    if (resolvedStepIds.has(step.id)) {
+      item.className += ' mission-infiltration__plan-step--resolved';
+    }
+    if (pendingStepId && pendingStepId === step.id) {
+      item.className += ' mission-infiltration__plan-step--active';
+    }
+
+    const header = document.createElement('div');
+    header.className = 'mission-infiltration__plan-step-header';
+
+    const label = document.createElement('span');
+    label.className = 'mission-infiltration__plan-step-label';
+    label.textContent = step.label || 'Infiltration step';
+    header.appendChild(label);
+
+    if (resolvedStepIds.has(step.id)) {
+      const status = document.createElement('span');
+      status.className = 'mission-infiltration__plan-step-status';
+      status.textContent = 'Resolved';
+      header.appendChild(status);
+    } else if (pendingStepId && pendingStepId === step.id) {
+      const status = document.createElement('span');
+      status.className = 'mission-infiltration__plan-step-status mission-infiltration__plan-step-status--active';
+      status.textContent = 'Active';
+      header.appendChild(status);
+    }
+
+    item.appendChild(header);
+
+    if (step.prompt) {
+      const prompt = document.createElement('p');
+      prompt.className = 'mission-infiltration__plan-step-prompt';
+      prompt.textContent = step.prompt;
+      item.appendChild(prompt);
+    }
+
+    const options = document.createElement('div');
+    options.className = 'mission-infiltration__plan-options';
+
+    const groupName = `infiltration-plan-${missionId ?? 'mission'}-${step.id}`;
+    const manualOption = document.createElement('label');
+    manualOption.className = 'mission-infiltration__plan-option mission-infiltration__plan-option--manual';
+    const manualInput = document.createElement('input');
+    manualInput.type = 'radio';
+    manualInput.name = groupName;
+    manualInput.value = '';
+    manualInput.dataset.infiltrationPlanStep = step.id;
+    manualInput.checked = !planState.choices.has(step.id);
+    if (resolvedStepIds.has(step.id)) {
+      manualInput.disabled = true;
+    }
+    manualOption.appendChild(manualInput);
+    const manualLabel = document.createElement('span');
+    manualLabel.className = 'mission-infiltration__plan-option-label';
+    manualLabel.textContent = 'Decide during mission';
+    manualOption.appendChild(manualLabel);
+    options.appendChild(manualOption);
+
+    if (Array.isArray(step.choices)) {
+      step.choices.forEach((choice) => {
+        if (!choice) {
+          return;
+        }
+        const option = document.createElement('label');
+        option.className = 'mission-infiltration__plan-option';
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = groupName;
+        input.value = choice.id ?? '';
+        input.dataset.infiltrationPlanStep = step.id;
+        input.checked = planState.choices.get(step.id) === choice.id;
+        if (resolvedStepIds.has(step.id)) {
+          input.disabled = true;
+        }
+        option.appendChild(input);
+
+        const optionLabel = document.createElement('span');
+        optionLabel.className = 'mission-infiltration__plan-option-label';
+        optionLabel.textContent = choice.label || 'Choice';
+        option.appendChild(optionLabel);
+
+        if (choice.summary) {
+          const summary = document.createElement('span');
+          summary.className = 'mission-infiltration__plan-option-summary';
+          summary.textContent = `Effects: ${choice.summary}`;
+          option.appendChild(summary);
+        }
+
+        options.appendChild(option);
+      });
+    }
+
+    item.appendChild(options);
+    planFragment.appendChild(item);
+  });
+
+  if (planFragment.childNodes.length) {
+    planList.appendChild(planFragment);
+    planList.hidden = false;
+    planEmpty.hidden = true;
+  } else {
+    planList.hidden = true;
+    planEmpty.hidden = false;
+    planEmpty.textContent = 'No infiltration steps available yet.';
+  }
 };
 
 const renderMissionInfiltrationTimeline = (mission) => {
@@ -13046,6 +13535,7 @@ const renderMissionEvents = () => {
   eventPrompt.textContent = 'No active mission. Event feed idle.';
   eventChoices.innerHTML = '';
   eventHistory.innerHTML = '';
+  renderActiveMissionPlanStatus(null);
 
   const missionSystem = getMissionSystem();
   const mission = missionSystem?.state?.activeMission ?? null;
@@ -13060,6 +13550,17 @@ const renderMissionEvents = () => {
   }
 
   renderMissionInfiltrationTimeline(mission);
+  renderActiveMissionPlanStatus(mission);
+  if (typeof mission?.lastInfiltrationPlanStatus === 'string' && mission.lastInfiltrationPlanStatus.trim()) {
+    missionControls.eventStatusDetail = mission.lastInfiltrationPlanStatus.trim();
+    setMissionEventStatus(missionControls.eventStatusDetail);
+  } else if (
+    typeof missionControls.eventStatusDetail === 'string' &&
+    missionControls.eventStatusDetail.startsWith('Preplanned action executed')
+  ) {
+    missionControls.eventStatusDetail = '';
+    setMissionEventStatus('');
+  }
 
   const pending = mission.pendingDecision ?? null;
   if (pending) {
@@ -13486,6 +13987,9 @@ const updateMissionControls = () => {
   const isAnotherMissionRunning = Boolean(
     activeMission && activeMission.id !== selectedMissionId && activeMission.status !== 'completed',
   );
+  const isActiveMissionSelected = Boolean(
+    activeMission && selectedMission && activeMission.id === selectedMission.id,
+  );
   const hasVehicleSelection = Boolean(missionControls.selectedVehicleId);
 
   startButton.disabled =
@@ -13496,18 +14000,33 @@ const updateMissionControls = () => {
     !hasVehicleSelection;
 
   const selectedCrewIds = missionControls.selectedCrewIds ?? [];
-  const assignedCrewMembers = chemistryRoster.filter((member) => selectedCrewIds.includes(member.id));
+  const assignedCrewMembers = chemistryRoster.filter((member) => {
+    if (!member) {
+      return false;
+    }
+    if (isActiveMissionSelected) {
+      return Array.isArray(selectedMission.assignedCrewIds)
+        ? selectedMission.assignedCrewIds.includes(member.id)
+        : false;
+    }
+    return selectedCrewIds.includes(member.id);
+  });
   const showInfiltrationPreview = Boolean(
-    isReady &&
-      selectedMission &&
-      isMissionAvailable &&
-      !isMissionRestricted &&
-      !isAnotherMissionRunning,
+    selectedMission &&
+      ((
+        isReady &&
+        isMissionAvailable &&
+        !isMissionRestricted &&
+        !isAnotherMissionRunning
+      ) || isActiveMissionSelected),
   );
+  const previewVehicleId = isActiveMissionSelected
+    ? selectedMission.assignedVehicleId ?? missionControls.selectedVehicleId ?? null
+    : missionControls.selectedVehicleId ?? null;
   renderMissionInfiltrationPreview({
     mission: selectedMission ?? null,
     crewMembers: assignedCrewMembers,
-    vehicleId: missionControls.selectedVehicleId ?? null,
+    vehicleId: previewVehicleId,
     showPreview: showInfiltrationPreview,
   });
 
@@ -13999,6 +14518,106 @@ const handleMissionEventChoice = (event) => {
   triggerHudRender();
 };
 
+const handleInfiltrationPlanChange = (event) => {
+  const input = event?.target?.closest
+    ? event.target.closest('input[type="radio"][data-infiltration-plan-step]')
+    : null;
+  if (!input) {
+    return;
+  }
+
+  const stepId = input.dataset.infiltrationPlanStep;
+  if (!stepId) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const missionSelect = missionControls.select;
+  if (!missionSystem || !missionSelect) {
+    return;
+  }
+
+  const missionId = missionSelect.value;
+  if (!missionId) {
+    return;
+  }
+
+  const mission = missionSystem.availableMissions.find((entry) => entry.id === missionId)
+    ?? missionSystem.state?.activeMission;
+  if (!mission || mission.id !== missionId) {
+    return;
+  }
+
+  let planState = missionControls.selectedInfiltrationPlan;
+  if (!planState || planState.missionId !== missionId) {
+    planState = createEmptyInfiltrationPlanState(missionId);
+  }
+
+  const choiceId = input.value ?? '';
+  if (choiceId) {
+    planState.choices.set(stepId, choiceId);
+  } else {
+    planState.choices.delete(stepId);
+  }
+  planState.updatedAt = Date.now();
+  missionControls.selectedInfiltrationPlan = planState;
+  missionControls.lastInfiltrationPreviewSignature = '';
+
+  const activeMission = missionSystem.state?.activeMission;
+  if (activeMission && activeMission.id === missionId) {
+    const updatedPlan = missionSystem.updateActiveMissionInfiltrationPlan(serializePlanChoices(planState));
+    if (updatedPlan) {
+      planState = hydratePlanStateFromMission(updatedPlan, missionId);
+      missionControls.selectedInfiltrationPlan = planState;
+      missionControls.lastInfiltrationPreviewSignature = '';
+      const stepInfo = planState.stepCatalog.find((step) => step.id === stepId);
+      const choiceInfo = stepInfo?.choices?.find((choice) => choice.id === choiceId);
+      if (choiceId) {
+        missionControls.eventStatusDetail = `Planned ${stepInfo?.label ?? 'infiltration step'} — ${choiceInfo?.label ?? 'choice'} ready.`;
+      } else {
+        missionControls.eventStatusDetail = `Cleared planned response for ${stepInfo?.label ?? 'infiltration step'}.`;
+      }
+    }
+  }
+
+  updateMissionControls();
+  renderMissionEvents();
+};
+
+const handleMissionPlanAction = (event) => {
+  const button = event?.target?.closest
+    ? event.target.closest('button[data-infiltration-plan-step]')
+    : null;
+  if (!button) {
+    return;
+  }
+
+  const stepId = button.dataset.infiltrationPlanStep;
+  if (!stepId) {
+    return;
+  }
+
+  const missionSystem = getMissionSystem();
+  const activeMission = missionSystem?.state?.activeMission ?? null;
+  if (!missionSystem || !activeMission || activeMission.status === 'completed') {
+    return;
+  }
+
+  const plan = activeMission.preplannedInfiltration || {};
+  const updatedChoices = { ...(plan.choices ?? {}) };
+  delete updatedChoices[stepId];
+  const updatedPlan = missionSystem.updateActiveMissionInfiltrationPlan(updatedChoices);
+  if (updatedPlan) {
+    missionControls.selectedInfiltrationPlan = hydratePlanStateFromMission(updatedPlan, activeMission.id);
+    missionControls.lastInfiltrationPreviewSignature = '';
+    const stepInfo = updatedPlan.stepCatalog?.find((step) => step.id === stepId);
+    missionControls.eventStatusDetail = `Cleared planned response for ${stepInfo?.label ?? 'infiltration step'}.`;
+  }
+
+  updateMissionControls();
+  renderMissionEvents();
+};
+
 const handleRelationshipEventChoice = (event) => {
   const target = event?.target;
   const button = target?.closest ? target.closest('button[data-relationship-choice]') : null;
@@ -14064,7 +14683,16 @@ const handleMissionStart = () => {
     return;
   }
 
-  const mission = missionSystem.startMission(missionId, crewIds, vehicleId);
+  const planState =
+    missionControls.selectedInfiltrationPlan &&
+    missionControls.selectedInfiltrationPlan.missionId === missionId
+      ? missionControls.selectedInfiltrationPlan
+      : null;
+  const infiltrationPlanPayload = planState
+    ? { choices: serializePlanChoices(planState) }
+    : null;
+
+  const mission = missionSystem.startMission(missionId, crewIds, vehicleId, infiltrationPlanPayload);
   if (!mission) {
     updateMissionStatusText();
     return;
@@ -14073,6 +14701,13 @@ const handleMissionStart = () => {
   missionControls.selectedCrewIds = [];
   missionControls.selectedVehicleId = null;
   missionControls.lastEventPromptId = null;
+  if (mission.preplannedInfiltration) {
+    missionControls.selectedInfiltrationPlan = hydratePlanStateFromMission(
+      mission.preplannedInfiltration,
+      mission.id,
+    );
+    missionControls.lastInfiltrationPreviewSignature = '';
+  }
   clearMaintenanceStatusDetail();
   setMissionEventStatus('Crew standing by for mid-run updates.');
   soundboard.playMissionStart();
@@ -14516,12 +15151,20 @@ const setupMissionControls = () => {
   );
   missionControls.infiltrationPreviewList = document.getElementById('mission-infiltration-preview-timeline');
   missionControls.infiltrationPreviewEmpty = document.getElementById('mission-infiltration-preview-empty');
+  missionControls.infiltrationPreviewPlan = document.getElementById('mission-infiltration-preview-plan');
+  missionControls.infiltrationPreviewPlanList = document.getElementById(
+    'mission-infiltration-preview-plan-list',
+  );
+  missionControls.infiltrationPreviewPlanEmpty = document.getElementById(
+    'mission-infiltration-preview-plan-empty',
+  );
   missionControls.infiltrationTimelineSummary = document.getElementById('mission-infiltration-summary');
   missionControls.infiltrationTimelineList = document.getElementById('mission-infiltration-timeline');
   missionControls.infiltrationTimelineEmpty = document.getElementById('mission-infiltration-empty');
   missionControls.infiltrationTimelineContainer = missionControls.infiltrationTimelineList
     ? missionControls.infiltrationTimelineList.closest('.mission-infiltration')
     : document.querySelector('.mission-events .mission-infiltration');
+  missionControls.eventPlanStatus = document.getElementById('mission-event-plan');
   missionControls.eventStatus = document.getElementById('mission-event-status');
   missionControls.debtList = document.getElementById('mission-debt-list');
   missionControls.debtStatus = document.getElementById('mission-debt-status');
@@ -14722,10 +15365,14 @@ const setupMissionControls = () => {
   select.addEventListener('change', () => {
     missionControls.selectedCrewIds = [];
     missionControls.selectedVehicleId = null;
+    missionControls.selectedInfiltrationPlan = null;
+    missionControls.lastInfiltrationPreviewSignature = '';
     clearMaintenanceStatusDetail();
     updateMissionControls();
   });
   missionControls.eventChoices?.addEventListener('click', handleMissionEventChoice);
+  missionControls.infiltrationPreviewPlanList?.addEventListener('change', handleInfiltrationPlanChange);
+  missionControls.eventPlanStatus?.addEventListener('click', handleMissionPlanAction);
   missionControls.debtList?.addEventListener('click', handleDebtListClick);
   trainingCrewSelect.addEventListener('change', updateTrainingOptions);
   trainingSpecialtySelect.addEventListener('change', updateTrainingOptions);
