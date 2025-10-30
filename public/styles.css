@@ -1459,6 +1459,21 @@ body {
 .mission-safehouse__facility-label {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.mission-safehouse__facility-name {
+  font-weight: 600;
+  color: rgba(209, 234, 255, 0.92);
+}
+
+.mission-safehouse__facility-summary {
+  font-size: 0.68rem;
+  line-height: 1.25;
+  color: rgba(209, 234, 255, 0.64);
+  word-break: break-word;
 }
 
 .mission-safehouse__facility-controls {

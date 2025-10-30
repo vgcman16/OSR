@@ -6008,7 +6008,26 @@ const updateSafehousePanel = () => {
 
           const label = document.createElement('span');
           label.className = 'mission-safehouse__facility-label';
-          label.textContent = formatFacilityLabel(facilityId);
+
+          const nameLine = document.createElement('span');
+          nameLine.className = 'mission-safehouse__facility-name';
+          nameLine.textContent = formatFacilityLabel(facilityId);
+          label.appendChild(nameLine);
+
+          const effectConfig = getFacilityEffectConfig(facilityId);
+          const summaryText =
+            typeof effectConfig?.summary === 'string' && effectConfig.summary.trim()
+              ? effectConfig.summary.trim()
+              : '';
+
+          if (summaryText) {
+            item.title = summaryText;
+            label.title = summaryText;
+            const summaryLine = document.createElement('span');
+            summaryLine.className = 'mission-safehouse__facility-summary';
+            summaryLine.textContent = summaryText;
+            label.appendChild(summaryLine);
+          }
 
           const controls = document.createElement('div');
           controls.className = 'mission-safehouse__facility-controls';
