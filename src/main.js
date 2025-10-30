@@ -11456,6 +11456,68 @@ const updateVehicleSelectionOptions = () => {
   const garage = Array.isArray(missionSystem?.state?.garage) ? missionSystem.state.garage : [];
   const activeMissionVehicleId = missionSystem?.state?.activeMission?.assignedVehicleId ?? null;
 
+  const selectedMissionId = missionControls.select?.value ?? '';
+  const crewRoster = Array.isArray(missionSystem?.state?.crew) ? missionSystem.state.crew : [];
+  const selectedCrewIds = Array.isArray(missionControls.selectedCrewIds)
+    ? missionControls.selectedCrewIds
+    : [];
+  const assignedCrewMembers = crewRoster.filter((member) => selectedCrewIds.includes(member.id));
+  const missionCandidate = (() => {
+    if (!missionSystem || !selectedMissionId) {
+      return null;
+    }
+
+    const fromAvailable = Array.isArray(missionSystem.availableMissions)
+      ? missionSystem.availableMissions.find((mission) => mission?.id === selectedMissionId)
+      : null;
+    if (fromAvailable) {
+      return fromAvailable;
+    }
+
+    const activeMission = missionSystem?.state?.activeMission ?? null;
+    if (activeMission?.id === selectedMissionId) {
+      return activeMission;
+    }
+
+    return null;
+  })();
+
+  const canPreviewMission = Boolean(
+    missionCandidate
+      && missionCandidate.status === 'available'
+      && typeof missionSystem?.previewCrewAssignment === 'function',
+  );
+
+  const canComputeImpact = Boolean(
+    missionCandidate && typeof missionSystem?.computeCrewImpact === 'function',
+  );
+
+  const getVehicleImpactForMission = (vehicle) => {
+    if (!missionCandidate || !vehicle) {
+      return null;
+    }
+
+    if (canPreviewMission) {
+      const preview = missionSystem.previewCrewAssignment(
+        missionCandidate.id,
+        selectedCrewIds,
+        vehicle.id,
+      );
+      return preview?.vehicleImpact ?? null;
+    }
+
+    if (canComputeImpact) {
+      const impact = missionSystem.computeCrewImpact(
+        missionCandidate,
+        assignedCrewMembers,
+        vehicle,
+      );
+      return impact?.vehicleImpact ?? null;
+    }
+
+    return null;
+  };
+
   vehicleContainer.innerHTML = '';
 
   if (!missionSystem) {
@@ -11547,9 +11609,57 @@ const updateVehicleSelectionOptions = () => {
       statusText = 'On mission';
     }
 
+    const vehicleImpact = getVehicleImpactForMission(vehicle);
     const conditionLabel =
       conditionPercent !== null ? `${conditionPercent}% condition` : 'Condition unknown';
-    descriptor.textContent = `${vehicle.model ?? 'Vehicle'} — ${conditionLabel} • Heat ${heatLabel} • ${statusText}`;
+    const impactMetrics = [];
+    if (vehicleImpact) {
+      const timelineDelta = describeDurationDelta(vehicleImpact.durationMultiplier);
+      impactMetrics.push(timelineDelta ? `Timeline ${timelineDelta}` : 'Timeline steady');
+
+      if (Number.isFinite(vehicleImpact.successContribution)) {
+        const successPercent = Math.round(vehicleImpact.successContribution * 100);
+        impactMetrics.push(
+          successPercent !== 0
+            ? `Success ${successPercent > 0 ? '+' : ''}${successPercent}%`
+            : 'Success steady',
+        );
+      }
+
+      if (Number.isFinite(vehicleImpact.heatAdjustment)) {
+        const normalizedHeat =
+          Math.abs(vehicleImpact.heatAdjustment) < 0.05
+            ? 0
+            : Math.round(vehicleImpact.heatAdjustment * 10) / 10;
+        const heatString = `${normalizedHeat > 0 ? '+' : normalizedHeat < 0 ? '' : '+'}${normalizedHeat.toFixed(1)}`;
+        impactMetrics.push(`Heat adj ${heatString}`);
+      }
+    }
+
+    const conditionParts = [conditionLabel];
+    if (impactMetrics.length) {
+      conditionParts.push(`(${impactMetrics.join(' • ')})`);
+    }
+
+    const descriptorParts = [
+      `${vehicle.model ?? 'Vehicle'} — ${conditionParts.join(' ')}`,
+      `Heat ${heatLabel}`,
+      statusText,
+    ];
+    descriptor.textContent = descriptorParts.join(' • ');
+
+    const ariaSummaryParts = [
+      `${vehicle.model ?? 'Vehicle'}.`,
+      `${conditionLabel}.`,
+    ];
+    if (impactMetrics.length) {
+      ariaSummaryParts.push(`Mission fit: ${impactMetrics.join(', ')}.`);
+    } else if (vehicleImpact) {
+      ariaSummaryParts.push('Mission fit steady.');
+    }
+    ariaSummaryParts.push(`Heat ${heatLabel}.`);
+    ariaSummaryParts.push(`${statusText}.`);
+    optionLabel.setAttribute('aria-label', ariaSummaryParts.join(' '));
 
     optionLabel.appendChild(radio);
     optionLabel.appendChild(descriptor);
