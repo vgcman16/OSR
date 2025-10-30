@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Specter Shielding Icon</title>
+  <defs>
+    <linearGradient id="shieldGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d6faff" />
+      <stop offset="100%" stop-color="#4c7bff" />
+    </linearGradient>
+  </defs>
+  <rect x="10" y="12" width="44" height="40" rx="10" fill="#050a16" stroke="#6bd0ff" stroke-width="2" />
+  <path d="M32 18l14 8v10c0 8.5-6 13-14 16-8-3-14-7.5-14-16V26z" fill="#071124" stroke="#7ed7ff" stroke-width="1.5" />
+  <path d="M32 22l10 6v8c0 6.2-4.4 9.6-10 12.2-5.6-2.6-10-6-10-12.2v-8z" fill="url(#shieldGradient)" />
+  <path d="M24 32h16" stroke="#11254b" stroke-width="2" opacity="0.5" />
+  <path d="M28 28h8" stroke="#11254b" stroke-width="2" opacity="0.5" />
+  <path d="M26 38h12" stroke="#11254b" stroke-width="2" opacity="0.5" />
+</svg>

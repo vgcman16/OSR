@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Adaptive Suspension Icon</title>
+  <defs>
+    <linearGradient id="suspensionGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#bdf1ff" />
+      <stop offset="100%" stop-color="#2d67d4" />
+    </linearGradient>
+  </defs>
+  <rect x="8" y="12" width="48" height="40" rx="10" fill="#060c19" stroke="#5abfff" stroke-width="2" />
+  <path d="M16 40l8-8 8 8 8-8 8 8" fill="none" stroke="#122446" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M16 28l8-8 8 8 8-8 8 8" fill="none" stroke="#183a6e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="24" cy="32" r="5" fill="url(#suspensionGradient)" stroke="#071226" stroke-width="2" />
+  <circle cx="40" cy="32" r="5" fill="url(#suspensionGradient)" stroke="#071226" stroke-width="2" />
+</svg>

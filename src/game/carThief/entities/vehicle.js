@@ -47,6 +47,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Dyno-tuned injectors and ECU maps push acceleration and top speed at the cost of extra attention.',
     summary: '+20 top speed, +1.2 acceleration, ~6% faster runs, +8% mission heat.',
     cost: 5200,
+    icon: '/images/tools/engine-tuning.svg',
     effects: {
       topSpeedBonus: 20,
       accelerationBonus: 1.2,
@@ -62,6 +63,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Composite shrouds and baffled exhaust dampers soak detection, trimming mission heat signatures.',
     summary: '-0.6 base heat, 18% heat multiplier reduction, +0.02 success bonus.',
     cost: 4800,
+    icon: '/images/tools/stealth-plating.svg',
     effects: {
       handlingBonus: 0.4,
       heatMultiplier: 0.82,
@@ -76,6 +78,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Layered RF spoofers blind trackers, shaving pursuit heat and calming response teams.',
     summary: 'Heat gain -0.3, 12% heat gain reduction, +0.015 success.',
     cost: 4100,
+    icon: '/images/tools/signal-masker.svg',
     effects: {
       heatGainFlat: -0.3,
       heatGainMultiplier: 0.88,
@@ -89,6 +92,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Kevlar-lined tires keep pace under fire, steadying handling and softening wear.',
     summary: '+0.5 handling, wear mitigation 0.25, 3% faster getaways.',
     cost: 3400,
+    icon: '/images/tools/run-flat-tires.svg',
     effects: {
       handlingBonus: 0.5,
       durationMultiplier: 0.97,
@@ -102,6 +106,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Sensor-linked dampers and torque vectoring bite into corners while easing frame fatigue.',
     summary: '+0.9 handling, +0.6 acceleration, wear mitigation 0.35.',
     cost: 5600,
+    icon: '/images/tools/adaptive-suspension.svg',
     effects: {
       handlingBonus: 0.9,
       accelerationBonus: 0.6,
@@ -115,6 +120,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Phase-change body panels and baffled vents dump heat trails, fooling pursuit sensors.',
     summary: '-0.5 base heat, 20% less heat gain, +0.015 success.',
     cost: 5900,
+    icon: '/images/tools/thermal-cloak.svg',
     effects: {
       heatFlatAdjustment: -0.5,
       heatGainMultiplier: 0.8,
@@ -128,6 +134,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Autonav thrusters plot micro-drifts that shave escape time while slipping past pursuers.',
     summary: '+0.5 handling, -0.3 heat, -8% duration, +0.02 success.',
     cost: 6200,
+    icon: '/images/tools/escape-vector-suite.svg',
     effects: {
       handlingBonus: 0.5,
       durationMultiplier: 0.92,
@@ -142,6 +149,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Acoustic baffles and cooled vents drop the ride into stealth mode for the final approach.',
     summary: '-0.4 base heat, 18% less heat gain, +0.015 success.',
     cost: 5600,
+    icon: '/images/tools/ghost-cabin.svg',
     effects: {
       heatFlatAdjustment: -0.4,
       heatGainMultiplier: 0.82,
@@ -155,6 +163,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Micro flare pods blind pursuit drones, softening heat spikes during extraction.',
     summary: 'Heat gain -0.4, 18% pursuit heat reduction, +0.02 success.',
     cost: 4700,
+    icon: '/images/tools/decoy-flare-launcher.svg',
     effects: {
       heatGainFlat: -0.4,
       heatGainMultiplier: 0.82,
@@ -168,6 +177,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Phase-balanced mounts steady the chassis, cutting corner drift and heat signatures.',
     summary: '+0.7 handling, -0.25 heat, 6% faster, +0.015 success.',
     cost: 6100,
+    icon: '/images/tools/quantum-stabilizers.svg',
     effects: {
       handlingBonus: 0.7,
       durationMultiplier: 0.94,
@@ -182,6 +192,7 @@ const VEHICLE_MOD_CATALOG = Object.freeze({
       'Layered EM mesh cloaks the ride, carving mission heat and dampening pursuit telemetry.',
     summary: '-0.6 base heat, 10% mission heat drop, 15% less pursuit heat, +0.02 success.',
     cost: 6400,
+    icon: '/images/tools/specter-shielding.svg',
     effects: {
       heatFlatAdjustment: -0.6,
       heatMultiplier: 0.9,

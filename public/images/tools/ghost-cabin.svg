@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Ghost Cabin Icon</title>
+  <defs>
+    <linearGradient id="ghostGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d9f6ff" />
+      <stop offset="100%" stop-color="#4178dd" />
+    </linearGradient>
+  </defs>
+  <rect x="8" y="14" width="48" height="36" rx="10" fill="#050b17" stroke="#62c5ff" stroke-width="2" />
+  <path d="M20 24l12-8 12 8v18H20z" fill="url(#ghostGradient)" stroke="#58b5ff" stroke-width="1.5" />
+  <path d="M24 24v10m8-14v14m8-10v10" stroke="#0d1f3c" stroke-width="2" opacity="0.55" stroke-linecap="round" />
+  <path d="M20 42c4-3 8-4 12-4s8 1 12 4" stroke="#0f264d" stroke-width="3" stroke-linecap="round" opacity="0.45" />
+  <circle cx="32" cy="32" r="4" fill="#071329" stroke="#8ddfff" stroke-width="1.5" />
+</svg>
