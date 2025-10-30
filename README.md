@@ -29,6 +29,12 @@ python -m http.server 3000
 
 Then open http://localhost:3000/public/ in your browser to view the site.
 
+## Running tests
+
+Before running the automated checks, install the project dependencies once with `npm install`.
+After the dependencies are installed, execute the existing Node test runner with `npm test`.
+This command runs the configured test suite against all files located in the `test/` directory.
+
 ## Project structure
 
 ```
