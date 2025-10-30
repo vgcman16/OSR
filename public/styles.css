@@ -1429,6 +1429,91 @@ body {
   color: rgba(209, 234, 255, 0.78);
 }
 
+.mission-safehouse__layout-zone-facilities--interactive {
+  gap: 0.4rem;
+}
+
+.mission-safehouse__facility {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  background: rgba(25, 36, 58, 0.55);
+  border: 1px solid rgba(120, 190, 255, 0.18);
+  cursor: grab;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.mission-safehouse__facility:focus-within {
+  outline: 2px solid rgba(120, 190, 255, 0.45);
+  outline-offset: 2px;
+}
+
+.mission-safehouse__facility--dragging {
+  opacity: 0.65;
+  transform: scale(0.98);
+}
+
+.mission-safehouse__facility-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mission-safehouse__facility-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.mission-safehouse__facility-zone-select {
+  appearance: none;
+  background: rgba(15, 24, 42, 0.75);
+  border: 1px solid rgba(120, 190, 255, 0.25);
+  color: rgba(209, 234, 255, 0.9);
+  border-radius: 6px;
+  padding: 0.2rem 1.6rem 0.2rem 0.45rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.mission-safehouse__facility-zone-select:focus {
+  outline: none;
+  border-color: rgba(120, 190, 255, 0.6);
+  box-shadow: 0 0 0 2px rgba(120, 190, 255, 0.25);
+}
+
+.mission-safehouse__facility-drag-handle {
+  font-size: 0.9rem;
+  letter-spacing: 0.2em;
+  color: rgba(180, 215, 255, 0.6);
+  user-select: none;
+}
+
+.mission-safehouse__layout-zone--drop-target {
+  border-color: rgba(120, 190, 255, 0.55);
+  box-shadow: 0 0 12px rgba(120, 190, 255, 0.28);
+  background: rgba(15, 26, 44, 0.92);
+}
+
+.mission-safehouse__layout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.35rem;
+}
+
+.mission-safehouse__layout-actions[hidden] {
+  display: none;
+}
+
+.mission-safehouse__layout-statusline {
+  font-size: 0.78rem;
+  color: rgba(209, 234, 255, 0.72);
+}
+
 .mission-safehouse__layout-zone-facilities li {
   line-height: 1.35;
 }
