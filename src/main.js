@@ -157,6 +157,7 @@ const missionControls = {
   eventStatusDetail: '',
   lastEventPromptId: null,
   infiltrationTimelineContainer: null,
+  infiltrationTimelineSummary: null,
   infiltrationTimelineList: null,
   infiltrationTimelineEmpty: null,
   lastInfiltrationTimelineSignature: '',
@@ -11195,6 +11196,21 @@ const renderMissionLog = () => {
         .filter(Boolean);
     })();
 
+    const aggregateEffects =
+      entry?.infiltrationAggregateEffects && typeof entry.infiltrationAggregateEffects === 'object'
+        ? entry.infiltrationAggregateEffects
+        : null;
+    if (aggregateEffects) {
+      const summaryContainer = document.createElement('div');
+      summaryContainer.className = 'mission-infiltration__aggregate mission-infiltration__aggregate--condensed';
+      const rendered = renderInfiltrationAggregateSummary(summaryContainer, aggregateEffects, {
+        condensed: true,
+      });
+      if (rendered) {
+        item.appendChild(summaryContainer);
+      }
+    }
+
     if (infiltrationHistoryEntries.length) {
       const timeline = document.createElement('ul');
       timeline.className = 'mission-infiltration__timeline mission-infiltration__timeline--condensed';
@@ -11474,6 +11490,99 @@ const buildInfiltrationEffectBadges = (effects = {}, fallbackSummary = null) => 
   return badges;
 };
 
+const deriveInfiltrationAggregateTone = (effects = {}) => {
+  if (!effects || typeof effects !== 'object') {
+    return 'neutral';
+  }
+
+  let score = 0;
+  const safeEffects = effects;
+
+  if (Number.isFinite(safeEffects.payoutMultiplier) && safeEffects.payoutMultiplier !== 1) {
+    score += safeEffects.payoutMultiplier > 1 ? 2 : -2;
+  }
+  if (Number.isFinite(safeEffects.payoutDelta) && safeEffects.payoutDelta !== 0) {
+    score += safeEffects.payoutDelta > 0 ? 2 : -2;
+  }
+  if (Number.isFinite(safeEffects.successDelta) && safeEffects.successDelta !== 0) {
+    score += safeEffects.successDelta > 0 ? 2 : -2;
+  }
+  if (Number.isFinite(safeEffects.crewLoyaltyDelta) && safeEffects.crewLoyaltyDelta !== 0) {
+    score += safeEffects.crewLoyaltyDelta > 0 ? 1 : -1;
+  }
+  if (Number.isFinite(safeEffects.heatMultiplier) && safeEffects.heatMultiplier !== 1) {
+    score += safeEffects.heatMultiplier < 1 ? 1 : -1;
+  }
+  if (Number.isFinite(safeEffects.heatDelta) && safeEffects.heatDelta !== 0) {
+    score += safeEffects.heatDelta < 0 ? 1 : -1;
+  }
+  if (Number.isFinite(safeEffects.durationMultiplier) && safeEffects.durationMultiplier !== 1) {
+    score += safeEffects.durationMultiplier < 1 ? 1 : -1;
+  }
+  if (Number.isFinite(safeEffects.durationDelta) && safeEffects.durationDelta !== 0) {
+    score += safeEffects.durationDelta < 0 ? 1 : -1;
+  }
+
+  if (score > 1) {
+    return 'success';
+  }
+  if (score < 0) {
+    return 'warning';
+  }
+  return 'neutral';
+};
+
+const renderInfiltrationAggregateSummary = (container, effects = null, { condensed = false } = {}) => {
+  if (!container) {
+    return false;
+  }
+
+  const safeEffects = effects && typeof effects === 'object' ? effects : {};
+  container.innerHTML = '';
+  container.hidden = true;
+
+  container.classList.toggle('mission-infiltration__aggregate--condensed', condensed);
+  container.classList.remove(
+    'mission-infiltration__aggregate--success',
+    'mission-infiltration__aggregate--warning',
+    'mission-infiltration__aggregate--neutral',
+  );
+
+  const badges = buildInfiltrationEffectBadges(safeEffects);
+  if (!badges.length) {
+    container.classList.add('mission-infiltration__aggregate--neutral');
+    return false;
+  }
+
+  const tone = deriveInfiltrationAggregateTone(safeEffects);
+  if (tone === 'success') {
+    container.classList.add('mission-infiltration__aggregate--success');
+  } else if (tone === 'warning') {
+    container.classList.add('mission-infiltration__aggregate--warning');
+  } else {
+    container.classList.add('mission-infiltration__aggregate--neutral');
+  }
+
+  const label = document.createElement(condensed ? 'span' : 'p');
+  label.className = 'mission-infiltration__aggregate-label';
+  if (condensed) {
+    label.className += ' mission-infiltration__aggregate-label--condensed';
+  }
+  label.textContent = 'Aggregate impact';
+  container.appendChild(label);
+
+  const badgeRow = document.createElement('div');
+  badgeRow.className = 'mission-infiltration__aggregate-effects';
+  if (condensed) {
+    badgeRow.className += ' mission-infiltration__aggregate-effects--condensed';
+  }
+  badges.forEach((badge) => badgeRow.appendChild(badge));
+  container.appendChild(badgeRow);
+
+  container.hidden = false;
+  return true;
+};
+
 const extractInfiltrationSummaryText = (entry) => {
   if (!entry || typeof entry !== 'object') {
     return '';
@@ -11556,8 +11665,14 @@ const createInfiltrationTimelineItem = (entry, { condensed = false } = {}) => {
 const renderMissionInfiltrationTimeline = (mission) => {
   const list = missionControls.infiltrationTimelineList;
   const emptyState = missionControls.infiltrationTimelineEmpty;
+  const summaryContainer = missionControls.infiltrationTimelineSummary;
   if (!list || !emptyState) {
     return;
+  }
+
+  const aggregateEffects = mission?.infiltrationState?.aggregateEffects ?? null;
+  if (summaryContainer) {
+    renderInfiltrationAggregateSummary(summaryContainer, aggregateEffects);
   }
 
   const historyEntries = Array.isArray(mission?.infiltrationState?.history)
@@ -13036,6 +13151,7 @@ const setupMissionControls = () => {
   missionControls.eventChoices = document.getElementById('mission-event-choices');
   missionControls.eventHistory = document.getElementById('mission-event-history');
   missionControls.infiltrationTimelineContainer = document.querySelector('.mission-infiltration');
+  missionControls.infiltrationTimelineSummary = document.getElementById('mission-infiltration-summary');
   missionControls.infiltrationTimelineList = document.getElementById('mission-infiltration-timeline');
   missionControls.infiltrationTimelineEmpty = document.getElementById('mission-infiltration-empty');
   missionControls.eventStatus = document.getElementById('mission-event-status');

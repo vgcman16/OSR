@@ -160,6 +160,12 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
 
   missionSystem.update(missionDuration);
   resolvePendingDecisions(missionSystem, firstMission);
+
+  const aggregateEffectsSnapshot =
+    firstMission.infiltrationState?.aggregateEffects &&
+    typeof firstMission.infiltrationState.aggregateEffects === 'object'
+      ? { ...firstMission.infiltrationState.aggregateEffects }
+      : null;
   missionSystem.update(0);
   assert.equal(firstMission.status, 'completed', 'mission automatically resolves once complete');
   assert.equal(firstMission.outcome, 'success', 'mission outcome is determined by the success roll');
@@ -193,6 +199,19 @@ test('MissionSystem lifecycle from contract to resolution', (t) => {
   assert.equal(latestLogEntry.outcome, 'success', 'mission log records the outcome');
   assert.equal(latestLogEntry.automatic, true, 'mission log flags automatic resolution');
   assert.match(latestLogEntry.summary, /rolled/i, 'mission log summary references the success roll');
+  if (aggregateEffectsSnapshot) {
+    assert.deepEqual(
+      latestLogEntry.infiltrationAggregateEffects,
+      aggregateEffectsSnapshot,
+      'mission log preserves aggregate infiltration totals for UI consumption',
+    );
+  } else {
+    assert.equal(
+      latestLogEntry.infiltrationAggregateEffects,
+      null,
+      'mission log leaves aggregate infiltration totals empty when no infiltration occurred',
+    );
+  }
 
   const refreshedMission = missionSystem.availableMissions.find(
     (mission) => mission.id === firstMission.id,

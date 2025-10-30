@@ -560,6 +560,64 @@ body {
   color: rgba(180, 215, 255, 0.6);
 }
 
+.mission-infiltration__aggregate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 190, 255, 0.22);
+  background: rgba(12, 18, 30, 0.45);
+  box-shadow: inset 0 0 12px rgba(120, 190, 255, 0.12);
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.mission-infiltration__aggregate--neutral {
+  border-color: rgba(120, 190, 255, 0.22);
+  background: rgba(12, 18, 30, 0.45);
+  box-shadow: inset 0 0 12px rgba(120, 190, 255, 0.12);
+}
+
+.mission-infiltration__aggregate--success {
+  border-color: rgba(84, 220, 180, 0.55);
+  background: rgba(18, 58, 48, 0.58);
+  box-shadow: 0 0 18px rgba(82, 215, 176, 0.25);
+}
+
+.mission-infiltration__aggregate--warning {
+  border-color: rgba(240, 140, 95, 0.55);
+  background: rgba(62, 28, 24, 0.6);
+  box-shadow: 0 0 18px rgba(240, 140, 95, 0.2);
+}
+
+.mission-infiltration__aggregate--condensed {
+  padding: 0.35rem 0.45rem;
+  gap: 0.25rem;
+}
+
+.mission-infiltration__aggregate-label {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(189, 222, 255, 0.78);
+}
+
+.mission-infiltration__aggregate-label--condensed {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+}
+
+.mission-infiltration__aggregate-effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.mission-infiltration__aggregate-effects--condensed {
+  gap: 0.25rem;
+}
+
 .mission-infiltration__timeline {
   list-style: none;
   padding-left: 0;
@@ -963,6 +1021,10 @@ body {
   background: rgba(10, 16, 28, 0.38);
   border-color: rgba(120, 190, 255, 0.12);
   box-shadow: inset 0 0 10px rgba(120, 190, 255, 0.06);
+}
+
+.mission-log__entry .mission-infiltration__aggregate {
+  margin-top: 0.25rem;
 }
 
 .mission-heat__history {
