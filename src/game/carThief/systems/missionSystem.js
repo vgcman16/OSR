@@ -3904,6 +3904,11 @@ class MissionSystem {
             )
             .filter(Boolean)
         : [],
+      infiltrationAggregateEffects:
+        mission?.infiltrationState?.aggregateEffects &&
+        typeof mission.infiltrationState.aggregateEffects === 'object'
+          ? { ...mission.infiltrationState.aggregateEffects }
+          : null,
       infiltrationSummary: Array.isArray(mission?.infiltrationSummary)
         ? mission.infiltrationSummary.slice()
         : [],
