@@ -742,6 +742,8 @@ const missionControls = {
   safehouseAlertPrompt: null,
   safehouseAlertsList: null,
   safehouseAlertStatus: null,
+  safehouseHistoryList: null,
+  safehouseHistoryStatus: null,
   safehouseLayoutSection: null,
   safehouseLayoutWarnings: null,
   safehouseLayoutZones: null,
@@ -5660,6 +5662,8 @@ const updateSafehousePanel = () => {
     safehouseAlertPrompt,
     safehouseAlertsList,
     safehouseAlertStatus,
+    safehouseHistoryList,
+    safehouseHistoryStatus,
     safehouseLayoutSection,
     safehouseLayoutWarnings,
     safehouseLayoutZones,
@@ -5676,6 +5680,8 @@ const updateSafehousePanel = () => {
     !safehouseAlertPrompt ||
     !safehouseAlertsList ||
     !safehouseAlertStatus ||
+    !safehouseHistoryList ||
+    !safehouseHistoryStatus ||
     !safehouseLayoutSection ||
     !safehouseLayoutWarnings ||
     !safehouseLayoutZones
@@ -5690,6 +5696,66 @@ const updateSafehousePanel = () => {
   const state = getSharedState();
   let alertSummaryLine = '';
 
+  const renderSafehouseHistory = (historyEntries) => {
+    safehouseHistoryList.innerHTML = '';
+
+    const entries = Array.isArray(historyEntries)
+      ? historyEntries
+          .map((entry) => {
+            if (!entry || typeof entry !== 'object') {
+              return null;
+            }
+
+            const alertId = typeof entry.alertId === 'string' ? entry.alertId.trim() : null;
+            const summary = typeof entry.summary === 'string' && entry.summary.trim()
+              ? entry.summary.trim()
+              : 'Incident resolved.';
+            const resolvedAt = Number.isFinite(entry.resolvedAt) ? entry.resolvedAt : null;
+
+            return { alertId, summary, resolvedAt };
+          })
+          .filter(Boolean)
+      : [];
+
+    if (!entries.length) {
+      const placeholder = document.createElement('li');
+      placeholder.className =
+        'mission-safehouse__history-item mission-safehouse__history-item--empty mission-safehouse__layout-warning';
+      placeholder.textContent = 'No resolved incursions recorded yet.';
+      safehouseHistoryList.appendChild(placeholder);
+      safehouseHistoryStatus.textContent = 'No resolved incursions recorded yet.';
+      return;
+    }
+
+    const displayEntries = entries.slice(-6).reverse();
+    const timestampOptions = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+
+    displayEntries.forEach((entry) => {
+      const item = document.createElement('li');
+      item.className = 'mission-safehouse__history-item mission-safehouse__layout-warning';
+      if (entry.alertId) {
+        item.dataset.alertId = entry.alertId;
+      }
+
+      const summaryLine = document.createElement('span');
+      summaryLine.className = 'mission-safehouse__history-summary';
+      summaryLine.textContent = entry.summary;
+
+      const timestamp = document.createElement('span');
+      timestamp.className = 'mission-safehouse__history-timestamp';
+      timestamp.textContent = entry.resolvedAt
+        ? `Resolved ${new Date(entry.resolvedAt).toLocaleString([], timestampOptions)}`
+        : 'Resolution timestamp unavailable.';
+
+      item.append(summaryLine, timestamp);
+      safehouseHistoryList.appendChild(item);
+    });
+
+    const count = displayEntries.length;
+    const detail = count === 1 ? 'Showing the latest resolved incident.' : `Showing ${count} recent resolved incidents.`;
+    safehouseHistoryStatus.textContent = `Incident log updated. ${detail}`;
+  };
+
   const renderSafehouseAlerts = (alerts, { day } = {}) => {
     safehouseAlertsList.innerHTML = '';
 
@@ -5701,6 +5767,7 @@ const updateSafehousePanel = () => {
       item.textContent = 'No incursions detected. Keep crew pressure low to stay hidden.';
       safehouseAlertsList.appendChild(item);
       safehouseAlertStatus.textContent = '';
+      renderSafehouseHistory(state?.safehouseDefense?.history);
       return { summaryLine: '' };
     }
 
@@ -5847,6 +5914,7 @@ const updateSafehousePanel = () => {
     });
 
     safehouseAlertStatus.textContent = summarySegments.join(' ');
+    renderSafehouseHistory(state?.safehouseDefense?.history);
     return { summaryLine: summarySegments[0] ?? '' };
   };
 
@@ -6626,6 +6694,8 @@ const updateSafehousePanel = () => {
     offlineAlert.textContent = 'Reconnect the command uplink to monitor incursions.';
     safehouseAlertsList.appendChild(offlineAlert);
     safehouseAlertStatus.textContent = '';
+    renderSafehouseHistory([]);
+    safehouseHistoryStatus.textContent = 'Incident log offline.';
     renderSafehouseLayout(null, {
       emptyMessage: 'Safehouse layout offline.',
       idleMessage: 'Layout telemetry unavailable.',
@@ -15278,6 +15348,35 @@ const setupMissionControls = () => {
 
       alertsContainer.append(alertsTitle, alertsPrompt, alertsList, alertsStatus);
 
+      const historyContainer = document.createElement('div');
+      historyContainer.className = 'mission-safehouse__history';
+
+      const historyTitle = document.createElement('h4');
+      historyTitle.className = 'mission-details__title mission-safehouse__history-title';
+      historyTitle.textContent = 'Safehouse Incident Log';
+
+      const historyStatus = document.createElement('p');
+      historyStatus.id = 'mission-safehouse-history-status';
+      historyStatus.className = 'mission-safehouse__history-status';
+      historyStatus.setAttribute('role', 'status');
+      historyStatus.setAttribute('aria-live', 'polite');
+      historyStatus.textContent = 'Incident log awaiting first entry.';
+
+      const historyList = document.createElement('ul');
+      historyList.id = 'mission-safehouse-history';
+      historyList.className = 'mission-safehouse__layout-alerts mission-safehouse__history-list';
+      const historyPlaceholder = document.createElement('li');
+      historyPlaceholder.className =
+        'mission-safehouse__history-item mission-safehouse__history-item--empty mission-safehouse__layout-warning';
+      historyPlaceholder.textContent = 'No resolved incursions recorded yet.';
+      historyList.appendChild(historyPlaceholder);
+
+      historyContainer.append(historyTitle, historyStatus, historyList);
+
+      const alertsCluster = document.createElement('div');
+      alertsCluster.className = 'mission-safehouse__alerts-cluster';
+      alertsCluster.append(alertsContainer, historyContainer);
+
       const projectsContainer = document.createElement('div');
       projectsContainer.className = 'mission-safehouse__projects';
 
@@ -15326,7 +15425,7 @@ const setupMissionControls = () => {
         grid,
         catalog,
         layoutSection,
-        alertsContainer,
+        alertsCluster,
         projectsContainer,
         projectButton,
         rushButton,
@@ -15358,6 +15457,8 @@ const setupMissionControls = () => {
     missionControls.safehouseAlertPrompt = safehouseSection.querySelector('#mission-safehouse-alert-prompt');
     missionControls.safehouseAlertsList = safehouseSection.querySelector('#mission-safehouse-alerts');
     missionControls.safehouseAlertStatus = safehouseSection.querySelector('#mission-safehouse-alert-status');
+    missionControls.safehouseHistoryList = safehouseSection.querySelector('#mission-safehouse-history');
+    missionControls.safehouseHistoryStatus = safehouseSection.querySelector('#mission-safehouse-history-status');
   }
 
   ensureCrewAttributeControls();
