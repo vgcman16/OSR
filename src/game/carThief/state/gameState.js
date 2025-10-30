@@ -839,7 +839,7 @@ const createInitialGameState = () => {
     safehouses,
     crew: initialCrew,
     garage: [
-      new Vehicle({ model: 'Safehouse Van', topSpeed: 95, handling: 4 }),
+      new Vehicle({ model: 'Safehouse Van', topSpeed: 95, handling: 4, image: '/images/vehicles/truck.svg' }),
     ],
     lastVehicleReport: null,
     recruitPool: [

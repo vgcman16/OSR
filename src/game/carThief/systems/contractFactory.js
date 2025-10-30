@@ -293,6 +293,18 @@ const cloneVehicleReward = (reward) => {
       ? { ...reward.vehicleBlueprint }
       : undefined;
 
+  if (vehicleBlueprint) {
+    if (typeof vehicleBlueprint.image === 'string') {
+      const trimmed = vehicleBlueprint.image.trim();
+      vehicleBlueprint.image = trimmed || undefined;
+      if (!trimmed) {
+        delete vehicleBlueprint.image;
+      }
+    } else if ('image' in vehicleBlueprint) {
+      delete vehicleBlueprint.image;
+    }
+  }
+
   return {
     ...reward,
     vehicleBlueprint,
