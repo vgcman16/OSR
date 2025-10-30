@@ -432,6 +432,64 @@ const syncSafehouseLayoutDraftFacilities = (draft, facilityIds) => {
   updateSafehouseLayoutDraftEffects(draft);
 };
 
+const shiftFacilityOrderInSafehouseDraft = (draft, facilityId, zoneId, delta) => {
+  if (!draft || !Number.isInteger(delta) || delta === 0) {
+    return false;
+  }
+
+  const normalizedFacilityId = normalizeFacilityId(facilityId);
+  if (!normalizedFacilityId) {
+    return false;
+  }
+
+  const normalizedZoneId = normalizeZoneId(zoneId) || SAFEHOUSE_UNASSIGNED_ZONE_ID;
+
+  if (normalizedZoneId === SAFEHOUSE_UNASSIGNED_ZONE_ID) {
+    draft.unassigned = Array.isArray(draft.unassigned) ? draft.unassigned : [];
+    const currentIndex = draft.unassigned.indexOf(normalizedFacilityId);
+    if (currentIndex === -1) {
+      return false;
+    }
+    const targetIndex = Math.min(
+      draft.unassigned.length - 1,
+      Math.max(0, currentIndex + delta),
+    );
+    if (targetIndex === currentIndex) {
+      return false;
+    }
+    draft.unassigned.splice(currentIndex, 1);
+    draft.unassigned.splice(targetIndex, 0, normalizedFacilityId);
+    updateSafehouseLayoutDraftEffects(draft);
+    return true;
+  }
+
+  const zone = Array.isArray(draft.zones)
+    ? draft.zones.find((entry) => entry && entry.id === normalizedZoneId)
+    : null;
+  if (!zone || !Array.isArray(zone.facilityIds)) {
+    return false;
+  }
+
+  const currentIndex = zone.facilityIds.indexOf(normalizedFacilityId);
+  if (currentIndex === -1) {
+    return false;
+  }
+
+  const targetIndex = Math.min(
+    zone.facilityIds.length - 1,
+    Math.max(0, currentIndex + delta),
+  );
+  if (targetIndex === currentIndex) {
+    return false;
+  }
+
+  zone.facilityIds.splice(currentIndex, 1);
+  zone.facilityIds.splice(targetIndex, 0, normalizedFacilityId);
+  zone.defenseScore = zone.facilityIds.length;
+  updateSafehouseLayoutDraftEffects(draft);
+  return true;
+};
+
 const moveFacilityInSafehouseDraft = (draft, facilityId, targetZoneId, { beforeFacilityId = null } = {}) => {
   if (!draft) {
     return false;
@@ -760,6 +818,7 @@ const missionControls = {
   safehouseLayoutStatusText: '',
   safehouseLayoutActiveSafehouseId: null,
   safehouseLayoutRenderContext: null,
+  safehouseLayoutPendingFocusFacilityId: null,
   safehouseSelectedProjectId: null,
   lastSafehouseAlertSignature: null,
   selectedCrewIds: [],
@@ -5778,12 +5837,114 @@ function handleSafehouseLayoutSelectChange(event) {
   const targetZoneId = select.value;
   const changed = moveFacilityInSafehouseDraft(missionControls.safehouseLayoutDraft, facilityId, targetZoneId);
 
+  missionControls.safehouseLayoutPendingFocusFacilityId = facilityId;
   if (changed) {
     missionControls.safehouseLayoutDraftDirty = true;
     missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
   }
 
   rerenderSafehouseLayoutFromContext();
+}
+
+function processSafehouseFacilityAction(actionId, item) {
+  if (!actionId || !item) {
+    return;
+  }
+
+  const draft = missionControls.safehouseLayoutDraft;
+  if (!draft) {
+    return;
+  }
+
+  const facilityId = item.dataset.facilityId;
+  const zoneId = item.dataset.zoneId ?? SAFEHOUSE_UNASSIGNED_ZONE_ID;
+  if (!facilityId) {
+    return;
+  }
+
+  let changed = false;
+  switch (actionId) {
+    case 'move-up': {
+      changed = shiftFacilityOrderInSafehouseDraft(draft, facilityId, zoneId, -1);
+      break;
+    }
+    case 'move-down': {
+      changed = shiftFacilityOrderInSafehouseDraft(draft, facilityId, zoneId, 1);
+      break;
+    }
+    case 'cycle-zone': {
+      const zoneOptions = getSafehouseZoneOptions(draft);
+      if (zoneOptions.length) {
+        const normalizedZoneId = normalizeZoneId(zoneId) || SAFEHOUSE_UNASSIGNED_ZONE_ID;
+        const currentIndex = zoneOptions.findIndex((option) => option.id === normalizedZoneId);
+        const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % zoneOptions.length;
+        const nextZone = zoneOptions[nextIndex] ?? zoneOptions[0];
+        const targetZoneId = nextZone?.id ?? SAFEHOUSE_UNASSIGNED_ZONE_ID;
+        changed = moveFacilityInSafehouseDraft(draft, facilityId, targetZoneId);
+      } else {
+        changed = moveFacilityInSafehouseDraft(draft, facilityId, SAFEHOUSE_UNASSIGNED_ZONE_ID);
+      }
+      break;
+    }
+    default:
+      return;
+  }
+
+  missionControls.safehouseLayoutPendingFocusFacilityId = facilityId;
+  if (changed) {
+    missionControls.safehouseLayoutDraftDirty = true;
+    missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
+  }
+
+  rerenderSafehouseLayoutFromContext();
+}
+
+function handleSafehouseLayoutActionClick(event) {
+  const button = event.target.closest('[data-facility-action]');
+  if (!button) {
+    return;
+  }
+  event.preventDefault();
+
+  const item = button.closest('[data-facility-id]');
+  processSafehouseFacilityAction(button.dataset.facilityAction, item);
+}
+
+function handleSafehouseLayoutActionKeydown(event) {
+  const button = event.target.closest('[data-facility-action]');
+  if (button) {
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+      event.preventDefault();
+      processSafehouseFacilityAction(button.dataset.facilityAction, button.closest('[data-facility-id]'));
+    }
+    return;
+  }
+
+  const item = event.target.closest('[data-facility-id]');
+  if (!item) {
+    return;
+  }
+
+  if (event.target.matches('select') || event.target.closest('select')) {
+    return;
+  }
+
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    const delta = event.key === 'ArrowUp' ? -1 : 1;
+    const changed = shiftFacilityOrderInSafehouseDraft(
+      missionControls.safehouseLayoutDraft,
+      item.dataset.facilityId,
+      item.dataset.zoneId,
+      delta,
+    );
+    missionControls.safehouseLayoutPendingFocusFacilityId = item.dataset.facilityId ?? null;
+    if (changed) {
+      missionControls.safehouseLayoutDraftDirty = true;
+      missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
+    }
+    rerenderSafehouseLayoutFromContext();
+  }
 }
 
 function ensureSafehouseLayoutInteractionHandlers() {
@@ -5799,6 +5960,8 @@ function ensureSafehouseLayoutInteractionHandlers() {
   safehouseLayoutZones.addEventListener('dragleave', handleSafehouseLayoutDragLeave);
   safehouseLayoutZones.addEventListener('drop', handleSafehouseLayoutDrop);
   safehouseLayoutZones.addEventListener('change', handleSafehouseLayoutSelectChange);
+  safehouseLayoutZones.addEventListener('click', handleSafehouseLayoutActionClick);
+  safehouseLayoutZones.addEventListener('keydown', handleSafehouseLayoutActionKeydown);
   safehouseLayoutZones.dataset.layoutInteractionBound = 'true';
 }
 
@@ -6430,6 +6593,7 @@ const updateSafehousePanel = () => {
           item.dataset.facilityId = facilityId;
           item.dataset.zoneId = zone?.id ?? '';
           item.draggable = true;
+          item.setAttribute('tabindex', '0');
 
           const label = document.createElement('span');
           label.className = 'mission-safehouse__facility-label';
@@ -6457,6 +6621,42 @@ const updateSafehousePanel = () => {
           const controls = document.createElement('div');
           controls.className = 'mission-safehouse__facility-controls';
 
+          const actions = document.createElement('div');
+          actions.className = 'mission-safehouse__facility-actions';
+
+          const createActionButton = (actionId, text, title) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'mission-safehouse__facility-action';
+            button.dataset.facilityAction = actionId;
+            button.textContent = text;
+            if (title) {
+              button.title = title;
+            }
+            return button;
+          };
+
+          const moveUpButton = createActionButton(
+            'move-up',
+            'Move up',
+            'Shift facility earlier within this zone',
+          );
+          const moveDownButton = createActionButton(
+            'move-down',
+            'Move down',
+            'Shift facility later within this zone',
+          );
+          const cycleZoneButton = createActionButton(
+            'cycle-zone',
+            'Send to zone',
+            'Assign facility to the next zone',
+          );
+
+          actions.append(moveUpButton, moveDownButton, cycleZoneButton);
+
+          const zoneControls = document.createElement('div');
+          zoneControls.className = 'mission-safehouse__facility-zone-controls';
+
           const select = document.createElement('select');
           select.className = 'mission-safehouse__facility-zone-select';
           select.dataset.zoneSelect = 'true';
@@ -6476,9 +6676,26 @@ const updateSafehousePanel = () => {
           dragHandle.setAttribute('aria-hidden', 'true');
           dragHandle.textContent = '⋮⋮';
 
-          controls.append(select, dragHandle);
+          zoneControls.append(select, dragHandle);
+
+          controls.append(actions, zoneControls);
           item.append(label, controls);
           list.appendChild(item);
+
+          if (missionControls.safehouseLayoutPendingFocusFacilityId === facilityId) {
+            const focusTarget = item;
+            const focusItem = () => {
+              if (typeof focusTarget.focus === 'function') {
+                focusTarget.focus();
+              }
+            };
+            if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+              window.requestAnimationFrame(focusItem);
+            } else {
+              setTimeout(focusItem, 0);
+            }
+            missionControls.safehouseLayoutPendingFocusFacilityId = null;
+          }
         });
       } else {
         const emptyItem = document.createElement('li');
