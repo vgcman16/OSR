@@ -16296,10 +16296,10 @@ const setupMissionControls = () => {
     trainingAttributeSelect,
     trainingAttributeButton,
     trainingAttributeList,
-    missionControls.trainingGearSelect,
-    missionControls.trainingGearAcquireButton,
-    missionControls.trainingGearEquipButton,
-    missionControls.trainingGearList,
+    trainingGearSelect,
+    trainingGearAcquireButton,
+    trainingGearEquipButton,
+    trainingGearList,
     trainingRestCrewSelect,
     trainingRestDurationSelect,
     trainingRestButton,
@@ -16497,32 +16497,52 @@ function initGame() {
   return gameInstance;
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  setupMissionControls();
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    setupMissionControls();
 
-  const onboardingSerializer = createGameSerializer({ key: 'osr.car-thief.onboarding.v1' });
-  onboardingTour = createOnboardingTour({ missionControls, serializer: onboardingSerializer });
+    const onboardingSerializer = createGameSerializer({ key: 'osr.car-thief.onboarding.v1' });
+    onboardingTour = createOnboardingTour({ missionControls, serializer: onboardingSerializer });
 
-  const tutorialToggle = document.getElementById('show-tutorial-btn');
-  if (tutorialToggle) {
-    tutorialToggle.addEventListener('click', () => {
-      onboardingTour?.start({ force: true });
-    });
-  }
+    const tutorialToggle = document.getElementById('show-tutorial-btn');
+    if (tutorialToggle) {
+      tutorialToggle.addEventListener('click', () => {
+        onboardingTour?.start({ force: true });
+      });
+    }
 
-  window.requestAnimationFrame(() => {
-    onboardingTour?.start();
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => {
+        onboardingTour?.start();
+      });
+    }
+
+    if (document.readyState === 'loading' && typeof window !== 'undefined') {
+      window.addEventListener('load', initGame, { once: true });
+    }
+    initGame();
   });
+}
 
-  if (document.readyState === 'loading') {
-    window.addEventListener('load', initGame, { once: true });
-  }
-  initGame();
-});
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('osr:init', () => {
+    updateMissionSelect();
+    updateMissionControls();
+  });
+}
 
-window.addEventListener('osr:init', () => {
-  updateMissionSelect();
-  updateMissionControls();
-});
+const __test = {
+  infiltrationPlanDraftSerializer,
+  resetMissionInfiltrationPlanCache: () => {
+    missionControls.infiltrationPlansByMission = new Map();
+  },
+};
 
-export { initGame, teardownGame };
+export {
+  initGame,
+  teardownGame,
+  serializePlanStateForStorage,
+  loadCachedMissionInfiltrationPlans,
+  setCachedMissionInfiltrationPlan,
+  __test,
+};
