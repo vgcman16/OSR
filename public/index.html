@@ -654,7 +654,11 @@
                 <option value="balanced" selected>Balanced sweep — standard tempo</option>
                 <option value="aggressive">Aggressive breach — fast strike</option>
               </select>
-              <button id="mission-recon-deploy-btn" type="button" class="mission-recon__action">
+              <button
+                id="mission-recon-deploy-btn"
+                type="button"
+                class="mission-recon__action mission-action-button"
+              >
                 Deploy Recon
               </button>
             </div>
@@ -823,19 +827,25 @@
           <label class="mission-training__label" for="mission-training-crew">Crew member</label>
           <select id="mission-training-crew" name="mission-training-crew"></select>
           <div class="mission-training__actions">
-            <button id="mission-training-loyalty-btn" type="button">Boost Loyalty</button>
+            <button id="mission-training-loyalty-btn" type="button" class="mission-action-button">
+              Boost Loyalty
+            </button>
           </div>
           <label class="mission-training__label" for="mission-training-specialty">Specialty focus</label>
           <select id="mission-training-specialty" name="mission-training-specialty"></select>
           <div class="mission-training__actions">
-            <button id="mission-training-specialty-btn" type="button">Specialty Training</button>
+            <button id="mission-training-specialty-btn" type="button" class="mission-action-button">
+              Specialty Training
+            </button>
           </div>
           <label class="mission-training__label" for="mission-training-rest-crew">Recovery rotation</label>
           <select id="mission-training-rest-crew" name="mission-training-rest-crew"></select>
           <label class="mission-training__label" for="mission-training-rest-duration">Rest duration</label>
           <select id="mission-training-rest-duration" name="mission-training-rest-duration"></select>
           <div class="mission-training__actions">
-            <button id="mission-training-rest-btn" type="button">Schedule Recovery</button>
+            <button id="mission-training-rest-btn" type="button" class="mission-action-button">
+              Schedule Recovery
+            </button>
           </div>
           <p
             id="mission-training-status"
@@ -870,12 +880,16 @@
           <label class="mission-training__label" for="mission-player-skill">Skill focus</label>
           <select id="mission-player-skill" name="mission-player-skill"></select>
           <div class="mission-training__actions">
-            <button id="mission-player-train-btn" type="button">Train Skill</button>
+            <button id="mission-player-train-btn" type="button" class="mission-action-button">
+              Train Skill
+            </button>
           </div>
           <label class="mission-training__label" for="mission-player-gear">Gear upgrade</label>
           <select id="mission-player-gear" name="mission-player-gear"></select>
           <div class="mission-training__actions">
-            <button id="mission-player-gear-btn" type="button">Acquire Gear</button>
+            <button id="mission-player-gear-btn" type="button" class="mission-action-button">
+              Acquire Gear
+            </button>
           </div>
           <p
             id="mission-player-status"
@@ -902,8 +916,12 @@
             Keep vehicles mission-ready by repairing damage or lowering attention levels.
           </p>
           <div class="mission-maintenance__actions">
-            <button id="mission-maintenance-repair-btn" type="button">Repair Condition</button>
-            <button id="mission-maintenance-heat-btn" type="button">Reduce Heat</button>
+            <button id="mission-maintenance-repair-btn" type="button" class="mission-action-button">
+              Repair Condition
+            </button>
+            <button id="mission-maintenance-heat-btn" type="button" class="mission-action-button">
+              Reduce Heat
+            </button>
           </div>
           <div class="mission-maintenance__resources">
             <h4 class="mission-maintenance__subtitle">Workshop Inventory</h4>
@@ -938,7 +956,9 @@
               <option value="" disabled selected>Select a vehicle to view upgrades</option>
             </select>
             <div class="mission-maintenance__actions">
-              <button id="mission-maintenance-upgrade-btn" type="button">Install Upgrade</button>
+              <button id="mission-maintenance-upgrade-btn" type="button" class="mission-action-button">
+                Install Upgrade
+              </button>
             </div>
             <ul
               id="mission-maintenance-upgrade-list"
