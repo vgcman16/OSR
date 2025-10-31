@@ -631,7 +631,8 @@ body {
   flex: 1 1 100%;
 }
 
-.control-panel__button--primary {
+.control-panel__button--primary,
+.mission-action-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -653,25 +654,31 @@ body {
 }
 
 .control-panel__button--primary:not(:disabled):hover,
-.control-panel__button--primary:not(:disabled):focus-visible {
+.control-panel__button--primary:not(:disabled):focus-visible,
+.mission-action-button:not(:disabled):hover,
+.mission-action-button:not(:disabled):focus-visible {
   transform: translateY(-2px) scale(1.02);
   box-shadow:
     0 0 0 1px rgba(120, 190, 255, 0.6),
     0 28px 60px rgba(120, 190, 255, 0.5);
 }
 
-.control-panel__button--primary:focus-visible {
+.control-panel__button--primary:focus-visible,
+.mission-action-button:focus-visible {
   outline: 3px solid rgba(120, 190, 255, 0.9);
   outline-offset: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .control-panel__button--primary {
+  .control-panel__button--primary,
+  .mission-action-button {
     transition: none;
   }
 
   .control-panel__button--primary:not(:disabled):hover,
-  .control-panel__button--primary:not(:disabled):focus-visible {
+  .control-panel__button--primary:not(:disabled):focus-visible,
+  .mission-action-button:not(:disabled):hover,
+  .mission-action-button:not(:disabled):focus-visible {
     transform: none;
   }
 }
