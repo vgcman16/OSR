@@ -17,8 +17,18 @@ const normalizeBasePath = (basePath) => {
   return basePath.endsWith('/') ? basePath : `${basePath}/`;
 };
 
-const createNoopSoundboard = ({ muted = false } = {}) => {
+const clampVolume = (value, fallback = 1) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  return Math.min(1, Math.max(0, numeric));
+};
+
+const createNoopSoundboard = ({ muted = false, volume = 1 } = {}) => {
   let mutedState = Boolean(muted);
+  let volumeState = clampVolume(volume, 1);
 
   return {
     preloadAll: () => {},
@@ -26,6 +36,11 @@ const createNoopSoundboard = ({ muted = false } = {}) => {
     setMuted: (value) => {
       mutedState = Boolean(value);
       return mutedState;
+    },
+    getVolume: () => volumeState,
+    setVolume: (value) => {
+      volumeState = clampVolume(value, volumeState);
+      return volumeState;
     },
     playMissionStart: () => false,
     playEventPrompt: () => false,
@@ -36,12 +51,13 @@ const createNoopSoundboard = ({ muted = false } = {}) => {
   };
 };
 
-const createSoundboard = ({ basePath = 'audio/', muted = false } = {}) => {
+const createSoundboard = ({ basePath = 'audio/', muted = false, volume = 1 } = {}) => {
   if (typeof Audio !== 'function') {
-    return createNoopSoundboard({ muted });
+    return createNoopSoundboard({ muted, volume });
   }
 
   let mutedState = Boolean(muted);
+  let volumeState = clampVolume(volume, 1);
   const resolvedBasePath = normalizeBasePath(basePath);
   const clipCache = new Map();
 
@@ -54,6 +70,14 @@ const createSoundboard = ({ basePath = 'audio/', muted = false } = {}) => {
     if (mutedState) {
       audio.pause();
     }
+  };
+
+  const applyVolumeState = (audio) => {
+    if (!audio) {
+      return;
+    }
+
+    audio.volume = volumeState;
   };
 
   const loadClip = (key) => {
@@ -70,6 +94,7 @@ const createSoundboard = ({ basePath = 'audio/', muted = false } = {}) => {
     const audio = new Audio(source);
     audio.preload = 'auto';
     applyMuteState(audio);
+    applyVolumeState(audio);
 
     try {
       audio.load();
@@ -92,6 +117,7 @@ const createSoundboard = ({ basePath = 'audio/', muted = false } = {}) => {
     }
 
     try {
+      applyVolumeState(clip);
       clip.currentTime = 0;
       const playback = clip.play();
       if (playback && typeof playback.catch === 'function') {
@@ -120,6 +146,21 @@ const createSoundboard = ({ basePath = 'audio/', muted = false } = {}) => {
 
   const isMuted = () => mutedState;
 
+  const setVolume = (value) => {
+    const nextVolume = clampVolume(value, volumeState);
+    if (nextVolume === volumeState) {
+      return volumeState;
+    }
+
+    volumeState = nextVolume;
+    clipCache.forEach((clip) => {
+      applyVolumeState(clip);
+    });
+    return volumeState;
+  };
+
+  const getVolume = () => volumeState;
+
   const playMissionOutcome = (result) => {
     const normalized = typeof result === 'string' ? result.trim().toLowerCase() : '';
     let clipKey = 'missionStalemate';
@@ -137,6 +178,8 @@ const createSoundboard = ({ basePath = 'audio/', muted = false } = {}) => {
     preloadAll,
     isMuted,
     setMuted,
+    getVolume,
+    setVolume,
     playMissionStart: () => playClip('missionStart'),
     playEventPrompt: () => playClip('eventPrompt'),
     playMissionOutcome,

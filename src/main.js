@@ -43,7 +43,16 @@ const settingsSerializer = createGameSerializer({ key: 'osr.car-thief.settings.v
 const infiltrationPlanDraftSerializer = createGameSerializer({
   key: 'osr.car-thief.infiltration-plans.v1',
 });
-const DEFAULT_PLAYER_SETTINGS = { audio: { muted: false } };
+const DEFAULT_PLAYER_SETTINGS = { audio: { muted: false, volume: 0.75 } };
+
+const clampVolumeSetting = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_PLAYER_SETTINGS.audio.volume;
+  }
+
+  return Math.min(1, Math.max(0, numeric));
+};
 
 const loadPlayerSettings = () => {
   const payload = settingsSerializer.load();
@@ -53,16 +62,20 @@ const loadPlayerSettings = () => {
 
   const audioSettings = payload.audio && typeof payload.audio === 'object' ? payload.audio : {};
   const muted = Boolean(audioSettings.muted);
+  const volume = clampVolumeSetting(audioSettings.volume);
 
   return {
     ...DEFAULT_PLAYER_SETTINGS,
     ...payload,
-    audio: { ...DEFAULT_PLAYER_SETTINGS.audio, ...audioSettings, muted },
+    audio: { ...DEFAULT_PLAYER_SETTINGS.audio, ...audioSettings, muted, volume },
   };
 };
 
 let playerSettings = loadPlayerSettings();
-const soundboard = createSoundboard({ muted: playerSettings?.audio?.muted });
+const soundboard = createSoundboard({
+  muted: playerSettings?.audio?.muted,
+  volume: playerSettings?.audio?.volume,
+});
 let soundboardPreloaded = false;
 
 const ensureSoundboardPreloaded = () => {
@@ -643,13 +656,17 @@ const getSafehouseZoneOptions = (draft) => {
 };
 
 const persistPlayerSettings = () => {
+  const muted = Boolean(playerSettings?.audio?.muted);
+  const volume = clampVolumeSetting(playerSettings?.audio?.volume);
+
   playerSettings = {
     ...DEFAULT_PLAYER_SETTINGS,
     ...playerSettings,
     audio: {
       ...DEFAULT_PLAYER_SETTINGS.audio,
       ...(playerSettings?.audio ?? {}),
-      muted: Boolean(playerSettings?.audio?.muted),
+      muted,
+      volume,
     },
   };
 
@@ -819,6 +836,8 @@ const missionControls = {
   heatStatusDetail: '',
   heatHistoryList: null,
   audioToggle: null,
+  audioVolume: null,
+  audioVolumeValue: null,
   lastMissionLogEntryId: null,
   safehouseSection: null,
   safehouseName: null,
@@ -5511,6 +5530,34 @@ const setMissionEventStatus = (message) => {
   eventStatus.textContent = detail;
 };
 
+const getCurrentSoundboardVolume = () => {
+  if (soundboard && typeof soundboard.getVolume === 'function') {
+    return clampVolumeSetting(soundboard.getVolume());
+  }
+
+  return clampVolumeSetting(playerSettings?.audio?.volume);
+};
+
+const updateAudioVolumeControl = () => {
+  const slider = missionControls.audioVolume;
+  if (!slider) {
+    return;
+  }
+
+  const normalizedVolume = getCurrentSoundboardVolume();
+  const percent = Math.round(normalizedVolume * 100);
+  const percentText = `${percent}%`;
+
+  slider.value = String(percent);
+  slider.setAttribute('aria-valuenow', String(percent));
+  slider.setAttribute('aria-valuetext', percentText);
+  slider.title = `Sound effects volume: ${percentText}`;
+
+  if (missionControls.audioVolumeValue) {
+    missionControls.audioVolumeValue.textContent = percentText;
+  }
+};
+
 const updateAudioToggleLabel = () => {
   const toggle = missionControls.audioToggle;
   if (!toggle) {
@@ -5536,6 +5583,37 @@ const handleAudioToggle = () => {
 
   persistPlayerSettings();
   updateAudioToggleLabel();
+  updateAudioVolumeControl();
+};
+
+const handleAudioVolumeChange = (event) => {
+  const slider = event?.target;
+  if (!slider) {
+    return;
+  }
+
+  ensureSoundboardPreloaded();
+
+  const rawPercent = Number(slider.value);
+  if (!Number.isFinite(rawPercent)) {
+    updateAudioVolumeControl();
+    return;
+  }
+
+  const normalizedVolume = clampVolumeSetting(rawPercent / 100);
+  soundboard.setVolume(normalizedVolume);
+
+  playerSettings = {
+    ...playerSettings,
+    audio: {
+      ...(playerSettings?.audio ?? {}),
+      muted: soundboard.isMuted(),
+      volume: normalizedVolume,
+    },
+  };
+
+  persistPlayerSettings();
+  updateAudioVolumeControl();
 };
 
 const formatEventEffectSummary = (effects) => {
@@ -15876,6 +15954,37 @@ const setupMissionControls = () => {
       audioControls = document.createElement('div');
       audioControls.className = 'mission-audio';
 
+      const volumeContainer = document.createElement('div');
+      volumeContainer.className = 'mission-audio__volume';
+
+      const volumeLabel = document.createElement('label');
+      volumeLabel.className = 'mission-audio__volume-label visually-hidden';
+      volumeLabel.setAttribute('for', 'mission-audio-volume');
+      volumeLabel.textContent = 'Sound effects volume';
+
+      const volumeSlider = document.createElement('input');
+      volumeSlider.id = 'mission-audio-volume';
+      volumeSlider.type = 'range';
+      volumeSlider.className = 'mission-audio__volume-slider';
+      volumeSlider.min = '0';
+      volumeSlider.max = '100';
+      volumeSlider.step = '5';
+      const initialVolume = Math.round(clampVolumeSetting(playerSettings?.audio?.volume) * 100);
+      volumeSlider.value = String(initialVolume);
+      volumeSlider.setAttribute('aria-label', 'Sound effects volume');
+      volumeSlider.setAttribute('aria-valuemin', '0');
+      volumeSlider.setAttribute('aria-valuemax', '100');
+      volumeSlider.setAttribute('aria-valuenow', String(initialVolume));
+      volumeSlider.setAttribute('aria-valuetext', `${initialVolume}%`);
+
+      const volumeValue = document.createElement('span');
+      volumeValue.className = 'mission-audio__volume-value';
+      volumeValue.textContent = `${initialVolume}%`;
+      volumeValue.setAttribute('aria-hidden', 'true');
+
+      volumeContainer.append(volumeLabel, volumeSlider, volumeValue);
+      audioControls.appendChild(volumeContainer);
+
       const toggle = document.createElement('button');
       toggle.id = 'mission-audio-toggle';
       toggle.type = 'button';
@@ -15887,6 +15996,24 @@ const setupMissionControls = () => {
         controlPanel.insertBefore(audioControls, referenceNode);
       } else {
         controlPanel.appendChild(audioControls);
+      }
+    }
+
+    missionControls.audioVolumeValue =
+      audioControls.querySelector('.mission-audio__volume-value') ?? null;
+
+    const volumeSlider = audioControls.querySelector('#mission-audio-volume');
+    if (volumeSlider) {
+      if (missionControls.audioVolume && missionControls.audioVolume !== volumeSlider) {
+        missionControls.audioVolume.removeEventListener('input', handleAudioVolumeChange);
+        missionControls.audioVolume.removeEventListener('change', handleAudioVolumeChange);
+      }
+
+      missionControls.audioVolume = volumeSlider;
+      if (!volumeSlider.dataset.audioVolumeBound) {
+        volumeSlider.addEventListener('input', handleAudioVolumeChange);
+        volumeSlider.addEventListener('change', handleAudioVolumeChange);
+        volumeSlider.dataset.audioVolumeBound = 'true';
       }
     }
 
@@ -15903,6 +16030,8 @@ const setupMissionControls = () => {
       }
       updateAudioToggleLabel();
     }
+
+    updateAudioVolumeControl();
 
     let safehouseSection = controlPanel.querySelector('.mission-safehouse');
     if (!safehouseSection) {
