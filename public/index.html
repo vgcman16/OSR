@@ -63,115 +63,178 @@
           <h3 class="mission-details__title">Mission Briefing</h3>
           <dl class="mission-details__grid">
             <div class="mission-details__row">
-              <dt>Description</dt>
-              <dd id="mission-detail-description">Select a mission to view its briefing.</dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/signal-masker.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Description</dt>
+                <dd id="mission-detail-description">Select a mission to view its briefing.</dd>
+              </div>
             </div>
             <div class="mission-details__row">
-              <dt>Payout</dt>
-              <dd id="mission-detail-payout">—</dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/engine-tuning.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Payout</dt>
+                <dd id="mission-detail-payout">
+                  <span class="mission-details__badge">—</span>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row">
-              <dt>Heat</dt>
-              <dd id="mission-detail-heat">—</dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/thermal-cloak.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Heat</dt>
+                <dd id="mission-detail-heat">
+                  <span class="mission-details__badge">—</span>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row">
-              <dt>Estimated Duration</dt>
-              <dd id="mission-detail-duration">—</dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/quantum-stabilizers.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Estimated Duration</dt>
+                <dd id="mission-detail-duration">
+                  <span class="mission-details__badge">—</span>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row">
-              <dt>Success Odds</dt>
-              <dd id="mission-detail-success">—</dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/specter-shielding.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Success Odds</dt>
+                <dd id="mission-detail-success">
+                  <span class="mission-details__badge">—</span>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row">
-              <dt>Crackdown Impact</dt>
-              <dd id="mission-detail-restriction">All contracts are currently open.</dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/ghost-cabin.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Crackdown Impact</dt>
+                <dd id="mission-detail-restriction">All contracts are currently open.</dd>
+              </div>
             </div>
             <div class="mission-details__row">
-              <dt>Vehicle Reward</dt>
-              <dd>
-                <ul id="mission-detail-vehicle-reward" class="mission-details__list">
-                  <li>Vehicle reward intel pending.</li>
-                </ul>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/vehicles/car.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Vehicle Reward</dt>
+                <dd>
+                  <ul id="mission-detail-vehicle-reward" class="mission-details__list">
+                    <li>Vehicle reward intel pending.</li>
+                  </ul>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row">
-              <dt>Player Expertise</dt>
-              <dd>
-                <ul id="mission-detail-player-impact" class="mission-details__list">
-                  <li>Player influence steady — train to unlock bonuses.</li>
-                </ul>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/hammer.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Player Expertise</dt>
+                <dd>
+                  <ul id="mission-detail-player-impact" class="mission-details__list">
+                    <li>Player influence steady — train to unlock bonuses.</li>
+                  </ul>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row">
-              <dt>Crew Impact</dt>
-              <dd>
-                <ul id="mission-detail-crew-impact" class="mission-details__list">
-                  <li>No crew assigned.</li>
-                </ul>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/wrench.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Crew Impact</dt>
+                <dd>
+                  <ul id="mission-detail-crew-impact" class="mission-details__list">
+                    <li>No crew assigned.</li>
+                  </ul>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row mission-details__row--breakdown">
-              <dt>
-                <span
-                  class="mission-breakdown__label"
-                  title="Detailed breakdown of how crew, vehicles, safehouse perks, player boosts, and chemistry affect this mission."
-                >
-                  Assignment Breakdown
-                </span>
-              </dt>
-              <dd>
-                <div
-                  id="mission-detail-breakdown"
-                  class="mission-breakdown"
-                  role="group"
-                  aria-live="polite"
-                  aria-label="Assignment modifier breakdown"
-                >
-                  <p class="mission-breakdown__placeholder">No modifiers applied yet.</p>
-                </div>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/decoy-flare-launcher.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>
+                  <span
+                    class="mission-breakdown__label"
+                    title="Detailed breakdown of how crew, vehicles, safehouse perks, player boosts, and chemistry affect this mission."
+                  >
+                    Assignment Breakdown
+                  </span>
+                </dt>
+                <dd>
+                  <div
+                    id="mission-detail-breakdown"
+                    class="mission-breakdown"
+                    role="group"
+                    aria-live="polite"
+                    aria-label="Assignment modifier breakdown"
+                  >
+                    <p class="mission-breakdown__placeholder">No modifiers applied yet.</p>
+                  </div>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row mission-details__row--infiltration">
-              <dt>Infiltration Preview</dt>
-              <dd>
-                <div
-                  id="mission-infiltration-preview"
-                  class="mission-infiltration mission-infiltration--preview"
-                  aria-live="polite"
-                  aria-label="Projected infiltration sequence"
-                  hidden
-                >
-                  <p id="mission-infiltration-preview-empty" class="mission-infiltration__empty">
-                    Assign crew to generate an infiltration preview.
-                  </p>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/stealth-plating.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Infiltration Preview</dt>
+                <dd>
                   <div
-                    id="mission-infiltration-preview-plan"
-                    class="mission-infiltration__plan"
-                    aria-label="Plan infiltration choices"
-                    role="group"
+                    id="mission-infiltration-preview"
+                    class="mission-infiltration mission-infiltration--preview"
+                    aria-live="polite"
+                    aria-label="Projected infiltration sequence"
                     hidden
                   >
-                    <p id="mission-infiltration-preview-plan-empty" class="mission-infiltration__plan-empty">
-                      Review the projected sequence to preselect responses for each step.
+                    <p id="mission-infiltration-preview-empty" class="mission-infiltration__empty">
+                      Assign crew to generate an infiltration preview.
                     </p>
+                    <div
+                      id="mission-infiltration-preview-plan"
+                      class="mission-infiltration__plan"
+                      aria-label="Plan infiltration choices"
+                      role="group"
+                      hidden
+                    >
+                      <p id="mission-infiltration-preview-plan-empty" class="mission-infiltration__plan-empty">
+                        Review the projected sequence to preselect responses for each step.
+                      </p>
+                      <ul
+                        id="mission-infiltration-preview-plan-list"
+                        class="mission-details__list mission-infiltration__plan-list"
+                      ></ul>
+                    </div>
+                    <div
+                      id="mission-infiltration-preview-summary"
+                      class="mission-infiltration__aggregate"
+                      hidden
+                    ></div>
                     <ul
-                      id="mission-infiltration-preview-plan-list"
-                      class="mission-details__list mission-infiltration__plan-list"
+                      id="mission-infiltration-preview-timeline"
+                      class="mission-details__list mission-infiltration__timeline"
+                      aria-label="Projected infiltration steps"
+                      hidden
                     ></ul>
                   </div>
-                  <div
-                    id="mission-infiltration-preview-summary"
-                    class="mission-infiltration__aggregate"
-                    hidden
-                  ></div>
-                  <ul
-                    id="mission-infiltration-preview-timeline"
-                    class="mission-details__list mission-infiltration__timeline"
-                    aria-label="Projected infiltration steps"
-                    hidden
-                  ></ul>
-                </div>
-              </dd>
+                </dd>
+              </div>
             </div>
           </dl>
         </section>
@@ -180,7 +243,10 @@
           aria-labelledby="mission-operations-title"
           aria-describedby="mission-operations-legend"
         >
-          <h3 id="mission-operations-title" class="mission-details__title">
+          <h3 id="mission-operations-title" class="mission-details__title mission-details__title--with-icon">
+            <span class="mission-details__title-icon" aria-hidden="true">
+              <img src="./images/tools/adaptive-suspension.svg" alt="" />
+            </span>
             Operations Dashboard
           </h3>
           <p id="mission-operations-legend" class="visually-hidden">
@@ -215,114 +281,144 @@
           </div>
           <dl class="mission-details__grid mission-operations__grid">
             <div class="mission-details__row mission-operations__row">
-              <dt>Projected Daily Expenses</dt>
-              <dd>
-                <span
-                  id="mission-ops-expenses"
-                  class="mission-operations__value"
-                  data-risk-level="unknown"
-                  aria-describedby="mission-operations-legend mission-ops-expenses-status"
-                >
-                  —
-                </span>
-                <span
-                  id="mission-ops-expenses-status"
-                  class="mission-operations__status visually-hidden"
-                  role="status"
-                  aria-live="polite"
-                >
-                  Expense telemetry syncing.
-                </span>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/escape-vector-suite.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Projected Daily Expenses</dt>
+                <dd>
+                  <span
+                    id="mission-ops-expenses"
+                    class="mission-operations__value mission-details__badge"
+                    data-risk-level="unknown"
+                    aria-describedby="mission-operations-legend mission-ops-expenses-status"
+                  >
+                    —
+                  </span>
+                  <span
+                    id="mission-ops-expenses-status"
+                    class="mission-operations__status visually-hidden"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    Expense telemetry syncing.
+                  </span>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row mission-operations__row">
-              <dt>Passive Income</dt>
-              <dd>
-                <span
-                  id="mission-ops-passive-income"
-                  class="mission-operations__value"
-                  data-risk-level="unknown"
-                  aria-describedby="mission-operations-legend mission-ops-passive-income-status"
-                >
-                  —
-                </span>
-                <span
-                  id="mission-ops-passive-income-status"
-                  class="mission-operations__status visually-hidden"
-                  role="status"
-                  aria-live="polite"
-                >
-                  Passive income telemetry syncing.
-                </span>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/run-flat-tires.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Passive Income</dt>
+                <dd>
+                  <span
+                    id="mission-ops-passive-income"
+                    class="mission-operations__value mission-details__badge"
+                    data-risk-level="unknown"
+                    aria-describedby="mission-operations-legend mission-ops-passive-income-status"
+                  >
+                    —
+                  </span>
+                  <span
+                    id="mission-ops-passive-income-status"
+                    class="mission-operations__status visually-hidden"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    Passive income telemetry syncing.
+                  </span>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row mission-operations__row">
-              <dt>Outstanding Payroll</dt>
-              <dd>
-                <span
-                  id="mission-ops-payroll"
-                  class="mission-operations__value"
-                  data-risk-level="unknown"
-                  aria-describedby="mission-operations-legend mission-ops-payroll-status"
-                >
-                  —
-                </span>
-                <span
-                  id="mission-ops-payroll-status"
-                  class="mission-operations__status visually-hidden"
-                  role="status"
-                  aria-live="polite"
-                >
-                  Payroll telemetry syncing.
-                </span>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/quantum-stabilizers.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Outstanding Payroll</dt>
+                <dd>
+                  <span
+                    id="mission-ops-payroll"
+                    class="mission-operations__value mission-details__badge"
+                    data-risk-level="unknown"
+                    aria-describedby="mission-operations-legend mission-ops-payroll-status"
+                  >
+                    —
+                  </span>
+                  <span
+                    id="mission-ops-payroll-status"
+                    class="mission-operations__status visually-hidden"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    Payroll telemetry syncing.
+                  </span>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row mission-operations__row">
-              <dt>Storage Usage</dt>
-              <dd>
-                <span
-                  id="mission-ops-storage"
-                  class="mission-operations__value"
-                  data-risk-level="unknown"
-                  aria-describedby="mission-operations-legend mission-ops-storage-status"
-                >
-                  —
-                </span>
-                <span
-                  id="mission-ops-storage-status"
-                  class="mission-operations__status visually-hidden"
-                  role="status"
-                  aria-live="polite"
-                >
-                  Storage telemetry syncing.
-                </span>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/specter-shielding.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Storage Usage</dt>
+                <dd>
+                  <span
+                    id="mission-ops-storage"
+                    class="mission-operations__value mission-details__badge"
+                    data-risk-level="unknown"
+                    aria-describedby="mission-operations-legend mission-ops-storage-status"
+                  >
+                    —
+                  </span>
+                  <span
+                    id="mission-ops-storage-status"
+                    class="mission-operations__status visually-hidden"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    Storage telemetry syncing.
+                  </span>
+                </dd>
+              </div>
             </div>
             <div class="mission-details__row mission-operations__row">
-              <dt>Crew Fatigue</dt>
-              <dd>
-                <span
-                  id="mission-ops-fatigue"
-                  class="mission-operations__value"
-                  data-risk-level="unknown"
-                  aria-describedby="mission-operations-legend mission-ops-fatigue-status"
-                >
-                  —
-                </span>
-                <span
-                  id="mission-ops-fatigue-status"
-                  class="mission-operations__status visually-hidden"
-                  role="status"
-                  aria-live="polite"
-                >
-                  Fatigue telemetry syncing.
-                </span>
-              </dd>
+              <figure class="mission-details__icon" aria-hidden="true">
+                <img src="./images/tools/thermal-cloak.svg" alt="" />
+              </figure>
+              <div class="mission-details__content">
+                <dt>Crew Fatigue</dt>
+                <dd>
+                  <span
+                    id="mission-ops-fatigue"
+                    class="mission-operations__value mission-details__badge"
+                    data-risk-level="unknown"
+                    aria-describedby="mission-operations-legend mission-ops-fatigue-status"
+                  >
+                    —
+                  </span>
+                  <span
+                    id="mission-ops-fatigue-status"
+                    class="mission-operations__status visually-hidden"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    Fatigue telemetry syncing.
+                  </span>
+                </dd>
+              </div>
             </div>
           </dl>
         </section>
         <section class="mission-city-intel" aria-labelledby="mission-city-intel-title">
-          <h3 id="mission-city-intel-title" class="mission-details__title">City Intel</h3>
+          <h3 id="mission-city-intel-title" class="mission-details__title mission-details__title--with-icon">
+            <span class="mission-details__title-icon" aria-hidden="true">
+              <img src="./images/tools/signal-masker.svg" alt="" />
+            </span>
+            City Intel
+          </h3>
           <p class="mission-details__hint">
             Assess district heat signatures and perks to synchronize tactics with the field team.
           </p>
@@ -335,35 +431,68 @@
             </p>
             <dl class="mission-details__grid mission-city-intel__grid">
               <div class="mission-details__row">
-                <dt>Risk Tier</dt>
-                <dd id="mission-city-intel-risk">Risk profile pending.</dd>
+                <figure class="mission-details__icon" aria-hidden="true">
+                  <img src="./images/tools/thermal-cloak.svg" alt="" />
+                </figure>
+                <div class="mission-details__content">
+                  <dt>Risk Tier</dt>
+                  <dd id="mission-city-intel-risk">
+                    <span class="mission-details__badge">Risk profile pending.</span>
+                  </dd>
+                </div>
               </div>
               <div class="mission-details__row">
-                <dt>Influence</dt>
-                <dd id="mission-city-intel-influence">Influence readings pending.</dd>
+                <figure class="mission-details__icon" aria-hidden="true">
+                  <img src="./images/tools/specter-shielding.svg" alt="" />
+                </figure>
+                <div class="mission-details__content">
+                  <dt>Influence</dt>
+                  <dd id="mission-city-intel-influence">
+                    <span class="mission-details__badge">Influence readings pending.</span>
+                  </dd>
+                </div>
               </div>
               <div class="mission-details__row">
-                <dt>Intel Coverage</dt>
-                <dd id="mission-city-intel-intel">Intel sweep pending.</dd>
+                <figure class="mission-details__icon" aria-hidden="true">
+                  <img src="./images/tools/signal-masker.svg" alt="" />
+                </figure>
+                <div class="mission-details__content">
+                  <dt>Intel Coverage</dt>
+                  <dd id="mission-city-intel-intel">
+                    <span class="mission-details__badge">Intel sweep pending.</span>
+                  </dd>
+                </div>
               </div>
               <div class="mission-details__row">
-                <dt>Crackdown Pressure</dt>
-                <dd id="mission-city-intel-crackdown">Crackdown telemetry pending.</dd>
+                <figure class="mission-details__icon" aria-hidden="true">
+                  <img src="./images/tools/decoy-flare-launcher.svg" alt="" />
+                </figure>
+                <div class="mission-details__content">
+                  <dt>Crackdown Pressure</dt>
+                  <dd id="mission-city-intel-crackdown">
+                    <span class="mission-details__badge">Crackdown telemetry pending.</span>
+                  </dd>
+                </div>
               </div>
               <div class="mission-details__row">
-                <dt>Point of Interest</dt>
-                <dd>
-                  <strong id="mission-city-intel-poi-name">No special target flagged.</strong>
-                  <p id="mission-city-intel-poi-description" class="mission-city-intel__poi-description">
-                    District sweep awaiting recon.
-                  </p>
-                  <ul
-                    id="mission-city-intel-poi-perks"
-                    class="mission-details__list mission-city-intel__poi-perks"
-                  >
-                    <li>No unique perks detected.</li>
-                  </ul>
-                </dd>
+                <figure class="mission-details__icon" aria-hidden="true">
+                  <img src="./images/tools/ghost-cabin.svg" alt="" />
+                </figure>
+                <div class="mission-details__content">
+                  <dt>Point of Interest</dt>
+                  <dd>
+                    <strong id="mission-city-intel-poi-name">No special target flagged.</strong>
+                    <p id="mission-city-intel-poi-description" class="mission-city-intel__poi-description">
+                      District sweep awaiting recon.
+                    </p>
+                    <ul
+                      id="mission-city-intel-poi-perks"
+                      class="mission-details__list mission-city-intel__poi-perks"
+                    >
+                      <li>No unique perks detected.</li>
+                    </ul>
+                  </dd>
+                </div>
               </div>
             </dl>
           </article>
@@ -464,7 +593,12 @@
           </article>
         </section>
         <section class="mission-events" aria-labelledby="mission-events-title">
-          <h3 id="mission-events-title" class="mission-details__title">Mission Events</h3>
+          <h3 id="mission-events-title" class="mission-details__title mission-details__title--with-icon">
+            <span class="mission-details__title-icon" aria-hidden="true">
+              <img src="./images/tools/stealth-plating.svg" alt="" />
+            </span>
+            Mission Events
+          </h3>
           <p class="mission-details__hint">
             Mid-run complications and opportunities will appear here for your decision.
           </p>
@@ -501,7 +635,10 @@
             aria-live="polite"
             aria-labelledby="mission-infiltration-title"
           >
-            <h4 id="mission-infiltration-title" class="mission-events__history-title">
+            <h4 id="mission-infiltration-title" class="mission-events__history-title mission-details__title--with-icon">
+              <span class="mission-details__title-icon" aria-hidden="true">
+                <img src="./images/tools/thermal-cloak.svg" alt="" />
+              </span>
               Infiltration Timeline
             </h4>
             <p id="mission-infiltration-empty" class="mission-infiltration__empty">
