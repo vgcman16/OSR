@@ -88,7 +88,16 @@ const SAFEHOUSE_ZONE_CONFIG = {
 
 const SAFEHOUSE_UNASSIGNED_ZONE_ID = 'unassigned';
 const SAFEHOUSE_UNASSIGNED_LABEL = 'Unassigned Facilities';
-const SAFEHOUSE_LAYOUT_DEFAULT_STATUS = 'Drag or select facilities to customize your defenses.';
+const SAFEHOUSE_LAYOUT_DEFAULT_STATUS =
+  'Use drag-and-drop or keyboard controls (arrow keys, the “Send to zone” button, and the zone selector) to customize your defenses.';
+
+const formatSafehouseLayoutStatusMessage = (message) => {
+  const trimmedMessage = typeof message === 'string' ? message.trim() : '';
+  if (!trimmedMessage || trimmedMessage === SAFEHOUSE_LAYOUT_DEFAULT_STATUS) {
+    return SAFEHOUSE_LAYOUT_DEFAULT_STATUS;
+  }
+  return `${trimmedMessage} ${SAFEHOUSE_LAYOUT_DEFAULT_STATUS}`;
+};
 
 const computeZoneFacilityEffects = (facilityIds) => {
   const normalizedIds = Array.isArray(facilityIds)
@@ -138,6 +147,12 @@ const normalizeZoneId = (value) => {
   }
 
   return value.trim();
+};
+
+const formatSafehouseLayoutInstructionsId = (zoneId) => {
+  const rawId = typeof zoneId === 'string' && zoneId.trim() ? zoneId.trim().toLowerCase() : 'zone';
+  const sanitized = rawId.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'zone';
+  return `mission-safehouse-layout-instructions-${sanitized}`;
 };
 
 const resolveHeuristicSafehouseZoneId = (facilityId) => {
@@ -5592,7 +5607,9 @@ function handleSafehouseLayoutSave() {
   const safehouseId = draft?.safehouseId ?? safehouse?.id ?? null;
 
   if (!state || !draft || !safehouseId) {
-    missionControls.safehouseLayoutStatusText = 'No safehouse layout available to save.';
+    missionControls.safehouseLayoutStatusText = formatSafehouseLayoutStatusMessage(
+      'No safehouse layout available to save.',
+    );
     rerenderSafehouseLayoutFromContext();
     return;
   }
@@ -5661,7 +5678,7 @@ function handleSafehouseLayoutSave() {
   }
 
   missionControls.safehouseLayoutDraftDirty = false;
-  missionControls.safehouseLayoutStatusText = 'Layout saved.';
+  missionControls.safehouseLayoutStatusText = formatSafehouseLayoutStatusMessage('Layout saved.');
   missionControls.safehouseLayoutDraftSignature = null;
   draft.source = 'custom';
   draft.updatedAt = layout.updatedAt;
@@ -5677,7 +5694,9 @@ function handleSafehouseLayoutReset() {
   const safehouseId = activeSafehouse?.id ?? draft?.safehouseId ?? null;
 
   if (!state || !safehouseId) {
-    missionControls.safehouseLayoutStatusText = 'Select a safehouse before resetting layout.';
+    missionControls.safehouseLayoutStatusText = formatSafehouseLayoutStatusMessage(
+      'Select a safehouse before resetting layout.',
+    );
     rerenderSafehouseLayoutFromContext();
     return;
   }
@@ -5751,7 +5770,9 @@ function handleSafehouseLayoutReset() {
   missionControls.safehouseLayoutDraft = buildSafehouseLayoutDraft({ layout, facilityIds, safehouseId });
   missionControls.safehouseLayoutDraftDirty = false;
   missionControls.safehouseLayoutDraftSignature = null;
-  missionControls.safehouseLayoutStatusText = 'Layout reset to recommended defaults.';
+  missionControls.safehouseLayoutStatusText = formatSafehouseLayoutStatusMessage(
+    'Layout reset to recommended defaults.',
+  );
   missionControls.safehouseLayoutActiveSafehouseId = safehouseId;
 
   rerenderSafehouseLayoutFromContext();
@@ -5898,7 +5919,9 @@ function handleSafehouseLayoutDrop(event) {
 
   if (changed) {
     missionControls.safehouseLayoutDraftDirty = true;
-    missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
+    missionControls.safehouseLayoutStatusText = formatSafehouseLayoutStatusMessage(
+      'Unsaved changes — save to commit.',
+    );
     rerenderSafehouseLayoutFromContext();
   } else {
     rerenderSafehouseLayoutFromContext();
@@ -5923,7 +5946,9 @@ function handleSafehouseLayoutSelectChange(event) {
   missionControls.safehouseLayoutPendingFocusFacilityId = facilityId;
   if (changed) {
     missionControls.safehouseLayoutDraftDirty = true;
-    missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
+    missionControls.safehouseLayoutStatusText = formatSafehouseLayoutStatusMessage(
+      'Unsaved changes — save to commit.',
+    );
   }
 
   rerenderSafehouseLayoutFromContext();
@@ -5976,7 +6001,9 @@ function processSafehouseFacilityAction(actionId, item) {
   missionControls.safehouseLayoutPendingFocusFacilityId = facilityId;
   if (changed) {
     missionControls.safehouseLayoutDraftDirty = true;
-    missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
+    missionControls.safehouseLayoutStatusText = formatSafehouseLayoutStatusMessage(
+      'Unsaved changes — save to commit.',
+    );
   }
 
   rerenderSafehouseLayoutFromContext();
@@ -6024,7 +6051,9 @@ function handleSafehouseLayoutActionKeydown(event) {
     missionControls.safehouseLayoutPendingFocusFacilityId = item.dataset.facilityId ?? null;
     if (changed) {
       missionControls.safehouseLayoutDraftDirty = true;
-      missionControls.safehouseLayoutStatusText = 'Unsaved changes — save to commit.';
+      missionControls.safehouseLayoutStatusText = formatSafehouseLayoutStatusMessage(
+        'Unsaved changes — save to commit.',
+      );
     }
     rerenderSafehouseLayoutFromContext();
   }
@@ -6644,6 +6673,12 @@ const updateSafehousePanel = () => {
       header.append(name, score);
       zoneCard.appendChild(header);
 
+      const instructionsId = formatSafehouseLayoutInstructionsId(zone?.id ?? '');
+      const instructions = document.createElement('p');
+      instructions.className = 'mission-safehouse__layout-zone-instructions';
+      instructions.id = instructionsId;
+      instructions.textContent = SAFEHOUSE_LAYOUT_DEFAULT_STATUS;
+
       const statEntries = describeZoneEffectStats(zone.effects, { zoneType: zone.zoneType });
       if (statEntries.length) {
         const statsContainer = document.createElement('div');
@@ -6666,9 +6701,12 @@ const updateSafehousePanel = () => {
         zoneCard.appendChild(statsContainer);
       }
 
+      zoneCard.appendChild(instructions);
+
       const facilities = Array.isArray(zone?.facilityIds) ? zone.facilityIds : [];
       const list = document.createElement('ul');
       list.className = 'mission-safehouse__layout-zone-facilities mission-safehouse__layout-zone-facilities--interactive';
+      list.setAttribute('aria-describedby', instructionsId);
       if (facilities.length) {
         facilities.forEach((facilityId) => {
           const item = document.createElement('li');
@@ -6677,6 +6715,7 @@ const updateSafehousePanel = () => {
           item.dataset.zoneId = zone?.id ?? '';
           item.draggable = true;
           item.setAttribute('tabindex', '0');
+          item.setAttribute('aria-describedby', instructionsId);
 
           const label = document.createElement('span');
           label.className = 'mission-safehouse__facility-label';
@@ -6787,6 +6826,7 @@ const updateSafehousePanel = () => {
           zone.zoneType === 'unassigned'
             ? 'No facilities waiting for assignment.'
             : 'No facilities installed.';
+        emptyItem.setAttribute('aria-describedby', instructionsId);
         list.appendChild(emptyItem);
       }
 
@@ -6812,7 +6852,7 @@ const updateSafehousePanel = () => {
         const statusMessage =
           missionControls.safehouseLayoutStatusText
           || (missionControls.safehouseLayoutDraftDirty
-            ? 'Unsaved changes — save to commit.'
+            ? formatSafehouseLayoutStatusMessage('Unsaved changes — save to commit.')
             : SAFEHOUSE_LAYOUT_DEFAULT_STATUS);
         statusLabel.textContent = statusMessage;
       }
