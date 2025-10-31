@@ -843,17 +843,57 @@ const serializePlanStateForStorage = (planState) => {
   }
 
   const choices = {};
+  const selectedChoiceLookup = new Map();
   if (planState.choices instanceof Map) {
     planState.choices.forEach((choiceId, stepId) => {
       if (typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId) {
         choices[stepId] = choiceId;
+        selectedChoiceLookup.set(stepId, choiceId);
       }
     });
   } else if (planState.choices && typeof planState.choices === 'object') {
     Object.entries(planState.choices).forEach(([stepId, choiceId]) => {
       if (typeof stepId === 'string' && typeof choiceId === 'string' && stepId && choiceId) {
         choices[stepId] = choiceId;
+        selectedChoiceLookup.set(stepId, choiceId);
       }
+    });
+  }
+
+  const stepCatalog = [];
+  if (Array.isArray(planState.stepCatalog)) {
+    planState.stepCatalog.forEach((step) => {
+      if (!step || typeof step !== 'object') {
+        return;
+      }
+
+      const id = typeof step.id === 'string' ? step.id : '';
+      if (!id) {
+        return;
+      }
+
+      const label = typeof step.label === 'string' ? step.label.trim() : '';
+      let summary = '';
+
+      const selectedChoiceId = selectedChoiceLookup.get(id);
+      if (selectedChoiceId && Array.isArray(step.choices)) {
+        const selectedChoice = step.choices.find(
+          (choice) => choice && typeof choice.id === 'string' && choice.id === selectedChoiceId,
+        );
+        if (selectedChoice && typeof selectedChoice.summary === 'string') {
+          summary = selectedChoice.summary.trim();
+        }
+      }
+
+      if (!summary && typeof step.summary === 'string') {
+        summary = step.summary.trim();
+      }
+
+      stepCatalog.push({
+        id,
+        label,
+        summary,
+      });
     });
   }
 
@@ -862,6 +902,7 @@ const serializePlanStateForStorage = (planState) => {
     choices,
     updatedAt: Number.isFinite(planState.updatedAt) ? planState.updatedAt : Date.now(),
     source: planState.source === 'active' ? 'active' : 'preview',
+    stepCatalog,
   };
 };
 
@@ -906,10 +947,30 @@ const loadCachedMissionInfiltrationPlans = () => {
       }
     });
 
+    const hydratedStepCatalog = Array.isArray(record.stepCatalog)
+      ? record.stepCatalog
+          .map((step) => {
+            if (!step || typeof step !== 'object') {
+              return null;
+            }
+
+            const id = typeof step.id === 'string' ? step.id : '';
+            const label = typeof step.label === 'string' ? step.label.trim() : '';
+            const summary = typeof step.summary === 'string' ? step.summary.trim() : '';
+
+            if (!id && !label && !summary) {
+              return null;
+            }
+
+            return { id, label, summary };
+          })
+          .filter(Boolean)
+      : [];
+
     cache.set(missionId, {
       missionId,
       choices: choiceMap,
-      stepCatalog: [],
+      stepCatalog: hydratedStepCatalog,
       source: record.source === 'active' ? 'active' : 'preview',
       updatedAt: Number.isFinite(record.updatedAt) ? record.updatedAt : Date.now(),
     });
@@ -962,7 +1023,12 @@ const setCachedMissionInfiltrationPlan = (missionId, planState, { persist = true
   }
 
   if (!Array.isArray(planState.stepCatalog)) {
-    planState.stepCatalog = [];
+    const existingPlan = cache.get(missionId);
+    if (existingPlan && Array.isArray(existingPlan.stepCatalog)) {
+      planState.stepCatalog = existingPlan.stepCatalog.map((step) => ({ ...step }));
+    } else {
+      planState.stepCatalog = [];
+    }
   }
 
   planState.missionId = missionId;
