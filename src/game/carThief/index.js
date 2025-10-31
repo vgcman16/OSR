@@ -42,12 +42,36 @@ const resolveStorage = (candidate) => {
     return candidate;
   }
 
-  if (typeof window !== 'undefined' && window?.localStorage) {
-    return window.localStorage;
+  let storage = null;
+  let lastError = null;
+
+  if (typeof window !== 'undefined') {
+    try {
+      storage = window.localStorage || null;
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  if (typeof globalThis !== 'undefined' && globalThis?.localStorage) {
-    return globalThis.localStorage;
+  if (!storage && typeof globalThis !== 'undefined') {
+    try {
+      storage = globalThis.localStorage || null;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (storage) {
+    return storage;
+  }
+
+  if (typeof console !== 'undefined') {
+    const warning = 'Car thief save system is using in-memory storage because browser storage is unavailable.';
+    if (lastError) {
+      console.warn(warning, lastError);
+    } else {
+      console.warn(warning);
+    }
   }
 
   return createMemoryStorage();
