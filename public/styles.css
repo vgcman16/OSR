@@ -338,6 +338,51 @@ body {
   flex: 1 1 100%;
 }
 
+.control-panel__button--primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 2.5rem;
+  border: none;
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: var(--callout-letter-spacing);
+  text-transform: var(--callout-text-transform);
+  font-size: 1rem;
+  color: #041023;
+  background: linear-gradient(135deg, #8ad9ff, #79ffd9 60%, #8cffe8);
+  box-shadow:
+    0 0 0 1px rgba(120, 190, 255, 0.5),
+    0 20px 44px rgba(120, 190, 255, 0.4);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.control-panel__button--primary:not(:disabled):hover,
+.control-panel__button--primary:not(:disabled):focus-visible {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow:
+    0 0 0 1px rgba(120, 190, 255, 0.6),
+    0 28px 60px rgba(120, 190, 255, 0.5);
+}
+
+.control-panel__button--primary:focus-visible {
+  outline: 3px solid rgba(120, 190, 255, 0.9);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control-panel__button--primary {
+    transition: none;
+  }
+
+  .control-panel__button--primary:not(:disabled):hover,
+  .control-panel__button--primary:not(:disabled):focus-visible {
+    transform: none;
+  }
+}
+
 .control-panel__status {
   min-height: 2.5rem;
   display: flex;
