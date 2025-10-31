@@ -410,12 +410,12 @@ body {
   width: min(100%, 340px);
   padding: 1.25rem;
   border-radius: 18px;
-  background: rgba(15, 18, 32, 0.85);
-  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.35);
+  background-color: rgba(15, 18, 32, 0.85);
+  border: 1px solid rgba(124, 195, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 22px 48px rgba(3, 8, 20, 0.5);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  border: 1px solid rgba(120, 190, 255, 0.2);
 }
 
 .visually-hidden {
@@ -672,9 +672,9 @@ body {
 .mission-details {
   padding: 1rem;
   border-radius: 14px;
-  background: rgba(9, 14, 28, 0.85);
-  border: 1px solid rgba(120, 190, 255, 0.25);
-  box-shadow: inset 0 0 18px rgba(120, 190, 255, 0.08);
+  background-color: rgba(9, 14, 28, 0.85);
+  border: 1px solid rgba(124, 195, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 20px 42px rgba(3, 8, 20, 0.45);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -786,9 +786,9 @@ body {
 .mission-operations {
   padding: 1rem;
   border-radius: 14px;
-  background: rgba(8, 12, 26, 0.85);
-  border: 1px solid rgba(140, 200, 255, 0.25);
-  box-shadow: inset 0 0 18px rgba(120, 190, 255, 0.1);
+  background-color: rgba(8, 12, 26, 0.85);
+  border: 1px solid rgba(132, 205, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 20px 44px rgba(3, 8, 20, 0.48);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -908,9 +908,9 @@ body {
 }
 
 .mission-campaign {
-  background: rgba(9, 14, 28, 0.85);
-  border: 1px solid rgba(120, 190, 255, 0.25);
-  box-shadow: inset 0 0 18px rgba(120, 190, 255, 0.08);
+  background-color: rgba(9, 14, 28, 0.85);
+  border: 1px solid rgba(124, 195, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 20px 42px rgba(3, 8, 20, 0.45);
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -922,7 +922,8 @@ body {
 
 .mission-campaign[data-state='complete'] {
   border-color: rgba(126, 203, 255, 0.45);
-  box-shadow: inset 0 0 22px rgba(126, 203, 255, 0.22);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 20px 42px rgba(3, 8, 20, 0.45),
+    0 0 22px rgba(126, 203, 255, 0.22);
 }
 
 .mission-campaign__stage {
@@ -1560,9 +1561,9 @@ body {
 .mission-log {
   padding: 1rem;
   border-radius: 14px;
-  background: rgba(9, 14, 28, 0.85);
-  border: 1px solid rgba(120, 190, 255, 0.25);
-  box-shadow: inset 0 0 18px rgba(120, 190, 255, 0.08);
+  background-color: rgba(9, 14, 28, 0.85);
+  border: 1px solid rgba(124, 195, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 20px 42px rgba(3, 8, 20, 0.45);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -1608,9 +1609,9 @@ body {
 .mission-heat__history {
   padding: 1rem;
   border-radius: 14px;
-  background: rgba(9, 14, 28, 0.82);
-  border: 1px solid rgba(120, 190, 255, 0.25);
-  box-shadow: inset 0 0 18px rgba(120, 190, 255, 0.08);
+  background-color: rgba(9, 14, 28, 0.82);
+  border: 1px solid rgba(124, 195, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 20px 42px rgba(3, 8, 20, 0.45);
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -1816,8 +1817,9 @@ body {
 .mission-safehouse__projects {
   padding: 0.85rem;
   border-radius: 12px;
-  background: rgba(5, 10, 22, 0.65);
-  border: 1px solid rgba(120, 190, 255, 0.18);
+  background-color: rgba(5, 10, 22, 0.68);
+  border: 1px solid rgba(124, 195, 255, 0.24);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 18px 40px rgba(3, 8, 20, 0.42);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -1840,8 +1842,9 @@ body {
 .mission-safehouse__history {
   padding: 0.85rem;
   border-radius: 12px;
-  background: rgba(5, 10, 22, 0.68);
-  border: 1px solid rgba(120, 190, 255, 0.18);
+  background-color: rgba(5, 10, 22, 0.68);
+  border: 1px solid rgba(124, 195, 255, 0.24);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 18px 40px rgba(3, 8, 20, 0.42);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -1951,8 +1954,9 @@ body {
   margin-top: 0.85rem;
   padding: 0.85rem;
   border-radius: 12px;
-  background: rgba(5, 10, 22, 0.68);
-  border: 1px solid rgba(120, 190, 255, 0.18);
+  background-color: rgba(5, 10, 22, 0.68);
+  border: 1px solid rgba(124, 195, 255, 0.24);
+  box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 18px 40px rgba(3, 8, 20, 0.42);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -1961,7 +1965,46 @@ body {
 
 .mission-safehouse__layout[data-layout-state='alert'] {
   border-color: rgba(255, 140, 140, 0.6);
-  box-shadow: 0 0 16px rgba(255, 140, 140, 0.25);
+  box-shadow: inset 0 1px 0 rgba(255, 220, 220, 0.14), 0 18px 40px rgba(3, 8, 20, 0.42),
+    0 0 18px rgba(255, 140, 140, 0.3);
+}
+
+@supports (backdrop-filter: blur(1px)) {
+  .control-panel,
+  .mission-details,
+  .mission-operations,
+  .mission-campaign,
+  .mission-log,
+  .mission-heat__history,
+  .mission-safehouse__projects,
+  .mission-safehouse__alerts,
+  .mission-safehouse__history,
+  .mission-safehouse__layout {
+    background-color: rgba(15, 18, 32, 0.6);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    backdrop-filter: blur(18px) saturate(140%);
+    border-color: rgba(140, 210, 255, 0.38);
+    box-shadow: inset 0 1px 0 rgba(220, 255, 255, 0.12), 0 30px 52px rgba(5, 10, 24, 0.55);
+  }
+
+  .mission-safehouse__projects,
+  .mission-safehouse__alerts,
+  .mission-safehouse__history,
+  .mission-safehouse__layout {
+    background-color: rgba(10, 16, 28, 0.58);
+  }
+
+  .mission-campaign[data-state='complete'] {
+    border-color: rgba(150, 220, 255, 0.55);
+    box-shadow: inset 0 1px 0 rgba(220, 255, 255, 0.12), 0 30px 52px rgba(5, 10, 24, 0.55),
+      0 0 26px rgba(126, 203, 255, 0.35);
+  }
+
+  .mission-safehouse__layout[data-layout-state='alert'] {
+    border-color: rgba(255, 160, 160, 0.72);
+    box-shadow: inset 0 1px 0 rgba(255, 220, 220, 0.18), 0 30px 52px rgba(5, 10, 24, 0.55),
+      0 0 22px rgba(255, 140, 140, 0.38);
+  }
 }
 
 .mission-safehouse__layout-title {
