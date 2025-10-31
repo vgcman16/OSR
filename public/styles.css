@@ -19,18 +19,125 @@ body {
     #0f0f17;
 }
 
-.site-header,
+.site-header {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: clamp(4rem, 10vw, 7rem) clamp(1.5rem, 6vw, 5rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: left;
+  color: #f6fbff;
+  background:
+    linear-gradient(135deg, rgba(26, 58, 93, 0.85), rgba(7, 18, 32, 0.92)),
+    radial-gradient(circle at top right, rgba(120, 190, 255, 0.35), transparent 60%),
+    #0b1324;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.45);
+}
+
+.site-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url('./images/hero-safehouse.svg');
+  background-size: cover;
+  background-position: center;
+  opacity: 0.6;
+  mix-blend-mode: screen;
+  transform: scale(1.05);
+  z-index: -2;
+}
+
+.site-header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(6, 12, 24, 0.95) 0%, rgba(6, 12, 24, 0.55) 55%, rgba(9, 16, 30, 0.85) 100%);
+  z-index: -1;
+}
+
+.site-header__inner {
+  max-width: 720px;
+  display: grid;
+  gap: 1rem;
+}
+
+.site-header h1 {
+  font-size: clamp(2.4rem, 5vw, 3.4rem);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.site-header__subheading {
+  font-size: clamp(1.05rem, 2.2vw, 1.5rem);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(192, 224, 255, 0.9);
+}
+
+.site-header__briefing {
+  font-size: clamp(1rem, 1.8vw, 1.15rem);
+  line-height: 1.8;
+  color: rgba(230, 242, 255, 0.92);
+}
+
+.site-header__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 0.85rem 2.75rem;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0a1324;
+  background: linear-gradient(135deg, #78beff, #7cf3d1);
+  border: none;
+  text-decoration: none;
+  box-shadow: 0 18px 40px rgba(120, 190, 255, 0.35);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.site-header__cta:hover,
+.site-header__cta:focus-visible {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 24px 50px rgba(120, 190, 255, 0.45);
+}
+
+.site-header__cta:focus-visible {
+  outline: 3px solid rgba(120, 190, 255, 0.9);
+  outline-offset: 4px;
+}
+
+@media (max-width: 640px) {
+  .site-header {
+    padding: clamp(3.5rem, 12vw, 5.5rem) clamp(1rem, 6vw, 2.25rem);
+    text-align: center;
+  }
+
+  .site-header__inner {
+    justify-items: center;
+  }
+
+  .site-header__briefing {
+    max-width: 34ch;
+  }
+
+  .site-header__cta {
+    width: 100%;
+    max-width: 320px;
+  }
+}
+
 .site-footer {
   padding: 1.5rem;
   text-align: center;
   background: rgba(12, 12, 20, 0.8);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(6px);
-}
-
-.site-header h1 {
-  font-size: clamp(1.8rem, 2.5vw, 2.8rem);
-  letter-spacing: 0.05em;
 }
 
 .site-main {

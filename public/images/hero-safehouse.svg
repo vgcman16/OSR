@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-label="Stylised safehouse concept">
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#0b1a2d" />
+      <stop offset="55%" stop-color="#132b43" />
+      <stop offset="100%" stop-color="#07101f" />
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" x2="50%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="rgba(120,190,255,0.85)" />
+      <stop offset="100%" stop-color="rgba(120,190,255,0)" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bgGradient)" />
+  <g opacity="0.75">
+    <ellipse cx="920" cy="660" rx="220" ry="80" fill="rgba(30,60,90,0.9)" />
+    <rect x="760" y="380" width="320" height="260" rx="22" fill="#0f1f33" />
+    <rect x="790" y="420" width="90" height="140" rx="8" fill="#0a1422" />
+    <rect x="910" y="420" width="140" height="70" rx="6" fill="#0a1422" />
+    <rect x="910" y="510" width="140" height="110" rx="6" fill="#0a1422" />
+    <rect x="795" y="448" width="78" height="12" rx="6" fill="#1f4060" />
+    <rect x="795" y="472" width="78" height="12" rx="6" fill="#1f4060" />
+    <rect x="795" y="496" width="78" height="12" rx="6" fill="#1f4060" />
+    <rect x="950" y="438" width="60" height="20" rx="6" fill="#1f4060" />
+    <rect x="950" y="528" width="60" height="20" rx="6" fill="#1f4060" />
+    <rect x="950" y="558" width="60" height="20" rx="6" fill="#1f4060" />
+    <rect x="880" y="612" width="80" height="28" rx="8" fill="#15243a" />
+  </g>
+  <g opacity="0.55">
+    <polygon points="340,580 420,340 540,340 620,580" fill="#102235" />
+    <rect x="360" y="420" width="200" height="160" rx="20" fill="#0d1728" />
+    <rect x="420" y="440" width="80" height="90" rx="10" fill="#08101d" />
+    <rect x="380" y="466" width="24" height="72" rx="10" fill="#1c3552" />
+    <rect x="520" y="466" width="24" height="72" rx="10" fill="#1c3552" />
+  </g>
+  <g opacity="0.35">
+    <circle cx="220" cy="260" r="140" fill="rgba(120,190,255,0.18)" />
+    <circle cx="380" cy="180" r="90" fill="rgba(120,190,255,0.12)" />
+    <path d="M140 640 Q280 560 420 640" stroke="rgba(120,190,255,0.2)" stroke-width="6" fill="none" />
+  </g>
+  <rect width="1200" height="800" fill="url(#glow)" opacity="0.45" />
+</svg>
