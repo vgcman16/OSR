@@ -63,6 +63,21 @@ const loadPlayerSettings = () => {
 
 let playerSettings = loadPlayerSettings();
 const soundboard = createSoundboard({ muted: playerSettings?.audio?.muted });
+let soundboardPreloaded = false;
+
+const ensureSoundboardPreloaded = () => {
+  if (soundboardPreloaded) {
+    return;
+  }
+
+  soundboardPreloaded = true;
+
+  try {
+    soundboard.preloadAll();
+  } catch (error) {
+    console.warn('Failed to preload audio clips for soundboard.', error);
+  }
+};
 
 const SAFEHOUSE_ZONE_CONFIG = {
   operations: { id: 'operations', label: 'Operations Deck' },
@@ -5495,6 +5510,7 @@ const updateAudioToggleLabel = () => {
 };
 
 const handleAudioToggle = () => {
+  ensureSoundboardPreloaded();
   const nextMuted = !soundboard.isMuted();
   soundboard.setMuted(nextMuted);
 
@@ -15680,6 +15696,7 @@ const handleMissionStart = () => {
   }
   clearMaintenanceStatusDetail();
   setMissionEventStatus('Crew standing by for mid-run updates.');
+  ensureSoundboardPreloaded();
   soundboard.playMissionStart();
   economySystem.payCrew();
   updateMissionSelect();

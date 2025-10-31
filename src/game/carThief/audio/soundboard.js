@@ -133,8 +133,6 @@ const createSoundboard = ({ basePath = 'audio/', muted = false } = {}) => {
     return playClip(clipKey);
   };
 
-  preloadAll();
-
   return {
     preloadAll,
     isMuted,
