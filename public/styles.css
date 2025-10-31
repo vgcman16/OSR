@@ -31,6 +31,33 @@ body {
     #0f0f17;
 }
 
+.noscript-notice {
+  max-width: 720px;
+  margin: 2rem auto 3rem;
+  padding: 1.5rem 1.75rem;
+  border: 1px solid rgba(120, 190, 255, 0.35);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(12, 28, 48, 0.95), rgba(21, 52, 82, 0.85));
+  color: rgba(236, 245, 255, 0.95);
+  font-family: var(--font-support);
+  text-align: center;
+  line-height: 1.6;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+}
+
+.noscript-notice a {
+  color: #7cf3d1;
+  font-family: var(--font-display);
+  font-weight: var(--callout-weight);
+  letter-spacing: var(--callout-letter-spacing);
+  text-transform: var(--callout-text-transform);
+}
+
+.noscript-notice a:hover,
+.noscript-notice a:focus-visible {
+  color: #78beff;
+}
+
 .skip-link {
   position: absolute;
   top: 0.75rem;
