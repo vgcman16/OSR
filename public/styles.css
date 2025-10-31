@@ -59,7 +59,8 @@ body {
 .mission-safehouse__layout-zone-stat-label,
 .mission-safehouse__facility-drag-handle,
 .mission-training__vendor-hint-label,
-.site-header__subheading {
+.site-header__subheading,
+.control-panel__label {
   font-family: var(--font-display);
   font-weight: var(--label-weight);
   letter-spacing: var(--label-letter-spacing);
@@ -310,6 +311,12 @@ body {
 
 .mission-filter__label {
   font-size: 0.85rem;
+  color: rgba(209, 234, 255, 0.75);
+}
+
+.control-panel__label {
+  font-size: 0.85rem;
+  letter-spacing: var(--label-letter-spacing);
   color: rgba(209, 234, 255, 0.75);
 }
 
