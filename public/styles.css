@@ -356,6 +356,91 @@ body {
   margin-bottom: -0.25rem;
 }
 
+.mission-audio__volume {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.mission-audio__volume-slider {
+  flex: 1 1 auto;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgba(120, 190, 255, 0.28);
+  outline: none;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.mission-audio__volume-slider:focus-visible {
+  box-shadow: 0 0 0 3px rgba(120, 190, 255, 0.3);
+}
+
+.mission-audio__volume-slider:hover {
+  background: rgba(120, 190, 255, 0.4);
+}
+
+.mission-audio__volume-slider::-webkit-slider-runnable-track {
+  height: 0.4rem;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.mission-audio__volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: rgba(120, 190, 255, 0.95);
+  border: 2px solid rgba(7, 22, 43, 0.9);
+  box-shadow: 0 0 12px rgba(120, 190, 255, 0.45);
+  margin-top: -0.275rem;
+  transition: transform 0.2s ease;
+}
+
+.mission-audio__volume-slider::-webkit-slider-thumb:active {
+  transform: scale(1.1);
+}
+
+.mission-audio__volume-slider::-moz-range-track {
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgba(120, 190, 255, 0.28);
+}
+
+.mission-audio__volume-slider::-moz-range-progress {
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgba(120, 190, 255, 0.45);
+}
+
+.mission-audio__volume-slider::-moz-range-thumb {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: rgba(120, 190, 255, 0.95);
+  border: 2px solid rgba(7, 22, 43, 0.9);
+  box-shadow: 0 0 12px rgba(120, 190, 255, 0.45);
+  transition: transform 0.2s ease;
+}
+
+.mission-audio__volume-slider::-moz-range-thumb:active {
+  transform: scale(1.1);
+}
+
+.mission-audio__volume-value {
+  font-size: 0.8rem;
+  color: rgba(209, 234, 255, 0.75);
+  font-variant-numeric: tabular-nums;
+  min-width: 2.75ch;
+  text-align: right;
+}
+
 .mission-audio__toggle {
   font-size: 0.85rem;
   padding: 0.45rem 0.9rem;
