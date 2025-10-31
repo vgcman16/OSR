@@ -31,6 +31,29 @@ body {
     #0f0f17;
 }
 
+.skip-link {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  padding: 0.65rem 1.25rem;
+  border-radius: 999px;
+  background: #f8f9fa;
+  color: #0f0f17;
+  font-family: var(--font-display);
+  font-weight: var(--callout-weight);
+  letter-spacing: var(--callout-letter-spacing);
+  text-transform: var(--callout-text-transform);
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform 0.2s ease;
+  z-index: 1000;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
 .site-header h1,
 .control-panel h2,
 .mission-details__title,
