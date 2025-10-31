@@ -206,6 +206,78 @@ body {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+.site-header__features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: clamp(1rem, 2.5vw, 1.75rem);
+}
+
+.site-header__feature {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1rem;
+  padding: clamp(1rem, 2.2vw, 1.4rem);
+  border-radius: 1.5rem;
+  background: linear-gradient(145deg, rgba(12, 24, 44, 0.9), rgba(10, 18, 34, 0.65));
+  border: 1px solid rgba(120, 190, 255, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(124, 243, 209, 0.08), 0 25px 45px rgba(8, 18, 36, 0.45);
+  backdrop-filter: blur(6px);
+}
+
+.site-header__feature::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 1.3rem;
+  background: radial-gradient(circle at top left, rgba(124, 243, 209, 0.16), transparent 55%),
+    radial-gradient(circle at bottom right, rgba(120, 190, 255, 0.14), transparent 60%);
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.site-header__feature-icon {
+  width: clamp(3rem, 5vw, 3.75rem);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(120, 190, 255, 0.28), rgba(124, 243, 209, 0.36));
+  box-shadow: inset 0 0 0 1px rgba(120, 190, 255, 0.35), 0 12px 30px rgba(12, 30, 48, 0.55);
+  overflow: hidden;
+  z-index: 1;
+}
+
+.site-header__feature-icon img {
+  width: 70%;
+  height: 70%;
+  filter: drop-shadow(0 0 10px rgba(124, 243, 209, 0.45));
+}
+
+.site-header__feature-copy {
+  display: grid;
+  gap: 0.35rem;
+  z-index: 1;
+}
+
+.site-header__feature-copy h3 {
+  margin: 0;
+  font-size: clamp(1.1rem, 2.2vw, 1.3rem);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(200, 240, 255, 0.95);
+}
+
+.site-header__feature-copy p {
+  margin: 0;
+  font-size: clamp(0.9rem, 1.8vw, 1rem);
+  line-height: 1.6;
+  color: rgba(210, 230, 250, 0.8);
+}
+
 .site-header__cta:hover,
 .site-header__cta:focus-visible {
   transform: translateY(-2px) scale(1.02);
@@ -234,6 +306,16 @@ body {
   .site-header__cta {
     width: 100%;
     max-width: 320px;
+  }
+
+  .site-header__features {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .site-header__feature {
+    grid-template-columns: 1fr;
+    text-align: left;
   }
 }
 
