@@ -284,16 +284,45 @@ const createOnboardingTour = ({ missionControls = {}, serializer } = {}) => {
     }
 
     updatePositions();
-    window.requestAnimationFrame(() => {
+
+    const runAlignment = () => {
       const adjusted = alignTargetWithinViewport();
       updatePositions();
 
       if (adjusted) {
-        window.setTimeout(() => {
+        const scheduleTimeout =
+          (typeof window !== 'undefined' && typeof window.setTimeout === 'function'
+            ? window.setTimeout
+            : typeof setTimeout === 'function'
+              ? setTimeout
+              : null);
+
+        if (scheduleTimeout) {
+          scheduleTimeout(() => {
+            updatePositions();
+          }, 280);
+        } else {
           updatePositions();
-        }, 280);
+        }
       }
-    });
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(runAlignment);
+    } else {
+      const scheduleTimeout =
+        (typeof window !== 'undefined' && typeof window.setTimeout === 'function'
+          ? window.setTimeout
+          : typeof setTimeout === 'function'
+            ? setTimeout
+            : null);
+
+      if (scheduleTimeout) {
+        scheduleTimeout(runAlignment, 16);
+      } else {
+        runAlignment();
+      }
+    }
 
     return true;
   };
