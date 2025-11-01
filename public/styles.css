@@ -52,6 +52,75 @@ body {
   z-index: 1;
 }
 
+.mission-group {
+  margin-top: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid rgba(126, 203, 255, 0.28);
+  border-radius: 20px;
+  background: linear-gradient(145deg, rgba(12, 26, 42, 0.96), rgba(8, 18, 30, 0.92));
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+}
+
+.mission-group summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.5rem;
+  cursor: pointer;
+  background: linear-gradient(120deg, rgba(24, 58, 88, 0.95), rgba(14, 36, 58, 0.85));
+  color: #f5fbff;
+  font-family: var(--font-display);
+  font-weight: var(--heading-weight);
+  letter-spacing: var(--heading-letter-spacing);
+  text-transform: var(--heading-text-transform);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+}
+
+.mission-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.mission-group summary::after {
+  content: '▸';
+  font-size: 1.15rem;
+  color: rgba(167, 218, 255, 0.85);
+  transition: transform 0.2s ease;
+}
+
+.mission-group[open] > summary {
+  background: linear-gradient(120deg, rgba(32, 86, 120, 0.95), rgba(21, 52, 82, 0.9));
+  box-shadow: inset 0 0 0 1px rgba(124, 243, 209, 0.2);
+}
+
+.mission-group[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.mission-group summary:focus-visible,
+.mission-group summary:hover {
+  background: linear-gradient(120deg, rgba(42, 112, 150, 0.98), rgba(26, 66, 101, 0.92));
+  box-shadow: inset 0 0 0 1px rgba(124, 243, 209, 0.28);
+}
+
+.mission-group summary:focus-visible {
+  outline: 3px solid rgba(124, 243, 209, 0.55);
+  outline-offset: 3px;
+}
+
+.mission-group__title {
+  font-size: clamp(0.95rem, 2.2vw, 1.05rem);
+}
+
+.mission-group__content {
+  display: grid;
+  gap: clamp(1.1rem, 2.8vw, 1.75rem);
+  padding: clamp(1.2rem, 2.8vw, 1.8rem) clamp(1.2rem, 3vw, 2rem) clamp(1.6rem, 3.2vw, 2.3rem);
+}
+
 .noscript-notice {
   max-width: 720px;
   margin: 2rem auto 3rem;
