@@ -16647,6 +16647,15 @@ function initGame() {
     return null;
   }
 
+  const gameContainer = canvas.closest('.game-container');
+  const placeholder = gameContainer?.querySelector('.game-container__placeholder');
+  if (gameContainer) {
+    gameContainer.classList.remove('is-ready');
+  }
+  if (placeholder) {
+    placeholder.removeAttribute('aria-hidden');
+  }
+
   const context = canvas.getContext('2d');
   if (!context) {
     console.error('Canvas context unavailable.');
@@ -16656,6 +16665,23 @@ function initGame() {
   gameInstance = createCarThiefGame({ canvas, context });
   gameInstance.boot();
   gameInstance.start();
+
+  const markContainerReady = () => {
+    if (gameContainer) {
+      gameContainer.classList.add('is-ready');
+    }
+    if (placeholder) {
+      placeholder.setAttribute('aria-hidden', 'true');
+    }
+  };
+
+  if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(markContainerReady);
+    });
+  } else {
+    markContainerReady();
+  }
 
   window.dispatchEvent(
     new CustomEvent('osr:init', {
