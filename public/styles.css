@@ -619,8 +619,12 @@ body {
   transition: background 0.2s ease;
 }
 
+.mission-audio__volume-slider:focus,
 .mission-audio__volume-slider:focus-visible {
-  box-shadow: 0 0 0 3px rgba(120, 190, 255, 0.3);
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(120, 190, 255, 0.24),
+    0 6px 18px rgba(120, 190, 255, 0.3);
 }
 
 .mission-audio__volume-slider:hover {
@@ -718,6 +722,21 @@ body {
 
 .control-panel select {
   width: 100%;
+}
+
+.control-panel select:focus,
+.control-panel select:focus-visible,
+.control-panel input:not([type='checkbox']):not([type='radio']):focus,
+.control-panel input:not([type='checkbox']):not([type='radio']):focus-visible,
+.control-panel textarea:focus,
+.control-panel textarea:focus-visible,
+.mission-filter__group select:focus,
+.mission-filter__group select:focus-visible {
+  outline: none;
+  border-color: rgba(120, 190, 255, 0.68);
+  box-shadow:
+    0 0 0 2px rgba(120, 190, 255, 0.22),
+    0 6px 18px rgba(120, 190, 255, 0.32);
 }
 
 .mission-filter {
@@ -2445,10 +2464,13 @@ body {
   cursor: pointer;
 }
 
-.mission-safehouse__facility-zone-select:focus {
+.mission-safehouse__facility-zone-select:focus,
+.mission-safehouse__facility-zone-select:focus-visible {
   outline: none;
-  border-color: rgba(120, 190, 255, 0.6);
-  box-shadow: 0 0 0 2px rgba(120, 190, 255, 0.25);
+  border-color: rgba(120, 190, 255, 0.68);
+  box-shadow:
+    0 0 0 2px rgba(120, 190, 255, 0.22),
+    0 6px 18px rgba(120, 190, 255, 0.28);
 }
 
 .mission-safehouse__facility-drag-handle {
