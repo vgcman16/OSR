@@ -452,6 +452,26 @@ body {
   flex-wrap: wrap;
   gap: clamp(1rem, 4vw, 2.5rem);
   padding: clamp(1rem, 3vw, 3rem);
+  position: relative;
+  z-index: 0;
+}
+
+.site-main::before {
+  content: '';
+  position: absolute;
+  inset: clamp(0.75rem, 2.5vw, 2.25rem);
+  border-radius: clamp(1.25rem, 3vw, 2.5rem);
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(120, 190, 255, 0.08), transparent 55%),
+    radial-gradient(circle at 80% 30%, rgba(124, 243, 209, 0.06), transparent 60%),
+    linear-gradient(135deg, rgba(12, 22, 38, 0.85), rgba(8, 16, 28, 0.55)),
+    repeating-linear-gradient(90deg, rgba(120, 190, 255, 0.08) 0, rgba(120, 190, 255, 0.08) 1px, transparent 1px, transparent 42px),
+    repeating-linear-gradient(0deg, rgba(120, 190, 255, 0.08) 0, rgba(120, 190, 255, 0.08) 1px, transparent 1px, transparent 42px);
+  background-blend-mode: screen;
+  box-shadow: inset 0 0 60px rgba(6, 12, 24, 0.65);
+  opacity: 0.82;
+  pointer-events: none;
+  z-index: -1;
 }
 
 .game-container {
