@@ -13315,6 +13315,7 @@ const renderMissionLog = () => {
   logEntries.slice(0, 5).forEach((entry) => {
     const item = document.createElement('li');
     item.className = 'mission-log__entry';
+    item.dataset.outcome = entry?.outcome ?? 'neutral';
     const summary = entry?.summary ?? 'Mission resolved.';
     const details = [summary];
     const falloutSummary = entry?.falloutSummary ?? null;
@@ -13364,11 +13365,28 @@ const renderMissionLog = () => {
       }
     });
     const timestamp = Number.isFinite(entry?.timestamp) ? new Date(entry.timestamp) : null;
-    const timeLabel = timestamp ? ` @ ${timestamp.toLocaleTimeString([], options)}` : '';
+    const timeLabel = timestamp ? timestamp.toLocaleTimeString([], options) : null;
 
     const summaryLine = document.createElement('p');
     summaryLine.className = 'mission-log__summary';
-    summaryLine.textContent = `${details.join(' — ')}${timeLabel}`;
+
+    const marker = document.createElement('span');
+    marker.className = 'mission-log__marker';
+    marker.setAttribute('aria-hidden', 'true');
+    summaryLine.appendChild(marker);
+
+    const summaryText = document.createElement('span');
+    summaryText.className = 'mission-log__text';
+    summaryText.textContent = details.join(' — ');
+    summaryLine.appendChild(summaryText);
+
+    if (timeLabel) {
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'mission-log__time';
+      timeSpan.textContent = `@ ${timeLabel}`;
+      timeSpan.setAttribute('aria-label', `Resolved at ${timeLabel}`);
+      summaryLine.appendChild(timeSpan);
+    }
     item.appendChild(summaryLine);
 
     const infiltrationHistoryEntries = (() => {
