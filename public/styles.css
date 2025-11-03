@@ -54,6 +54,7 @@ body::before {
 .mission-panel {
   position: relative;
   isolation: isolate;
+  scroll-margin-top: clamp(1.25rem, 4vw, 2.5rem);
 }
 
 .mission-panel::before {
