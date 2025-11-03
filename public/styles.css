@@ -890,15 +890,15 @@ body::before {
 }
 
 .control-panel {
-  width: min(100%, 340px);
-  padding: 1.25rem;
+  width: clamp(320px, 28vw, 400px);
+  padding: clamp(1.1rem, 2.2vw, 1.4rem);
   border-radius: 18px;
   background-color: rgba(15, 18, 32, 0.85);
   border: 1px solid rgba(124, 195, 255, 0.28);
   box-shadow: inset 0 1px 0 rgba(124, 243, 209, 0.08), 0 22px 48px rgba(3, 8, 20, 0.5);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: clamp(0.75rem, 1.6vw, 1rem);
   position: sticky;
   top: clamp(1rem, 3vw, 3rem);
   max-height: calc(100vh - clamp(1rem, 3vw, 3rem) * 2);
@@ -906,6 +906,13 @@ body::before {
   scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
   scrollbar-color: rgba(124, 195, 255, 0.55) rgba(5, 10, 22, 0.55);
+}
+
+@media (min-width: 1200px) {
+  .control-panel {
+    padding: clamp(1.3rem, 2.6vw, 1.6rem);
+    gap: clamp(0.9rem, 1.8vw, 1.15rem);
+  }
 }
 
 .control-panel::-webkit-scrollbar {
