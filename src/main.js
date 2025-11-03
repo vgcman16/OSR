@@ -698,6 +698,9 @@ const missionControls = {
   missionFiltersActive: false,
   totalMissionCount: 0,
   filteredMissionCount: 0,
+  quickNavObserver: null,
+  quickNavLinks: [],
+  quickNavActiveLink: null,
   detailDescription: null,
   detailPayout: null,
   detailHeat: null,
@@ -16061,7 +16064,160 @@ const setupMissionControls = () => {
   };
 
   const controlPanel = document.querySelector('.control-panel');
+  if (!controlPanel) {
+    if (missionControls.quickNavObserver) {
+      missionControls.quickNavObserver.disconnect();
+      missionControls.quickNavObserver = null;
+    }
+
+    if (Array.isArray(missionControls.quickNavLinks) && missionControls.quickNavLinks.length) {
+      missionControls.quickNavLinks.forEach((linkEl) => {
+        linkEl.classList.remove('control-panel__quick-link--active');
+        linkEl.removeAttribute('aria-current');
+      });
+    }
+
+    missionControls.quickNavLinks = [];
+    missionControls.quickNavActiveLink = null;
+  }
   if (controlPanel) {
+    if (missionControls.quickNavObserver) {
+      missionControls.quickNavObserver.disconnect();
+      missionControls.quickNavObserver = null;
+    }
+
+    if (Array.isArray(missionControls.quickNavLinks) && missionControls.quickNavLinks.length) {
+      missionControls.quickNavLinks.forEach((linkEl) => {
+        linkEl.classList.remove('control-panel__quick-link--active');
+        linkEl.removeAttribute('aria-current');
+      });
+    }
+
+    missionControls.quickNavLinks = [];
+    missionControls.quickNavActiveLink = null;
+
+    const quickNav = controlPanel.querySelector('.control-panel__quick-nav');
+    if (quickNav) {
+      const quickLinks = Array.from(quickNav.querySelectorAll('.control-panel__quick-link'));
+      if (quickLinks.length) {
+        missionControls.quickNavLinks = quickLinks;
+
+        const applyActiveLink = (nextLink) => {
+          const normalizedNextLink = nextLink ?? null;
+          if (missionControls.quickNavActiveLink === normalizedNextLink) {
+            return;
+          }
+
+          quickLinks.forEach((linkEl) => {
+            if (linkEl === normalizedNextLink) {
+              linkEl.classList.add('control-panel__quick-link--active');
+              linkEl.setAttribute('aria-current', 'true');
+            } else {
+              linkEl.classList.remove('control-panel__quick-link--active');
+              linkEl.removeAttribute('aria-current');
+            }
+          });
+
+          missionControls.quickNavActiveLink = normalizedNextLink;
+        };
+
+        const quickNavSections = quickLinks
+          .map((link) => {
+            const href = link.getAttribute('href');
+            if (!href || typeof href !== 'string' || !href.startsWith('#')) {
+              return null;
+            }
+
+            const targetId = href.slice(1);
+            if (!targetId) {
+              return null;
+            }
+
+            const section = document.getElementById(targetId);
+            if (!section) {
+              return null;
+            }
+
+            return { link, section };
+          })
+          .filter(Boolean);
+
+        if (quickLinks[0]) {
+          applyActiveLink(quickLinks[0]);
+        }
+
+        const intersectionState = new Map();
+
+        const evaluateActiveQuickLink = () => {
+          const visibleEntries = quickNavSections
+            .map(({ link, section }) => {
+              const entry = intersectionState.get(section);
+              if (entry && entry.isIntersecting) {
+                return { link, entry };
+              }
+              return null;
+            })
+            .filter(Boolean);
+
+          if (visibleEntries.length) {
+            visibleEntries.sort((a, b) => {
+              const topDelta = a.entry.boundingClientRect.top - b.entry.boundingClientRect.top;
+              if (topDelta !== 0) {
+                return topDelta;
+              }
+              return b.entry.intersectionRatio - a.entry.intersectionRatio;
+            });
+            applyActiveLink(visibleEntries[0].link);
+            return;
+          }
+
+          if (quickNavSections.length) {
+            const nearestSection = quickNavSections
+              .map(({ link, section }) => {
+                const rect = section.getBoundingClientRect();
+                return { link, rect };
+              })
+              .sort((a, b) => {
+                const aDistance = Math.abs(a.rect.top);
+                const bDistance = Math.abs(b.rect.top);
+                if (aDistance === bDistance) {
+                  return a.rect.top - b.rect.top;
+                }
+                return aDistance - bDistance;
+              });
+
+            if (nearestSection.length) {
+              applyActiveLink(nearestSection[0].link);
+              return;
+            }
+          }
+
+          if (quickLinks[0]) {
+            applyActiveLink(quickLinks[0]);
+          } else {
+            applyActiveLink(null);
+          }
+        };
+
+        if (quickNavSections.length && typeof IntersectionObserver === 'function') {
+          const observer = new IntersectionObserver(
+            (entries) => {
+              entries.forEach((entry) => {
+                intersectionState.set(entry.target, entry);
+              });
+              evaluateActiveQuickLink();
+            },
+            { root: null, rootMargin: '0px 0px -60% 0px', threshold: [0.1, 0.25, 0.5, 0.75] },
+          );
+
+          quickNavSections.forEach(({ section }) => observer.observe(section));
+          missionControls.quickNavObserver = observer;
+        }
+
+        evaluateActiveQuickLink();
+      }
+    }
+
     let audioControls = controlPanel.querySelector('.mission-audio');
     if (!audioControls) {
       audioControls = document.createElement('div');
