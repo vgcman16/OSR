@@ -8121,10 +8121,54 @@ const updateDebtPanel = () => {
   debtStatus.textContent = detailMessage || summaryMessage;
 };
 
-const setOperationsDashboardValue = (valueNode, statusNode, { text, riskLevel, statusText }) => {
+const clampProgress01 = (value) => {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  if (value <= 0) {
+    return 0;
+  }
+
+  if (value >= 1) {
+    return 1;
+  }
+
+  return value;
+};
+
+const progressFromRiskLevel = (riskLevel) => {
+  switch (riskLevel) {
+    case 'low':
+      return 0.25;
+    case 'positive':
+      return 0.2;
+    case 'medium':
+      return 0.6;
+    case 'high':
+      return 0.88;
+    default:
+      return 0.5;
+  }
+};
+
+const setOperationsDashboardValue = (valueNode, statusNode, { text, riskLevel, statusText, progress }) => {
+  const resolvedRisk = riskLevel ?? 'unknown';
+
   if (valueNode) {
     valueNode.textContent = text ?? '—';
-    valueNode.dataset.riskLevel = riskLevel ?? 'unknown';
+    valueNode.dataset.riskLevel = resolvedRisk;
+  }
+
+  const metricNode = valueNode?.closest('.mission-operations__metric');
+  if (metricNode) {
+    metricNode.dataset.riskLevel = resolvedRisk;
+    const normalizedProgress = clampProgress01(progress);
+    if (normalizedProgress === null) {
+      metricNode.style.removeProperty('--metric-progress');
+    } else {
+      metricNode.style.setProperty('--metric-progress', String(normalizedProgress));
+    }
   }
 
   if (statusNode) {
@@ -8246,26 +8290,31 @@ const resetOperationsDashboard = () => {
     text: '—',
     riskLevel: 'unknown',
     statusText: 'Expense telemetry syncing.',
+    progress: null,
   });
   setOperationsDashboardValue(operationsPassiveIncomeValue, operationsPassiveIncomeStatus, {
     text: '—',
     riskLevel: 'unknown',
     statusText: 'Passive income telemetry syncing.',
+    progress: null,
   });
   setOperationsDashboardValue(operationsPayrollValue, operationsPayrollStatus, {
     text: '—',
     riskLevel: 'unknown',
     statusText: 'Payroll telemetry syncing.',
+    progress: null,
   });
   setOperationsDashboardValue(operationsStorageValue, operationsStorageStatus, {
     text: '—',
     riskLevel: 'unknown',
     statusText: 'Storage telemetry syncing.',
+    progress: null,
   });
   setOperationsDashboardValue(operationsCrewFatigueValue, operationsCrewFatigueStatus, {
     text: '—',
     riskLevel: 'unknown',
     statusText: 'Fatigue telemetry syncing.',
+    progress: null,
   });
 
   if (operationsHistoryList && operationsHistoryEmpty && operationsHistoryStatus) {
@@ -8388,13 +8437,16 @@ const updateOperationsDashboard = () => {
   const expenseLabel = projectedExpenses !== null ? formatPerDay(projectedExpenses) : '—';
   let expenseRisk = 'unknown';
   let expenseStatus = 'Expense telemetry unavailable.';
+  let expenseProgress = progressFromRiskLevel(expenseRisk);
   if (projectedExpenses !== null) {
     if (funds <= 0 && projectedExpenses > 0) {
       expenseRisk = 'high';
       expenseStatus = 'No reserves available to cover daily expenses.';
+      expenseProgress = 1;
     } else if (projectedExpenses === 0) {
       expenseRisk = 'low';
       expenseStatus = 'Daily overhead neutralized for now.';
+      expenseProgress = 0;
     } else {
       const ratio = funds > 0 ? projectedExpenses / funds : Infinity;
       if (ratio >= 0.8) {
@@ -8407,6 +8459,11 @@ const updateOperationsDashboard = () => {
         expenseRisk = 'low';
         expenseStatus = 'Daily burn sustainable with current reserves.';
       }
+
+      const normalizedRatio = clampProgress01(ratio);
+      if (normalizedRatio !== null) {
+        expenseProgress = normalizedRatio;
+      }
     }
   }
 
@@ -8414,21 +8471,51 @@ const updateOperationsDashboard = () => {
     text: expenseLabel,
     riskLevel: expenseRisk,
     statusText: expenseStatus,
+    progress: expenseProgress,
   });
 
   const passiveLabel = formatPerDay(passiveIncome ?? NaN, { signed: true });
   let passiveRisk = 'unknown';
   let passiveStatus = 'Passive income telemetry unavailable.';
+  let passiveProgress = progressFromRiskLevel(passiveRisk);
   if (Number.isFinite(passiveIncomeRaw)) {
     if ((passiveIncome ?? 0) > 0) {
       passiveRisk = 'positive';
       passiveStatus = 'Safehouse assets are covering part of the daily burn.';
+      passiveProgress = 0.2;
     } else if (passiveIncome === 0) {
       passiveRisk = 'medium';
       passiveStatus = 'No passive income online — invest in amenities to offset expenses.';
+      passiveProgress = 0.55;
     } else {
       passiveRisk = 'high';
       passiveStatus = 'Passive income deficit — amenities are draining reserves.';
+      passiveProgress = 0.85;
+    }
+
+    if (projectedExpenses !== null && projectedExpenses > 0) {
+      const coverageRatio = (passiveIncome ?? 0) / projectedExpenses;
+      if (coverageRatio >= 1) {
+        passiveProgress = 0.1;
+      } else if (coverageRatio > 0) {
+        const normalizedCoverage = clampProgress01(coverageRatio);
+        if (normalizedCoverage !== null) {
+          const recalculated = 0.35 + (1 - normalizedCoverage) * 0.4;
+          const normalizedProgress = clampProgress01(recalculated);
+          if (normalizedProgress !== null) {
+            passiveProgress = normalizedProgress;
+          }
+        }
+      } else {
+        const deficitRatio = clampProgress01(Math.min(1, Math.abs(coverageRatio)));
+        if (deficitRatio !== null) {
+          const recalculated = 0.6 + deficitRatio * 0.35;
+          const normalizedProgress = clampProgress01(recalculated);
+          if (normalizedProgress !== null) {
+            passiveProgress = normalizedProgress;
+          }
+        }
+      }
     }
   }
 
@@ -8436,15 +8523,18 @@ const updateOperationsDashboard = () => {
     text: passiveLabel,
     riskLevel: passiveRisk,
     statusText: passiveStatus,
+    progress: passiveProgress,
   });
 
   const payrollLabel = payroll !== null ? formatPerDay(payroll) : '—';
   let payrollRisk = 'unknown';
   let payrollStatus = 'Payroll telemetry unavailable.';
+  let payrollProgress = progressFromRiskLevel(payrollRisk);
   if (payroll !== null) {
     if (payroll === 0) {
       payrollRisk = 'low';
       payrollStatus = 'No active payroll commitments.';
+      payrollProgress = 0;
     } else {
       const ratio = funds > 0 ? payroll / funds : Infinity;
       if (ratio >= 0.6) {
@@ -8457,6 +8547,11 @@ const updateOperationsDashboard = () => {
         payrollRisk = 'low';
         payrollStatus = 'Payroll covered comfortably by reserves.';
       }
+
+      const normalizedRatio = clampProgress01(ratio);
+      if (normalizedRatio !== null) {
+        payrollProgress = normalizedRatio;
+      }
     }
   }
 
@@ -8464,6 +8559,7 @@ const updateOperationsDashboard = () => {
     text: payrollLabel,
     riskLevel: payrollRisk,
     statusText: payrollStatus,
+    progress: payrollProgress,
   });
 
   const garage = Array.isArray(state?.garage) ? state.garage : [];
@@ -8483,21 +8579,23 @@ const updateOperationsDashboard = () => {
     return null;
   })();
 
+  const garageSize = garage.length;
   let storageRisk = 'unknown';
   let storageStatus = 'Storage telemetry unavailable.';
-  let storageLabel = `${garage.length} vehicles`;
+  let storageLabel = `${garageSize} vehicles`;
+  let storageProgress = progressFromRiskLevel(storageRisk);
 
   if (Number.isFinite(resolvedCapacity) && resolvedCapacity >= 0) {
-    const garageSize = garage.length;
-    const usageRatio = resolvedCapacity > 0 ? garageSize / resolvedCapacity : Infinity;
     if (resolvedCapacity === 0) {
       storageLabel = `${garageSize} stored / 0 capacity`;
       storageRisk = garageSize > 0 ? 'high' : 'medium';
       storageStatus = garageSize > 0
         ? 'No garage capacity available — liquidate vehicles immediately.'
         : 'Garage not yet expanded — secure upgrades to store vehicles.';
+      storageProgress = garageSize > 0 ? 1 : 0;
     } else {
       storageLabel = `${garageSize}/${resolvedCapacity} slots`;
+      const usageRatio = garageSize / resolvedCapacity;
       if (usageRatio >= 1) {
         storageRisk = 'high';
         storageStatus = 'Garage full — sell or scrap vehicles before accepting new assets.';
@@ -8510,16 +8608,23 @@ const updateOperationsDashboard = () => {
         const slotsFree = Math.max(0, resolvedCapacity - garageSize);
         storageStatus = `${slotsFree === 1 ? '1 slot' : `${slotsFree} slots`} ready for new acquisitions.`;
       }
+
+      const normalizedUsage = clampProgress01(usageRatio);
+      if (normalizedUsage !== null) {
+        storageProgress = normalizedUsage;
+      }
     }
   } else {
     storageRisk = 'medium';
-    storageStatus = `Garage telemetry offline — tracking ${garage.length} vehicles manually.`;
+    storageStatus = `Garage telemetry offline — tracking ${garageSize} vehicles manually.`;
+    storageProgress = garageSize > 0 ? 0.6 : 0.3;
   }
 
   setOperationsDashboardValue(operationsStorageValue, operationsStorageStatus, {
     text: storageLabel,
     riskLevel: storageRisk,
     statusText: storageStatus,
+    progress: storageProgress,
   });
 
   const crew = Array.isArray(state?.crew)
@@ -8548,6 +8653,7 @@ const updateOperationsDashboard = () => {
   let fatigueRisk = 'unknown';
   let fatigueStatus = 'Fatigue telemetry unavailable.';
   let fatigueLabel = crewCount === 0 ? 'No crew' : '—';
+  let fatigueProgress = progressFromRiskLevel(fatigueRisk);
 
   if (crewCount > 0) {
     if (averageFatigue === null || highestFatigue === null) {
@@ -8566,10 +8672,16 @@ const updateOperationsDashboard = () => {
         fatigueRisk = 'low';
         fatigueStatus = 'Crew rested and ready for operations.';
       }
+
+      const normalizedFatigue = clampProgress01(highestFatigue / 100);
+      if (normalizedFatigue !== null) {
+        fatigueProgress = normalizedFatigue;
+      }
     }
   } else {
     fatigueRisk = 'medium';
     fatigueStatus = 'Recruit crew to run missions.';
+    fatigueProgress = 0.5;
   }
 
   const lastRecoveryTimestamp = Number.isFinite(economySystem?.state?.lastCrewRecoveryTimestamp)
@@ -8586,6 +8698,7 @@ const updateOperationsDashboard = () => {
     text: fatigueLabel,
     riskLevel: fatigueRisk,
     statusText: fatigueStatus,
+    progress: fatigueProgress,
   });
 
   if (operationsHistoryList && operationsHistoryEmpty && operationsHistoryStatus) {
