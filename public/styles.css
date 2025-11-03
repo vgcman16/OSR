@@ -1205,6 +1205,26 @@ body {
   align-items: flex-start;
   gap: 0.9rem;
   overflow: hidden;
+  transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.mission-details__row:hover,
+.mission-details__row:focus-within {
+  background: linear-gradient(135deg, rgba(10, 25, 55, 0.92), rgba(40, 110, 180, 0.85));
+  border-color: rgba(120, 190, 255, 0.45);
+  box-shadow: 0 10px 25px rgba(66, 224, 199, 0.18), 0 0 18px rgba(120, 190, 255, 0.35);
+  transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mission-details__row {
+    transition: background 180ms ease, border-color 180ms ease;
+  }
+
+  .mission-details__row:hover,
+  .mission-details__row:focus-within {
+    transform: none;
+  }
 }
 
 .mission-details__row:not(:last-child)::after {
