@@ -53,48 +53,85 @@
     <a class="skip-link" href="#mission-select">Skip to Mission Control</a>
     <header class="site-header">
       <div class="site-header__inner">
-        <h1>Open Source Roguelike</h1>
-        <p class="site-header__subheading">Covert Operations Simulator</p>
-        <p class="site-header__briefing">
-          Assemble your cell, secure the safehouse, and orchestrate daring missions in
-          a living roguelike network. Every contract shapes the resistance.
-        </p>
-        <a class="site-header__cta" href="#mission-select">Begin Briefing</a>
-        <ul class="site-header__features">
-          <li class="site-header__feature">
-            <figure class="site-header__feature-icon" aria-hidden="true">
-              <img src="./images/tools/ghost-cabin.svg" alt="" />
-            </figure>
-            <div class="site-header__feature-copy">
-              <h3>Assemble the crew</h3>
-              <p>Recruit specialists with bespoke talents and sync their loadouts for each operation.</p>
-            </div>
-          </li>
-          <li class="site-header__feature">
-            <figure class="site-header__feature-icon" aria-hidden="true">
-              <img src="./images/hero-safehouse.svg" alt="" />
-            </figure>
-            <div class="site-header__feature-copy">
-              <h3>Command the safehouse</h3>
-              <p>Upgrade hideouts, decode intel streams, and pivot strategies from your secure base.</p>
-            </div>
-          </li>
-          <li class="site-header__feature">
-            <figure class="site-header__feature-icon" aria-hidden="true">
-              <img src="./images/tools/signal-masker.svg" alt="" />
-            </figure>
-            <div class="site-header__feature-copy">
-              <h3>Disrupt crackdowns</h3>
-              <p>Jam surveillance grids and reroute patrols to keep resistance networks in motion.</p>
-            </div>
-          </li>
-        </ul>
+        <div class="site-header__content">
+          <h1>Open Source Roguelike</h1>
+          <p class="site-header__subheading">Covert Operations Simulator</p>
+          <p class="site-header__briefing">
+            Assemble your cell, secure the safehouse, and orchestrate daring missions in a living roguelike network.
+            Every contract shapes the resistance.
+          </p>
+          <a class="site-header__cta" href="#mission-select">Begin Briefing</a>
+        </div>
+        <figure class="site-header__keyart" aria-hidden="true">
+          <div class="site-header__keyart-orbit"></div>
+          <img class="site-header__keyart-image" src="./images/hero-safehouse.svg" alt="" />
+          <figcaption class="site-header__keyart-caption">
+            <span class="site-header__keyart-label">Safehouse Theta-12</span>
+            <span class="site-header__keyart-status">Operational • Signal clean</span>
+          </figcaption>
+          <div class="site-header__keyart-hologram">
+            <span class="site-header__keyart-tag">Crew uplink</span>
+            <span class="site-header__keyart-tag">Logistics synced</span>
+            <span class="site-header__keyart-tag">Intel cache primed</span>
+          </div>
+        </figure>
       </div>
+      <ul class="site-header__features">
+        <li class="site-header__feature" data-feature-index="1">
+          <figure class="site-header__feature-icon" aria-hidden="true">
+            <img src="./images/tools/ghost-cabin.svg" alt="" />
+          </figure>
+          <div class="site-header__feature-copy">
+            <h3>Assemble the crew</h3>
+            <p>Recruit specialists with bespoke talents and sync their loadouts for each operation.</p>
+          </div>
+        </li>
+        <li class="site-header__feature" data-feature-index="2">
+          <figure class="site-header__feature-icon" aria-hidden="true">
+            <img src="./images/hero-safehouse.svg" alt="" />
+          </figure>
+          <div class="site-header__feature-copy">
+            <h3>Command the safehouse</h3>
+            <p>Upgrade hideouts, decode intel streams, and pivot strategies from your secure base.</p>
+          </div>
+        </li>
+        <li class="site-header__feature" data-feature-index="3">
+          <figure class="site-header__feature-icon" aria-hidden="true">
+            <img src="./images/tools/signal-masker.svg" alt="" />
+          </figure>
+          <div class="site-header__feature-copy">
+            <h3>Disrupt crackdowns</h3>
+            <p>Jam surveillance grids and reroute patrols to keep resistance networks in motion.</p>
+          </div>
+        </li>
+      </ul>
     </header>
     <main class="site-main">
       <section class="game-container" aria-label="Game canvas">
         <div class="game-container__placeholder" role="status" aria-live="polite">
-          <span class="game-container__placeholder-text">Booting covert ops interface…</span>
+          <div class="game-container__placeholder-hud">
+            <div class="game-container__placeholder-rings" aria-hidden="true">
+              <span class="game-container__placeholder-ring"></span>
+              <span class="game-container__placeholder-ring game-container__placeholder-ring--delay"></span>
+            </div>
+            <div class="game-container__placeholder-readout">
+              <p class="game-container__placeholder-title">Boot sequence engaged</p>
+              <ul class="game-container__placeholder-list">
+                <li>
+                  <span class="game-container__placeholder-label">Telemetry uplink</span>
+                  <span class="game-container__placeholder-value">syncing…</span>
+                </li>
+                <li>
+                  <span class="game-container__placeholder-label">Crew roster</span>
+                  <span class="game-container__placeholder-value">verifying</span>
+                </li>
+                <li>
+                  <span class="game-container__placeholder-label">Safehouse perimeter</span>
+                  <span class="game-container__placeholder-value">stable</span>
+                </li>
+              </ul>
+            </div>
+          </div>
         </div>
         <canvas
           id="game-canvas"
@@ -109,6 +146,12 @@
         <p class="control-panel__hint">
           Select a contract, then coordinate its execution.
         </p>
+        <nav class="control-panel__quick-nav" aria-label="Mission control quick navigation">
+          <a class="control-panel__quick-link" href="#operations-dashboard">Operations</a>
+          <a class="control-panel__quick-link" href="#city-intel">Intel</a>
+          <a class="control-panel__quick-link" href="#crew-roster">Crew</a>
+          <a class="control-panel__quick-link" href="#heat-management">Heat</a>
+        </nav>
         <button
           type="button"
           id="show-tutorial-btn"
@@ -321,6 +364,7 @@
           </summary>
           <div id="mission-group-operations" class="mission-group__content">
             <section
+              id="operations-dashboard"
               class="mission-panel mission-operations"
               data-accent="finance"
               aria-labelledby="mission-operations-title"
@@ -370,14 +414,17 @@
                   <div class="mission-details__content">
                     <dt>Projected Daily Expenses</dt>
                     <dd>
-                      <span
-                        id="mission-ops-expenses"
-                        class="mission-operations__value mission-details__badge"
-                        data-risk-level="unknown"
-                        aria-describedby="mission-operations-legend mission-ops-expenses-status"
-                      >
-                        —
-                      </span>
+                      <div class="mission-operations__metric" data-risk-level="unknown">
+                        <span class="mission-operations__dial" aria-hidden="true"></span>
+                        <span
+                          id="mission-ops-expenses"
+                          class="mission-operations__value mission-details__badge"
+                          data-risk-level="unknown"
+                          aria-describedby="mission-operations-legend mission-ops-expenses-status"
+                        >
+                          —
+                        </span>
+                      </div>
                       <span
                         id="mission-ops-expenses-status"
                         class="mission-operations__status visually-hidden"
@@ -396,14 +443,17 @@
                   <div class="mission-details__content">
                     <dt>Passive Income</dt>
                     <dd>
-                      <span
-                        id="mission-ops-passive-income"
-                        class="mission-operations__value mission-details__badge"
-                        data-risk-level="unknown"
-                        aria-describedby="mission-operations-legend mission-ops-passive-income-status"
-                      >
-                        —
-                      </span>
+                      <div class="mission-operations__metric" data-risk-level="unknown">
+                        <span class="mission-operations__dial" aria-hidden="true"></span>
+                        <span
+                          id="mission-ops-passive-income"
+                          class="mission-operations__value mission-details__badge"
+                          data-risk-level="unknown"
+                          aria-describedby="mission-operations-legend mission-ops-passive-income-status"
+                        >
+                          —
+                        </span>
+                      </div>
                       <span
                         id="mission-ops-passive-income-status"
                         class="mission-operations__status visually-hidden"
@@ -422,14 +472,17 @@
                   <div class="mission-details__content">
                     <dt>Outstanding Payroll</dt>
                     <dd>
-                      <span
-                        id="mission-ops-payroll"
-                        class="mission-operations__value mission-details__badge"
-                        data-risk-level="unknown"
-                        aria-describedby="mission-operations-legend mission-ops-payroll-status"
-                      >
-                        —
-                      </span>
+                      <div class="mission-operations__metric" data-risk-level="unknown">
+                        <span class="mission-operations__dial" aria-hidden="true"></span>
+                        <span
+                          id="mission-ops-payroll"
+                          class="mission-operations__value mission-details__badge"
+                          data-risk-level="unknown"
+                          aria-describedby="mission-operations-legend mission-ops-payroll-status"
+                        >
+                          —
+                        </span>
+                      </div>
                       <span
                         id="mission-ops-payroll-status"
                         class="mission-operations__status visually-hidden"
@@ -448,14 +501,17 @@
                   <div class="mission-details__content">
                     <dt>Storage Usage</dt>
                     <dd>
-                      <span
-                        id="mission-ops-storage"
-                        class="mission-operations__value mission-details__badge"
-                        data-risk-level="unknown"
-                        aria-describedby="mission-operations-legend mission-ops-storage-status"
-                      >
-                        —
-                      </span>
+                      <div class="mission-operations__metric" data-risk-level="unknown">
+                        <span class="mission-operations__dial" aria-hidden="true"></span>
+                        <span
+                          id="mission-ops-storage"
+                          class="mission-operations__value mission-details__badge"
+                          data-risk-level="unknown"
+                          aria-describedby="mission-operations-legend mission-ops-storage-status"
+                        >
+                          —
+                        </span>
+                      </div>
                       <span
                         id="mission-ops-storage-status"
                         class="mission-operations__status visually-hidden"
@@ -474,14 +530,17 @@
                   <div class="mission-details__content">
                     <dt>Crew Fatigue</dt>
                     <dd>
-                      <span
-                        id="mission-ops-fatigue"
-                        class="mission-operations__value mission-details__badge"
-                        data-risk-level="unknown"
-                        aria-describedby="mission-operations-legend mission-ops-fatigue-status"
-                      >
-                        —
-                      </span>
+                      <div class="mission-operations__metric" data-risk-level="unknown">
+                        <span class="mission-operations__dial" aria-hidden="true"></span>
+                        <span
+                          id="mission-ops-fatigue"
+                          class="mission-operations__value mission-details__badge"
+                          data-risk-level="unknown"
+                          aria-describedby="mission-operations-legend mission-ops-fatigue-status"
+                        >
+                          —
+                        </span>
+                      </div>
                       <span
                         id="mission-ops-fatigue-status"
                         class="mission-operations__status visually-hidden"
@@ -495,7 +554,7 @@
                 </div>
               </dl>
             </section>
-            <section class="mission-city-intel" aria-labelledby="mission-city-intel-title">
+            <section id="city-intel" class="mission-city-intel" aria-labelledby="mission-city-intel-title">
           <h3 id="mission-city-intel-title" class="mission-details__title mission-details__title--with-icon">
             <span class="mission-details__title-icon" aria-hidden="true">
               <img src="./images/tools/signal-masker.svg" alt="" />
@@ -781,6 +840,7 @@
           </summary>
           <div id="mission-group-crew" class="mission-group__content">
             <section
+              id="crew-roster"
               class="mission-panel mission-crew"
               aria-labelledby="mission-crew-title"
               data-accent="crew"
@@ -1029,6 +1089,7 @@
           </summary>
           <div id="mission-group-heat" class="mission-group__content">
             <section
+              id="heat-management"
               class="mission-panel mission-heat"
               aria-labelledby="mission-heat-title"
               data-accent="suppression"
